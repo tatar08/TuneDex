@@ -82,6 +82,12 @@ describe('station catalog', () => {
       expect((await http().get('/v1/admin/stations').set('Authorization', `Bearer ${token}`)).status).toBe(403);
     });
 
+    it('tells each caller their own current roles', async () => {
+      expect((await http().get('/v1/me/staff').set(as('editor'))).body).toEqual({ roles: ['catalog_editor'] });
+      expect((await http().get('/v1/me/staff').set(as('user'))).body).toEqual({ roles: [] });
+      expect((await http().get('/v1/me/staff')).status).toBe(401);
+    });
+
     it('refuses unknown roles and duplicate grants in the CLI', async () => {
       expect(await staff('grant', 'x', 'superuser', '--by', 'tar', '--reason', 'r')).toBe(2);
       expect(await staff('grant', 'staff-admin', 'admin', '--by', 'tar', '--reason', 'again')).toBe(1);

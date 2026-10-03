@@ -1,58 +1,18 @@
-import { ChildProcess, spawn } from 'node:child_process';
-import { createServer } from 'node:net';
-import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { startApi } from '../test/api-process';
-import { CLIENT_ID, CLIENT_SECRET, MockIdp, startMockIdp } from '../test/mock-idp';
+import { startStack, Stack } from './stack';
 
-// Full browser run: real Next.js build + real services/api + PostgreSQL, with the test-only IdP.
-let idp: MockIdp;
-let api: { url: string; stop: () => Promise<void> };
-let web: ChildProcess;
+let stack: Stack;
+let idp: Stack['idp'];
+let api: Stack['api'];
 let base: string;
 
-const freePort = () =>
-  new Promise<number>((resolve) => {
-    const s = createServer();
-    s.listen(0, '127.0.0.1', () => {
-      const port = (s.address() as { port: number }).port;
-      s.close(() => resolve(port));
-    });
-  });
-
 test.beforeAll(async () => {
-  idp = await startMockIdp();
-  api = await startApi(idp.issuer);
-  const port = await freePort();
-  base = `http://localhost:${port}`;
-  web = spawn(join(__dirname, '../node_modules/.bin/next'), ['start', '-p', String(port)], {
-    cwd: join(__dirname, '..'),
-    stdio: 'ignore',
-    env: {
-      ...process.env,
-      NEXT_TELEMETRY_DISABLED: '1',
-      CONSOLE_BASE_URL: base,
-      API_BASE_URL: api.url,
-      OIDC_ISSUER: idp.issuer,
-      OIDC_CLIENT_ID: CLIENT_ID,
-      OIDC_CLIENT_SECRET: CLIENT_SECRET,
-      SESSION_SECRET: 'e2e-'.repeat(10),
-    },
-  });
-  for (let i = 0; i < 100; i++) {
-    try {
-      await fetch(`${base}/login`);
-      break;
-    } catch {
-      await new Promise((r) => setTimeout(r, 200));
-    }
-  }
+  stack = await startStack();
+  ({ idp, api, base } = stack);
 });
 
 test.afterAll(async () => {
-  web?.kill('SIGTERM');
-  await api?.stop();
-  await idp?.close();
+  await stack?.stop();
 });
 
 test('sign in, save by keyboard, resolve a conflict, sign out', async ({ browser }) => {

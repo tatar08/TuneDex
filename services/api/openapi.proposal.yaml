@@ -95,6 +95,14 @@ paths:
         '401': { description: 'Not signed in, or REAUTH_REQUIRED with details.maxAgeSeconds', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { $ref: '#/components/responses/Error' }
         '503': { $ref: '#/components/responses/Error' }
+  /v1/me/staff:
+    get:
+      summary: The caller's current staff roles
+      responses:
+        '200':
+          description: Empty list for customers
+          content: { application/json: { schema: { type: object, required: [roles], properties: { roles: { type: array, items: { type: string, enum: [support, catalog_editor, operator, admin, auditor] } } } } } }
+        '401': { $ref: '#/components/responses/Error' }
   /v1/catalog/radio:
     get:
       summary: Public radio catalog (no sign-in)

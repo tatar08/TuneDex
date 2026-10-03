@@ -30,11 +30,18 @@ async function psql(url: string, sql: string) {
   }
 }
 
+export interface ApiProcess {
+  url: string;
+  stop: () => Promise<void>;
+  /** Runs the operator staff CLI (grant/revoke/list) against this API's database. */
+  staff: (...args: string[]) => void;
+}
+
 /**
  * Runs the real services/api build against a throwaway PostgreSQL database,
  * trusting the mock IdP's JWKS. Requires `npm ci && npm run build` in services/api.
  */
-export async function startApi(issuer: string): Promise<{ url: string; stop: () => Promise<void> }> {
+export async function startApi(issuer: string): Promise<ApiProcess> {
   if (!existsSync(join(API_DIR, 'dist/main.js'))) {
     throw new Error('services/api is not built: run `npm ci && npm run build` in services/api first');
   }
@@ -66,6 +73,9 @@ export async function startApi(issuer: string): Promise<{ url: string; stop: () 
   }
   return {
     url,
+    staff: (...args) => {
+      execFileSync('node', ['dist/staff/staff-cli.js', ...args], { cwd: API_DIR, env, stdio: 'ignore' });
+    },
     stop: async () => {
       child.kill('SIGTERM');
       await new Promise((r) => child.once('exit', r));
