@@ -87,6 +87,31 @@ export type StationAction = (typeof STATION_ACTIONS)[number];
 
 export type SessionContext = { id: string; session: Session };
 
+export interface LogEntry {
+  id: string;
+  timestamp: string;
+  severity: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
+  service: string;
+  environment: string;
+  build: string;
+  eventCode: string;
+  requestId: string | null;
+  method: string | null;
+  route: string | null;
+  status: number | null;
+  durationMs: number | null;
+  actorId: string | null;
+  errorName: string | null;
+  errorCode: string | null;
+}
+export interface LogPage {
+  logs: LogEntry[];
+  nextCursor: string | null;
+  retentionDays: number;
+}
+/** Search fields the console forwards to GET /v1/admin/logs; anything else is dropped. The API validates values. */
+export const LOG_PARAMS = ['from', 'to', 'severity', 'service', 'build', 'eventCode', 'requestId', 'status', 'limit', 'cursor'] as const;
+
 const LOGIN_TX_SECONDS = 600;
 const REFRESH_SKEW_MS = 30_000;
 const MAX_BODY_BYTES = 16 * 1024;
@@ -270,6 +295,23 @@ export function createBff(deps: BffDeps) {
       const res = await callApi(ctx, `/v1/admin/stations/${id}`, { method: 'GET' }, `web_${randomUUID()}`);
       if (!res) return null;
       return res.ok ? { status: 200, station: (await res.json()) as AdminStation } : { status: res.status };
+    },
+
+    /** Server-side log search for /admin/logs. Null means the user must sign in again. */
+    async loadLogs(
+      ctx: SessionContext,
+      params: Partial<Record<(typeof LOG_PARAMS)[number], string>>,
+    ): Promise<{ status: number; page?: LogPage; field?: string } | null> {
+      const qs = new URLSearchParams();
+      for (const k of LOG_PARAMS) {
+        const v = params[k];
+        if (typeof v === 'string' && v && v.length <= 200) qs.set(k, v);
+      }
+      const res = await callApi(ctx, `/v1/admin/logs?${qs}`, { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      if (res.ok) return { status: 200, page: (await res.json()) as LogPage };
+      const body = (await res.json().catch(() => ({}))) as { details?: { field?: string } };
+      return { status: res.status, field: body.details?.field };
     },
 
     /** GET/POST /bff/admin/stations */

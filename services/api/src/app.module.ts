@@ -4,13 +4,15 @@ import type { JWTVerifyGetKey } from 'jose';
 import type { Pool } from 'pg';
 import { AuthGuard, KEY_RESOLVER } from './auth/auth.guard';
 import { ErrorEnvelopeFilter } from './common/error.filter';
-import { LOG_WRITER, LogWriter, StructuredLogger, stdoutWriter } from './common/logger';
+import { LOG_SINK, LOG_WRITER, LogWriter, StructuredLogger, stdoutWriter } from './common/logger';
 import { requestContext } from './common/request-context';
 import { APP_CONFIG, AppConfig } from './config';
 import { Database, PG_POOL } from './db/database';
 import { DevicesController } from './devices/devices.controller';
 import { DevicesService } from './devices/devices.service';
 import { HealthController } from './health/health.controller';
+import { PgLogStore } from './logs/log-store';
+import { AdminLogsController, LogsService } from './logs/logs';
 import { SettingsController } from './settings/settings.controller';
 import { SettingsService } from './settings/settings.service';
 import { StaffController, StaffGuard, StaffService } from './staff/staff';
@@ -30,13 +32,16 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController],
+      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },
         { provide: KEY_RESOLVER, useValue: deps.keyResolver },
         { provide: LOG_WRITER, useValue: deps.logWriter ?? stdoutWriter },
+        PgLogStore,
+        { provide: LOG_SINK, useExisting: PgLogStore },
         StructuredLogger,
+        LogsService,
         Database,
         UsersService,
         SettingsService,
