@@ -13,6 +13,9 @@ import { DevicesService } from './devices/devices.service';
 import { HealthController } from './health/health.controller';
 import { SettingsController } from './settings/settings.controller';
 import { SettingsService } from './settings/settings.service';
+import { StaffGuard, StaffService } from './staff/staff';
+import { AdminStationsController, CatalogController } from './stations/stations.controller';
+import { StationsService } from './stations/stations.service';
 import { UsersService } from './users/users.service';
 
 export interface AppDeps {
@@ -27,7 +30,7 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController, DevicesController],
+      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },
@@ -38,7 +41,10 @@ export class AppModule {
         UsersService,
         SettingsService,
         DevicesService,
+        StaffService,
+        StationsService,
         AuthGuard,
+        StaffGuard,
       ],
     };
   }

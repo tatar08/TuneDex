@@ -12,6 +12,8 @@ export type ErrorCode =
   | 'REAUTH_REQUIRED'
   | 'DEVICE_REVOKED'
   | 'DEVICE_LIMIT'
+  | 'ROLE_REQUIRED'
+  | 'PUBLISH_BLOCKED'
   | 'INTERNAL';
 
 export const MESSAGE_KEYS: Record<ErrorCode, string> = {
@@ -26,6 +28,8 @@ export const MESSAGE_KEYS: Record<ErrorCode, string> = {
   REAUTH_REQUIRED: 'errors.auth.reauthRequired',
   DEVICE_REVOKED: 'errors.devices.revoked',
   DEVICE_LIMIT: 'errors.devices.limit',
+  ROLE_REQUIRED: 'errors.auth.roleRequired',
+  PUBLISH_BLOCKED: 'errors.stations.publishBlocked',
   INTERNAL: 'errors.service.internal',
 };
 
