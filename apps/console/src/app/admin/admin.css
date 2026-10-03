@@ -70,6 +70,94 @@
 .adm-denied main { max-width: 560px; margin: 0 auto; padding: 80px 20px; }
 .adm-denied h1 { font-size: 24px; font-weight: 500; margin-bottom: 8px; }
 
+/* Logs page pieces shared by the themes (Doc 17 /admin/logs); each theme arranges them below */
+.adm .logs { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.adm .lg-filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px 12px; align-items: end; }
+.adm .lg-filters .wide { grid-column: span 2; }
+.adm .lg-actions { display: flex; gap: 12px; align-items: center; }
+.adm .lg-table { padding: 0; overflow-x: auto; }
+.adm .lg-table table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.adm .lg-table th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--m); padding: 10px 12px; border-bottom: 1px solid var(--l); white-space: nowrap; }
+.adm .lg-table td { padding: 8px 12px; border-bottom: 1px solid var(--l); vertical-align: top; overflow-wrap: anywhere; }
+.adm .lg-table tr:last-child td { border-bottom: 0; }
+.adm .lg-table .num { text-align: right; white-space: nowrap; }
+.adm .lg-table .nowrap { white-space: nowrap; }
+.adm .lg-table tr.lg-error td { background: color-mix(in srgb, var(--e) 7%, transparent); }
+.adm .lg-route { min-width: 200px; }
+.adm .lg-table table { min-width: 980px; }
+.adm .lg-sev { display: inline-block; white-space: nowrap; font-family: var(--mono); font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--u) 18%, transparent); color: var(--m); }
+.adm .lg-sev.warn { background: color-mix(in srgb, var(--w) 18%, transparent); color: var(--w); }
+.adm .lg-sev.error { background: color-mix(in srgb, var(--e) 16%, transparent); color: var(--e); }
+.adm .lg-pager { display: flex; gap: 16px; align-items: center; font-size: 13px; }
+.adm .lg-pager span { margin-right: auto; }
+.adm .lg-ic.info, .adm .lamp.lg-info { background: var(--u); color: var(--u); }
+.adm .lg-ic.warn, .adm .lamp.lg-warn { background: var(--w); color: var(--w); }
+.adm .lg-ic.error, .adm .lamp.lg-error { background: var(--e); color: var(--e); }
+
+/* Control Room logs: segments for range and level, one-line filter strip, dense table */
+.t-control-room .logs .seg + .seg { margin-left: 0; }
+.t-control-room .cr-filter { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: end; background: var(--p); border: 1px solid var(--l); border-radius: 6px; padding: 10px 14px; }
+.t-control-room .cr-filter .fld { font-size: 11.5px; min-width: 130px; }
+.t-control-room .cr-filter .fld.wide { min-width: 240px; }
+.t-control-room .cr-filter input { padding: 5px 8px; font-family: var(--mono); font-size: 12px; }
+.t-control-room .lg-pn table { min-width: 980px; }
+.t-control-room .lg-pn .lg-sev { background: none; border: 1px solid var(--l); border-radius: 3px; }
+
+/* Broadcast Rack logs: knobs, then the lines as a lit tape */
+.t-broadcast-rack .br-pick { display: flex; flex-direction: column; gap: 8px; }
+.t-broadcast-rack .br-filter { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; align-items: end; }
+.t-broadcast-rack .br-tape { list-style: none; margin: 0; padding: 8px 0; background: #0c0a07; border: 1px solid var(--l); border-radius: 4px; font-family: var(--mono); font-size: 12.5px; box-shadow: inset 0 2px 10px #000; overflow-x: auto; }
+.t-broadcast-rack .br-tape li { display: grid; grid-template-columns: 14px 150px 52px minmax(220px, 1fr) 44px 60px 130px; gap: 10px; align-items: center; padding: 4px 14px; min-width: 760px; color: #d9c7a5; }
+.t-broadcast-rack .br-tape li:nth-child(odd) { background: rgba(255, 176, 59, 0.03); }
+.t-broadcast-rack .br-tape .t { color: var(--m); }
+.t-broadcast-rack .br-tape .sv { font-size: 11px; letter-spacing: 0.08em; }
+.t-broadcast-rack .br-tape li.warn .sv, .t-broadcast-rack .br-tape li.warn .n:first-of-type { color: var(--a); text-shadow: 0 0 6px rgba(255, 176, 59, 0.5); }
+.t-broadcast-rack .br-tape li.error { color: #ffb4a8; }
+.t-broadcast-rack .br-tape li.error .sv { color: var(--e); text-shadow: 0 0 6px rgba(230, 80, 60, 0.6); }
+.t-broadcast-rack .br-tape .n { text-align: right; }
+.t-broadcast-rack .br-tape a { color: var(--a); }
+.t-broadcast-rack .br-tape .lamp { margin: 0; }
+
+/* Daylight Bento logs: chips, four stat tiles, filter card, rounded line cards */
+.t-daylight-bento .logs .search { flex-direction: column; align-items: flex-start; }
+.t-daylight-bento .db-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+.t-daylight-bento .db-stats div { background: var(--p); border-radius: 20px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.t-daylight-bento .db-stats small { color: var(--m); font-size: 12px; }
+.t-daylight-bento .db-stats b { font-size: 26px; font-weight: 600; }
+.t-daylight-bento .db-stats .w b { color: var(--w); }
+.t-daylight-bento .db-stats .e b { color: var(--e); }
+.t-daylight-bento .db-filter { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; align-items: end; margin-bottom: 14px; }
+.t-daylight-bento .db-logs { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.t-daylight-bento .db-logs li { background: var(--p); border-radius: 16px; padding: 10px 14px; display: grid; grid-template-columns: 70px minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; }
+.t-daylight-bento .db-logs li.error { box-shadow: inset 3px 0 0 var(--e); }
+.t-daylight-bento .db-logs b { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.t-daylight-bento .db-logs .st { font-weight: 600; }
+.t-daylight-bento .db-logs small { grid-column: 2 / 4; color: var(--m); font-size: 12px; }
+.t-daylight-bento .lg-pill { justify-content: center; font-family: var(--mono); font-size: 11px; }
+.t-daylight-bento .lg-pill.warn { background: #fdf1dc; color: var(--w); }
+.t-daylight-bento .lg-pill.error { background: #fde4e1; color: var(--e); }
+@media (max-width: 900px) { .t-daylight-bento .db-stats { grid-template-columns: 1fr 1fr; } }
+
+/* Workbench logs: list pane with the search on top, field list in the detail pane */
+.t-workbench .wb-search { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.t-workbench .wb-search .wide, .t-workbench .wb-search .lg-actions { grid-column: 1 / -1; }
+.t-workbench .wb-search .fld { font-size: 11.5px; }
+.t-workbench .wb-search input { padding: 5px 8px; font-size: 12px; }
+.t-workbench .lg-pick { all: unset; cursor: pointer; min-width: 0; overflow-wrap: anywhere; }
+.t-workbench .lg-pick:focus-visible { outline: 2px solid var(--a); }
+.t-workbench .lg-it b { font-size: 12px; }
+.t-workbench .lg-detail { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.t-workbench .lg-detail .crumb { margin: 0; font-size: 12px; color: var(--m); }
+.t-workbench .lg-detail h2 { font-size: 18px; overflow-wrap: anywhere; }
+.t-workbench .lg-fields { margin: 0; width: 100%; display: grid; gap: 0; padding: 4px 16px; }
+.t-workbench .lg-fields div { display: grid; grid-template-columns: 150px 1fr; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--l2); font-size: 12.5px; }
+.t-workbench .lg-fields div:last-child { border-bottom: 0; }
+.t-workbench .lg-fields dt { color: var(--m); }
+.t-workbench .lg-fields dd { margin: 0; overflow-wrap: anywhere; }
+.t-workbench .foot a { margin-left: 8px; }
+
+@media (max-width: 900px) { .adm .lg-filters .wide { grid-column: auto; } }
+
 /* ============ 1 CONTROL ROOM: dark ops, sidebar ============ */
 .adm.t-control-room {
   --b: #0e131a; --p: #151c25; --p2: #1b2430; --l: #263241; --t: #d7dee8; --m: #8593a6; --a: #4cc2e0; --ai: #04212b;
@@ -386,6 +474,16 @@
 .t-minimal .fv-rows .nm:hover { color: var(--a); }
 .t-minimal .fv-rows small { color: var(--m); font-size: 12px; }
 .t-minimal .fv-rows .mono { font-family: var(--mono); text-align: right; }
+
+/* Logs inside the card layout */
+.t-minimal .fv-logstats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+.t-minimal .fv-logstats .fv-card { gap: 6px; }
+.t-minimal .fv-logform input, .t-minimal .fv-logform select { background: var(--soft); border-color: transparent; border-radius: 14px; padding: 10px 12px; }
+.t-minimal .lg-latest { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.t-minimal .lg-table { padding: 8px 0; }
+@media (max-width: 1100px) { .t-minimal .fv-logstats { grid-template-columns: 1fr 1fr; } }
+.t-minimal .lg-table { border-radius: 28px; }
+.t-minimal .lg-table th:first-child, .t-minimal .lg-table td:first-child { padding-left: 22px; }
 
 /* Editor inside the card layout */
 .t-minimal .editor { gap: 18px; }

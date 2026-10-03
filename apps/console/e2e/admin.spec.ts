@@ -7,6 +7,7 @@ test.beforeAll(async () => {
   stack = await startStack();
   stack.api.staff('grant', 'e2e-editor', 'catalog_editor', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-admin', 'admin', '--by', 'e2e', '--reason', 'test');
+  stack.api.staff('grant', 'e2e-ops', 'operator', '--by', 'e2e', '--reason', 'test');
 });
 
 test.afterAll(async () => {
@@ -151,4 +152,68 @@ test('accounts without a staff role see a plain refusal, and signed-out visitors
   const anon = await (await browser.newContext()).newPage();
   await anon.goto(`${stack.base}/admin/stations`);
   await expect(anon).toHaveURL(/\/login\?returnTo=%2Fadmin%2Fstations|\/login\?returnTo=\/admin\/stations/);
+});
+
+test('operators search redacted API logs; editors cannot', async ({ browser }) => {
+  const ops = await signInAs(browser, 'e2e-ops', '/admin/logs');
+  // Operators have no catalog role, so the menu offers only the log page and /admin lands there.
+  await expect(ops.getByRole('link', { name: 'สถานีวิทยุ' })).toHaveCount(0);
+  await ops.goto(`${stack.base}/admin`);
+  await expect(ops).toHaveURL(`${stack.base}/admin/logs`);
+  await expect(ops.getByRole('heading', { name: 'บันทึกระบบ' })).toBeVisible();
+
+  // Make a failing request with a known requestId and a secret in the URL, then find it.
+  const secret = 'tok_SHOULD_NOT_APPEAR';
+  const probe = await ops.request.get(`${stack.api.url}/v1/me/settings?access_token=${secret}`, { headers: { 'x-request-id': 'req-e2e-trace-01' } });
+  expect(probe.status()).toBe(401);
+  await expect(async () => {
+    await ops.goto(`${stack.base}/admin/logs?requestId=req-e2e-trace-01`);
+    await expect(ops.locator('.lg-table tbody tr')).toHaveCount(1, { timeout: 500 });
+  }).toPass({ timeout: 10_000 });
+  const row = ops.locator('.lg-table tbody tr').first();
+  await expect(row).toContainText('WARN');
+  await expect(row).toContainText('401');
+  await expect(ops.locator('body')).not.toContainText(secret);
+
+  // Filters go through the form; a bad value gets a plain message, not a crash.
+  await ops.goto(`${stack.base}/admin/logs`);
+  await ops.getByLabel('HTTP status').fill('abc');
+  await ops.getByRole('button', { name: 'ค้นหา' }).click();
+  await expect(ops.locator('.adm-alert')).toContainText('HTTP status');
+  await ops.getByLabel('HTTP status').fill('401');
+  await ops.getByLabel('ระดับ').selectOption('warn');
+  await ops.getByRole('button', { name: 'ค้นหา' }).click();
+  await expect(ops.locator('.lg-table tbody tr').first()).toContainText('401');
+  if (SHOTS) await ops.screenshot({ path: `${SHOTS}/logs-minimal.png`, fullPage: true });
+
+  const editor = await signInAs(browser, 'e2e-editor');
+  await expect(editor.getByRole('link', { name: 'บันทึกระบบ' })).toHaveCount(0);
+  await editor.goto(`${stack.base}/admin/logs`);
+  await expect(editor.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูบันทึกระบบ');
+});
+
+test('the log page has its own layout in each theme', async ({ browser }) => {
+  const page = await signInAs(browser, 'e2e-admin', '/admin/logs');
+  const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
+  const layouts: Record<string, string> = {
+    'control-room': '.t-control-room .cr-page .cr-filter + .lg-pn table',
+    'broadcast-rack': '.t-broadcast-rack .br-tape li',
+    'daylight-bento': '.t-daylight-bento .db-stats + .db-filter',
+    workbench: '.t-workbench .split .lg-it',
+    minimal: '.t-minimal .fv-logstats + .fv-card .fv-logform',
+  };
+  for (const [theme, selector] of Object.entries(layouts)) {
+    await picker.selectOption(theme);
+    await expect(page.locator(selector).first()).toBeVisible();
+    if (theme === 'workbench') {
+      // j moves to the next line and the detail pane follows.
+      const second = await page.locator('.lg-it').nth(1).locator('small').innerText();
+      await page.locator('body').click({ position: { x: 900, y: 600 } });
+      await page.keyboard.press('j');
+      await expect(page.locator('.lg-it.sel small')).toHaveText(second);
+      await expect(page.locator('.lg-fields')).toBeVisible();
+    }
+    await expect(page.getByRole('link', { name: 'บันทึกระบบ' }).first()).toBeVisible();
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/logs-${theme}.png`, fullPage: true });
+  }
 });

@@ -151,3 +151,99 @@ export function rightsDaysLeft(s: AdminStation, now = Date.now()): number | null
   const end = s.draft.rightsExpiresAt;
   return end ? Math.ceil((Date.parse(`${end}T23:59:59Z`) - now) / 86_400_000) : null;
 }
+
+/** What each staff role can open in the console; the API checks the same roles on every call. */
+export const canSeeStations = (roles: StaffRole[]) => roles.includes('catalog_editor') || roles.includes('admin');
+export const canSeeLogs = (roles: StaffRole[]) => roles.includes('operator') || roles.includes('admin');
+
+export const LOG_RANGES = [
+  { id: '15m', label: '15 นาทีล่าสุด', ms: 15 * 60_000 },
+  { id: '1h', label: '1 ชั่วโมงล่าสุด', ms: 3_600_000 },
+  { id: '6h', label: '6 ชั่วโมงล่าสุด', ms: 6 * 3_600_000 },
+  { id: '24h', label: '24 ชั่วโมงล่าสุด', ms: 24 * 3_600_000 },
+  { id: '7d', label: '7 วันล่าสุด', ms: 7 * 24 * 3_600_000 },
+] as const;
+export type LogRangeId = (typeof LOG_RANGES)[number]['id'];
+
+export const LOG_LEVELS = [
+  { id: '', label: 'ทุกระดับ', severity: '' },
+  { id: 'error', label: 'เฉพาะ ERROR', severity: 'ERROR' },
+  { id: 'warn', label: 'WARN ขึ้นไป', severity: 'WARN,ERROR' },
+] as const;
+
+export const LOG_FIELD_LABELS: Record<string, string> = {
+  from: 'ช่วงเวลา',
+  to: 'ช่วงเวลา',
+  severity: 'ระดับ',
+  build: 'build',
+  eventCode: 'รหัสเหตุการณ์',
+  requestId: 'requestId',
+  status: 'HTTP status',
+  cursor: 'หน้าถัดไป',
+};
+
+export interface LogSearch {
+  range: LogRangeId;
+  level: string;
+  status: string;
+  eventCode: string;
+  requestId: string;
+  build: string;
+  /** Fixed end of the window while paging, so newer lines do not shift the pages. */
+  to: string;
+  cursor: string;
+}
+
+const pick = (v: string | string[] | undefined, max = 80) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+
+/** Reads the search form from the page URL. Values are passed on as text; the API rejects bad ones. */
+export function logSearchFrom(sp: Record<string, string | string[] | undefined>): LogSearch {
+  const range = LOG_RANGES.find((r) => r.id === sp.range)?.id ?? '1h';
+  const level = LOG_LEVELS.find((l) => l.id === sp.level)?.id ?? '';
+  return {
+    range,
+    level,
+    status: pick(sp.status, 3),
+    eventCode: pick(sp.eventCode, 64).toUpperCase(),
+    requestId: pick(sp.requestId, 64),
+    build: pick(sp.build, 64),
+    to: pick(sp.to, 40),
+    cursor: pick(sp.cursor, 120),
+  };
+}
+
+/** Turns the form into API parameters, ending the window now unless a page link fixed it. */
+export function logApiParams(s: LogSearch, now = Date.now()) {
+  const toMs = s.to && !Number.isNaN(Date.parse(s.to)) ? Date.parse(s.to) : now;
+  const ms = LOG_RANGES.find((r) => r.id === s.range)!.ms;
+  return {
+    from: new Date(toMs - ms).toISOString(),
+    to: new Date(toMs).toISOString(),
+    severity: LOG_LEVELS.find((l) => l.id === s.level)!.severity,
+    status: s.status,
+    eventCode: s.eventCode,
+    requestId: s.requestId,
+    build: s.build,
+    cursor: s.cursor,
+    limit: '50',
+  };
+}
+
+/** A link to the log page with these search values (empty ones left out). */
+export function logHref(s: Partial<LogSearch>): string {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(s)) if (v && !(k === 'range' && v === '1h')) p.set(k, v);
+  const qs = p.toString();
+  return qs ? `/admin/logs?${qs}` : '/admin/logs';
+}
+
+const logTimeFmt = new Intl.DateTimeFormat('th-TH', {
+  timeZone: 'Asia/Bangkok',
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+export const formatLogTime = (iso: string) => logTimeFmt.format(new Date(iso));

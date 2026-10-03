@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { createContext, Suspense, useContext, useEffect, useState } from 'react';
-import { CatalogSummary, Mode, MODE_COOKIE, ROLE_LABELS, THEME_COOKIE, THEMES, ThemeId } from '@/lib/admin';
+import { canSeeLogs, canSeeStations, CatalogSummary, Mode, MODE_COOKIE, ROLE_LABELS, THEME_COOKIE, THEMES, ThemeId } from '@/lib/admin';
 import type { StaffRole } from '@/lib/bff';
 
 interface AdminContextValue {
@@ -22,7 +22,10 @@ export function useAdmin(): AdminContextValue {
   return v;
 }
 
-const NAV = [{ href: '/admin/stations', label: 'สถานีวิทยุ', short: 'ST' }];
+const NAV = [
+  { href: '/admin/stations', label: 'สถานีวิทยุ', short: 'ST', icon: 'stations', show: canSeeStations },
+  { href: '/admin/logs', label: 'บันทึกระบบ', short: 'LG', icon: 'logs', show: canSeeLogs },
+] as const;
 
 function ThemePicker({ theme, onChange }: { theme: ThemeId; onChange: (t: ThemeId) => void }) {
   return (
@@ -75,6 +78,7 @@ const ICONS = {
   logout: 'M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1',
   chevron: 'M15 19l-7-7 7-7',
   bolt: 'M13 10V3L4 14h7v7l9-11h-7z',
+  logs: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9h6m-6-4h6m-6 8h4',
 } as const;
 
 export function Icon({ name, className }: { name: keyof typeof ICONS; className?: string }) {
@@ -129,6 +133,7 @@ export function AdminShell({
   const isAdmin = roles.includes('admin');
   const value: AdminContextValue = { theme, summary, roles, csrfToken, isAdmin, canEdit: isAdmin || roles.includes('catalog_editor') };
   const who = roles.map((r) => ROLE_LABELS[r]).join(', ');
+  const nav = NAV.filter((n) => n.show(roles));
   const on = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
   function changeTheme(t: ThemeId) {
@@ -145,7 +150,7 @@ export function AdminShell({
   }
 
   const picker = <ThemePicker theme={theme} onChange={changeTheme} />;
-  const links = NAV.map((n) => (
+  const links = nav.map((n) => (
     <Link key={n.href} href={n.href} className={on(n.href) ? 'on' : undefined} aria-current={on(n.href) ? 'page' : undefined}>
       {n.label}
     </Link>
@@ -160,8 +165,8 @@ export function AdminShell({
             <div className="logo">
               TuneDeck <span>· console</span>
             </div>
-            <nav className="grp" aria-label="แค็ตตาล็อก">
-              <h6>Catalog</h6>
+            <nav className="grp" aria-label="เมนู">
+              <h6>Console</h6>
               {links}
             </nav>
             <nav className="grp" aria-label="บัญชี">
@@ -231,7 +236,7 @@ export function AdminShell({
             <span className="lg" aria-hidden="true">
               T
             </span>
-            {NAV.map((n) => (
+            {nav.map((n) => (
               <Link key={n.href} href={n.href} className={on(n.href) ? 'on' : undefined} title={n.label} aria-label={n.label} aria-current={on(n.href) ? 'page' : undefined}>
                 {n.short}
               </Link>
@@ -273,11 +278,11 @@ export function AdminShell({
               </Suspense>
               <nav className="fv-menu" aria-label="เมนู">
                 <span className="fv-section">เมนู</span>
-                {NAV.map((n) => (
+                {nav.map((n) => (
                   <Link key={n.href} href={n.href} className={on(n.href) ? 'on' : undefined} aria-current={on(n.href) ? 'page' : undefined} title={n.label}>
-                    <Icon name="stations" />
+                    <Icon name={n.icon} />
                     <span className="fv-text">{n.label}</span>
-                    {summary && summary.pending > 0 && (
+                    {n.href === '/admin/stations' && summary && summary.pending > 0 && (
                       <span className="fv-badge" aria-label={`รอตรวจ ${summary.pending}`}>
                         {summary.pending}
                       </span>
@@ -327,7 +332,8 @@ export function AdminShell({
                 </span>
                 <div>
                   <h1>
-                    TuneDeck Console {summary ? <span className="fv-live">เชื่อมต่อ API แล้ว</span> : <span className="fv-live off">โหลดข้อมูลสรุปไม่ได้</span>}
+                    TuneDeck Console{' '}
+                    {summary ? <span className="fv-live">เชื่อมต่อ API แล้ว</span> : canSeeStations(roles) && <span className="fv-live off">โหลดข้อมูลสรุปไม่ได้</span>}
                   </h1>
                   <p>จัดการแค็ตตาล็อกสถานีวิทยุที่แอปจะเห็น</p>
                 </div>

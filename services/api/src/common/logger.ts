@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Optional } from '@nestjs/common';
 import { APP_CONFIG, AppConfig } from '../config';
 
 export type Severity = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
@@ -26,15 +26,30 @@ export const stdoutWriter: LogWriter = (line) => {
   process.stdout.write(line);
 };
 
+export interface LogLine extends LogFields {
+  timestamp: string;
+  severity: Severity;
+  service: string;
+  environment: string;
+  build: string;
+}
+
+/** A second destination that keeps lines for staff search. Must never throw or block the caller. */
+export const LOG_SINK = Symbol('LOG_SINK');
+export interface LogSink {
+  add(line: LogLine): void;
+}
+
 @Injectable()
 export class StructuredLogger {
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(LOG_WRITER) private readonly write: LogWriter,
+    @Optional() @Inject(LOG_SINK) private readonly sink?: LogSink,
   ) {}
 
   log(severity: Severity, fields: LogFields): void {
-    const line = {
+    const line: LogLine = {
       timestamp: new Date().toISOString(),
       severity,
       service: 'api',
@@ -43,5 +58,6 @@ export class StructuredLogger {
       ...fields,
     };
     this.write(JSON.stringify(line) + '\n');
+    this.sink?.add(line);
   }
 }
