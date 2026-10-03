@@ -1,0 +1,42 @@
+import { HttpStatus } from '@nestjs/common';
+
+export type ErrorCode =
+  | 'AUTH_REQUIRED'
+  | 'AUTH_FORBIDDEN'
+  | 'VALIDATION_FAILED'
+  | 'NOT_FOUND'
+  | 'PRECONDITION_REQUIRED'
+  | 'REVISION_MISMATCH'
+  | 'PAYLOAD_TOO_LARGE'
+  | 'DEPENDENCY_UNAVAILABLE'
+  | 'INTERNAL';
+
+export const MESSAGE_KEYS: Record<ErrorCode, string> = {
+  AUTH_REQUIRED: 'errors.auth.required',
+  AUTH_FORBIDDEN: 'errors.auth.forbidden',
+  VALIDATION_FAILED: 'errors.request.invalid',
+  NOT_FOUND: 'errors.request.notFound',
+  PRECONDITION_REQUIRED: 'errors.request.ifMatchRequired',
+  REVISION_MISMATCH: 'errors.settings.revisionMismatch',
+  PAYLOAD_TOO_LARGE: 'errors.request.tooLarge',
+  DEPENDENCY_UNAVAILABLE: 'errors.service.unavailable',
+  INTERNAL: 'errors.service.internal',
+};
+
+/** An error that maps to the `{code,messageKey,requestId,details}` envelope. Details must not hold tokens or PII. */
+export class ApiError extends Error {
+  constructor(
+    readonly status: HttpStatus,
+    readonly code: ErrorCode,
+    readonly details: Record<string, unknown> = {},
+  ) {
+    super(code);
+    this.name = 'ApiError';
+  }
+}
+
+export class DependencyUnavailableError extends ApiError {
+  constructor(readonly dependency: string) {
+    super(HttpStatus.SERVICE_UNAVAILABLE, 'DEPENDENCY_UNAVAILABLE');
+  }
+}
