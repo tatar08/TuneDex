@@ -1,0 +1,36 @@
+# TuneDeck console (`apps/console`)
+
+Next.js web app with a server-side BFF. This folder is COL-03 from [Doc 19](../../Docs/19-Claude-Codex-Collaboration.md): sign-in, session, sign-out and the user's own settings page. Admin screens (catalog, logs, themes) come later.
+
+## How it works
+
+- **Sign-in:** `/auth/login` starts OIDC authorization code + PKCE S256 with `state` and `nonce`, kept in a signed 10-minute HttpOnly cookie. `/auth/callback` checks state, exchanges the code as a confidential client (`client_secret_basic`), verifies the ID token (issuer, audience, signature, nonce) and starts a new session. After login it only redirects to `/app/...` paths.
+- **Session:** tokens stay on the server. The browser gets one opaque, HttpOnly, `SameSite=Lax` cookie (`__Host-td_session` with `Secure` outside localhost). Idle timeout 12 hours (Doc 17), absolute 7 days (proposal). Access tokens refresh automatically with rotation; a rejected refresh ends the session.
+- **CSRF:** every change (`PATCH /bff/settings`, `POST /auth/logout`) must come from the console's own `Origin` and carry the session's CSRF token.
+- **Settings page** (`/app/settings`): theme, language and mobile-data policy as keyboard-friendly radio groups, Thai labels by default, English once the user saves `language = en`. Shows the saved revision. A device-status line always says "waiting for sync", because per-device applied status needs the device registry (later ticket). On a 412 conflict the user can take the server's values or resend only the fields they changed, so changes made elsewhere to other fields are kept.
+- **Logout:** deletes the server session, clears the cookie and sends the browser to the IdP's end-session endpoint when it has one.
+- **Logs:** one JSON line per BFF request with method, route, status, duration and a request id that is also sent to the API. No tokens, cookies, codes or bodies.
+
+## Run locally
+
+```bash
+cp .env.example .env.local   # point at Keycloak and services/api
+npm ci
+npm run build && npm start    # http://localhost:3200
+```
+
+Register `CONSOLE_BASE_URL/auth/callback` as the exact redirect URI and `CONSOLE_BASE_URL/login?signedOut=1` as the post-logout URI on the Keycloak client, and map the API audience onto its access tokens.
+
+## Test
+
+```bash
+npm run typecheck
+npm test                      # unit, component (jsdom) and BFF integration tests
+npm run build && npm run test:e2e   # Chromium against next start
+```
+
+The integration and browser tests run the real `services/api` build against PostgreSQL (`TEST_DATABASE_URL`, default `postgres://postgres@127.0.0.1:54329/postgres`), so build it first: `cd ../../services/api && npm ci && npm run build`. Identity comes from a test-only OpenID provider in `test/mock-idp.ts`; nothing in `src/` can bypass sign-in.
+
+## Not in this ticket
+
+Shared session store (the in-memory store limits this to one console instance), device list and per-device applied revision, account deletion/export, admin console and its five themes, rate limiting, CI.
