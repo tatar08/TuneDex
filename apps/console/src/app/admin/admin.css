@@ -94,6 +94,36 @@
 .adm .lg-ic.warn, .adm .lamp.lg-warn { background: var(--w); color: var(--w); }
 .adm .lg-ic.error, .adm .lamp.lg-error { background: var(--e); color: var(--e); }
 
+/* Audit page pieces: one color per action family */
+.adm .nowrap, .adm .tag, .adm .au-pill { white-space: nowrap; }
+.adm .chk-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--m); align-self: end; padding-bottom: 8px; }
+.adm .au-ic.station, .adm .lamp.au-station { background: var(--ok); color: var(--ok); }
+.adm .au-ic.staff_role, .adm .lamp.au-staff_role { background: var(--w); color: var(--w); }
+.adm .au-ic.logs, .adm .au-ic.audit, .adm .lamp.au-logs, .adm .lamp.au-audit { background: var(--u); color: var(--u); }
+.t-control-room .tag.au-station { color: var(--ok); border-color: #1f5a43; }
+.t-control-room .tag.au-staff_role { color: var(--w); border-color: #6a5420; }
+.t-broadcast-rack .br-book { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.t-broadcast-rack .br-book li { background: linear-gradient(#2c241b, #1f1912); border: 1px solid var(--l); border-radius: 4px; padding: 10px 14px; box-shadow: inset 0 -3px 0 #0e0b08; display: grid; grid-template-columns: 60px 150px 1fr; gap: 4px 12px; align-items: baseline; }
+.t-broadcast-rack .br-book .no, .t-broadcast-rack .br-book .t { font-family: var(--mono); color: var(--m); font-size: 12px; }
+.t-broadcast-rack .br-book .no { color: var(--a); }
+.t-broadcast-rack .br-book b { font-weight: 600; font-size: 14.5px; display: flex; align-items: center; }
+.t-broadcast-rack .br-book .who, .t-broadcast-rack .br-book .why { grid-column: 3; font-size: 12.5px; color: var(--m); }
+.t-broadcast-rack .br-book .why q { color: var(--t); }
+.t-broadcast-rack .br-book a { color: var(--a); }
+.t-daylight-bento .db-days { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.t-daylight-bento .db-days h4 { margin: 10px 4px 6px; font-size: 13px; font-weight: 600; color: var(--m); }
+.t-daylight-bento .au-cards li { grid-template-columns: 130px minmax(0, 1fr) auto; }
+.t-daylight-bento .au-pill { justify-content: center; }
+.t-daylight-bento .au-pill.station { background: var(--a2); color: var(--a); }
+.t-daylight-bento .au-pill.staff_role { background: #fdf1dc; color: var(--w); }
+.t-daylight-bento .au-cards small q { color: var(--t); }
+.t-minimal .fv-tile.au-station { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.t-minimal .fv-tile.au-staff_role { background: color-mix(in srgb, var(--w) 14%, transparent); color: var(--w); }
+.t-minimal .fv-tile.au-logs, .t-minimal .fv-tile.au-audit { background: var(--soft); color: var(--m); }
+.t-minimal .au-feed .fv-tx-side { max-width: 34%; }
+.t-minimal .au-feed .fv-tx-main b a, .t-minimal .au-feed .fv-tx-side a { text-decoration: none; }
+.t-minimal .au-feed small { white-space: normal; }
+
 /* Control Room logs: segments for range and level, one-line filter strip, dense table */
 .t-control-room .logs .seg + .seg { margin-left: 0; }
 .t-control-room .cr-filter { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: end; background: var(--p); border: 1px solid var(--l); border-radius: 6px; padding: 10px 14px; }

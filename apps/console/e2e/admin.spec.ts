@@ -8,6 +8,7 @@ test.beforeAll(async () => {
   stack.api.staff('grant', 'e2e-editor', 'catalog_editor', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-admin', 'admin', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-ops', 'operator', '--by', 'e2e', '--reason', 'test');
+  stack.api.staff('grant', 'e2e-auditor', 'auditor', '--by', 'e2e', '--reason', 'test');
 });
 
 test.afterAll(async () => {
@@ -215,5 +216,51 @@ test('the log page has its own layout in each theme', async ({ browser }) => {
     }
     await expect(page.getByRole('link', { name: 'บันทึกระบบ' }).first()).toBeVisible();
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/logs-${theme}.png`, fullPage: true });
+  }
+});
+
+test('auditors read who changed what; reading is recorded', async ({ browser }) => {
+  const aud = await signInAs(browser, 'e2e-auditor', '/admin/audit');
+  await aud.goto(`${stack.base}/admin`);
+  await expect(aud).toHaveURL(`${stack.base}/admin/audit`);
+  await expect(aud.getByRole('link', { name: 'บันทึกระบบ' })).toHaveCount(0);
+  const feed = aud.locator('.au-feed li');
+  // Role grants from the operator CLI are always there; station work from earlier tests too.
+  await expect(aud.locator('.au-feed')).toContainText('ให้สิทธิ์ทีมงาน');
+  await expect(aud.locator('.au-feed')).toContainText('เผยแพร่สถานี');
+  await expect(aud.locator('.au-feed')).not.toContainText('ดูประวัติการแก้ไข');
+  if (SHOTS) await aud.screenshot({ path: `${SHOTS}/audit-minimal.png`, fullPage: true });
+
+  // Clicking an actor narrows the list to that actor.
+  await aud.locator('.au-feed').getByRole('link', { name: 'e2e-admin' }).first().click();
+  await expect(aud).toHaveURL(/actor=e2e-admin/);
+  for (const text of await feed.locator('.fv-tx-side b').allInnerTexts()) expect(text).toBe('e2e-admin');
+
+  // Including reads shows this auditor's own views.
+  await aud.goto(`${stack.base}/admin/audit?family=audit&reads=1`);
+  await expect(aud.locator('.au-feed')).toContainText('ดูประวัติการแก้ไข');
+  await expect(aud.locator('.au-feed')).toContainText('e2e-auditor');
+
+  const editor = await signInAs(browser, 'e2e-editor');
+  await expect(editor.getByRole('link', { name: 'ประวัติการแก้ไข' })).toHaveCount(0);
+  await editor.goto(`${stack.base}/admin/audit`);
+  await expect(editor.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูประวัติการแก้ไข');
+});
+
+test('the audit page has its own layout in each theme', async ({ browser }) => {
+  const page = await signInAs(browser, 'e2e-admin', '/admin/audit');
+  const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
+  const layouts: Record<string, string> = {
+    'control-room': '.t-control-room .audit .cr-filter + .lg-pn table',
+    'broadcast-rack': '.t-broadcast-rack .br-book li',
+    'daylight-bento': '.t-daylight-bento .db-days h4',
+    workbench: '.t-workbench .split .au-it',
+    minimal: '.t-minimal .fv-logstats + .fv-card .fv-logform',
+  };
+  for (const [theme, selector] of Object.entries(layouts)) {
+    await picker.selectOption(theme);
+    await expect(page.locator(selector).first()).toBeVisible();
+    await expect(page.getByRole('link', { name: 'ประวัติการแก้ไข' }).first()).toBeVisible();
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/audit-${theme}.png`, fullPage: true });
   }
 });

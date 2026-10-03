@@ -2,6 +2,7 @@ import { DynamicModule, INestApplication, Module } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import type { JWTVerifyGetKey } from 'jose';
 import type { Pool } from 'pg';
+import { AdminAuditController, AuditSearchService } from './audit/audit-search';
 import { AuthGuard, KEY_RESOLVER } from './auth/auth.guard';
 import { ErrorEnvelopeFilter } from './common/error.filter';
 import { LOG_SINK, LOG_WRITER, LogWriter, StructuredLogger, stdoutWriter } from './common/logger';
@@ -32,7 +33,7 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController],
+      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },
@@ -42,6 +43,7 @@ export class AppModule {
         { provide: LOG_SINK, useExisting: PgLogStore },
         StructuredLogger,
         LogsService,
+        AuditSearchService,
         Database,
         UsersService,
         SettingsService,

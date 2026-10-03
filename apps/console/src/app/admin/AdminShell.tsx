@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { createContext, Suspense, useContext, useEffect, useState } from 'react';
-import { canSeeLogs, canSeeStations, CatalogSummary, Mode, MODE_COOKIE, ROLE_LABELS, THEME_COOKIE, THEMES, ThemeId } from '@/lib/admin';
+import { canSeeAudit, canSeeLogs, canSeeStations, CatalogSummary, Mode, MODE_COOKIE, ROLE_LABELS, THEME_COOKIE, THEMES, ThemeId } from '@/lib/admin';
 import type { StaffRole } from '@/lib/bff';
 
 interface AdminContextValue {
@@ -25,6 +25,7 @@ export function useAdmin(): AdminContextValue {
 const NAV = [
   { href: '/admin/stations', label: 'สถานีวิทยุ', short: 'ST', icon: 'stations', show: canSeeStations },
   { href: '/admin/logs', label: 'บันทึกระบบ', short: 'LG', icon: 'logs', show: canSeeLogs },
+  { href: '/admin/audit', label: 'ประวัติการแก้ไข', short: 'AU', icon: 'audit', show: canSeeAudit },
 ] as const;
 
 function ThemePicker({ theme, onChange }: { theme: ThemeId; onChange: (t: ThemeId) => void }) {
@@ -78,6 +79,7 @@ const ICONS = {
   logout: 'M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1',
   chevron: 'M15 19l-7-7 7-7',
   bolt: 'M13 10V3L4 14h7v7l9-11h-7z',
+  audit: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
   logs: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9h6m-6-4h6m-6 8h4',
 } as const;
 

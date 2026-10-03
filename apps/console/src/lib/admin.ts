@@ -1,4 +1,4 @@
-import type { AdminStation, StaffRole } from './bff';
+import type { AdminStation, AuditEvent, StaffRole } from './bff';
 
 /** The five staff console themes Tar approved on 2026-10-03; each keeps its own layout. Minimal is the default. */
 export const THEMES = [
@@ -155,6 +155,7 @@ export function rightsDaysLeft(s: AdminStation, now = Date.now()): number | null
 /** What each staff role can open in the console; the API checks the same roles on every call. */
 export const canSeeStations = (roles: StaffRole[]) => roles.includes('catalog_editor') || roles.includes('admin');
 export const canSeeLogs = (roles: StaffRole[]) => roles.includes('operator') || roles.includes('admin');
+export const canSeeAudit = (roles: StaffRole[]) => roles.includes('auditor') || roles.includes('admin');
 
 export const LOG_RANGES = [
   { id: '15m', label: '15 นาทีล่าสุด', ms: 15 * 60_000 },
@@ -247,3 +248,113 @@ const logTimeFmt = new Intl.DateTimeFormat('th-TH', {
   hour12: false,
 });
 export const formatLogTime = (iso: string) => logTimeFmt.format(new Date(iso));
+
+export const AUDIT_RANGES = [
+  { id: '24h', label: '24 ชั่วโมงล่าสุด', ms: 24 * 3_600_000 },
+  { id: '7d', label: '7 วันล่าสุด', ms: 7 * 86_400_000 },
+  { id: '30d', label: '30 วันล่าสุด', ms: 30 * 86_400_000 },
+  { id: '90d', label: '90 วันล่าสุด', ms: 90 * 86_400_000 },
+] as const;
+export type AuditRangeId = (typeof AUDIT_RANGES)[number]['id'];
+
+export const ACTION_LABELS: Record<string, string> = {
+  'station.create': 'สร้างร่างสถานี',
+  'station.update': 'แก้ร่างสถานี',
+  'station.publish': 'เผยแพร่สถานี',
+  'station.disable': 'ปิดสถานี',
+  'station.enable': 'เปิดสถานีอีกครั้ง',
+  'staff_role.grant': 'ให้สิทธิ์ทีมงาน',
+  'staff_role.revoke': 'ถอนสิทธิ์ทีมงาน',
+  'logs.search': 'ค้นบันทึกระบบ',
+  'audit.search': 'ดูประวัติการแก้ไข',
+};
+export const actionLabel = (a: string) => ACTION_LABELS[a] ?? a;
+/** Family used for colors and the action filter. */
+export const actionFamily = (a: string) => a.split('.')[0];
+export const AUDIT_FAMILIES = [
+  { id: '', label: 'ทุกการกระทำ' },
+  { id: 'station', label: 'สถานี' },
+  { id: 'staff_role', label: 'สิทธิ์ทีมงาน' },
+  { id: 'logs', label: 'การค้นบันทึก' },
+  { id: 'audit', label: 'การดูประวัติ' },
+] as const;
+
+export const AUDIT_FIELD_LABELS: Record<string, string> = {
+  from: 'ช่วงเวลา',
+  to: 'ช่วงเวลา',
+  actor: 'ผู้กระทำ',
+  action: 'การกระทำ',
+  targetId: 'เป้าหมาย',
+  requestId: 'requestId',
+  cursor: 'หน้าถัดไป',
+};
+
+export interface AuditSearch {
+  range: AuditRangeId;
+  family: string;
+  actor: string;
+  targetId: string;
+  requestId: string;
+  reads: string;
+  to: string;
+  cursor: string;
+}
+
+export function auditSearchFrom(sp: Record<string, string | string[] | undefined>): AuditSearch {
+  return {
+    range: AUDIT_RANGES.find((r) => r.id === sp.range)?.id ?? '7d',
+    family: AUDIT_FAMILIES.find((f) => f.id === sp.family)?.id ?? '',
+    actor: pick(sp.actor, 128),
+    targetId: pick(sp.targetId, 64),
+    requestId: pick(sp.requestId, 64),
+    reads: sp.reads === '1' ? '1' : '',
+    to: pick(sp.to, 40),
+    cursor: pick(sp.cursor, 120),
+  };
+}
+
+export function auditApiParams(s: AuditSearch, now = Date.now()) {
+  const toMs = s.to && !Number.isNaN(Date.parse(s.to)) ? Date.parse(s.to) : now;
+  const ms = AUDIT_RANGES.find((r) => r.id === s.range)!.ms;
+  return {
+    from: new Date(toMs - ms).toISOString(),
+    to: new Date(toMs).toISOString(),
+    action: s.family,
+    actor: s.actor,
+    targetId: s.targetId,
+    requestId: s.requestId,
+    includeReads: s.reads,
+    cursor: s.cursor,
+    limit: '50',
+  };
+}
+
+export function auditHref(s: Partial<AuditSearch>): string {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(s)) if (v && !(k === 'range' && v === '7d')) p.set(k, v);
+  const qs = p.toString();
+  return qs ? `/admin/audit?${qs}` : '/admin/audit';
+}
+
+/** Who did it: the account's OIDC subject, or the operator label for staff CLI changes. */
+export const actorName = (e: AuditEvent) => e.actorSubject ?? (e.actor.startsWith('operator:') ? `โอเปอเรเตอร์ ${e.actor.slice(9)}` : e.actor);
+/** Value for the actor filter that finds this actor again. */
+export const actorKey = (e: AuditEvent) => e.actorSubject ?? e.actor.replace(/^user:/, '');
+
+/** One-line, plain-text summary of what changed. */
+export function changeSummary(e: AuditEvent): string {
+  const c = e.changes ?? {};
+  const parts: string[] = [];
+  if (Array.isArray(c.fields)) parts.push(`ช่อง: ${(c.fields as string[]).map((f) => FIELD_LABELS[f] ?? f).join(', ')}`);
+  if (typeof c.role === 'string') parts.push(`บทบาท: ${ROLE_LABELS[c.role as StaffRole] ?? c.role}`);
+  if (c.revision !== undefined) parts.push(`revision ${c.revision}`);
+  if (c.previousPublishedRevision !== undefined && c.previousPublishedRevision !== null) parts.push(`แทน r${c.previousPublishedRevision}`);
+  for (const [k, v] of Object.entries(c)) {
+    if (['fields', 'role', 'revision', 'previousPublishedRevision'].includes(k)) continue;
+    parts.push(`${k}: ${Array.isArray(v) ? v.join(',') : typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)}`);
+  }
+  return parts.join(' · ');
+}
+
+const dayFmt = new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+export const formatDay = (iso: string) => dayFmt.format(new Date(iso));

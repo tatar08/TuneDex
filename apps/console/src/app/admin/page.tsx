@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { canSeeLogs, canSeeStations } from '@/lib/admin';
+import { canSeeAudit, canSeeLogs, canSeeStations } from '@/lib/admin';
 import { staffPage } from './stations/load';
 
 export const dynamic = 'force-dynamic';
@@ -9,5 +9,5 @@ export default async function AdminHome() {
   const { bff, ctx } = await staffPage('/admin');
   const staff = await bff.loadStaff(ctx).catch(() => null);
   const roles = staff && 'roles' in staff ? staff.roles : [];
-  redirect(canSeeStations(roles) || !canSeeLogs(roles) ? '/admin/stations' : '/admin/logs');
+  redirect(canSeeStations(roles) ? '/admin/stations' : canSeeLogs(roles) ? '/admin/logs' : canSeeAudit(roles) ? '/admin/audit' : '/admin/stations');
 }
