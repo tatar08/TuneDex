@@ -38,6 +38,21 @@ export interface SettingsView {
   updatedAt: string | null;
 }
 
+export interface DeviceView {
+  id: string;
+  platform: 'ios' | 'android';
+  osMajor: number;
+  appBuild: string;
+  appliedSettingsRevision: number;
+  lastSeenAt: string;
+  revokedAt: string | null;
+}
+
+export interface DevicesView {
+  settingsRevision: number;
+  devices: DeviceView[];
+}
+
 export type SessionContext = { id: string; session: Session };
 
 const LOGIN_TX_SECONDS = 600;
@@ -222,6 +237,23 @@ export function createBff(deps: BffDeps) {
       if (!res) return null;
       return res.ok ? { status: 200, view: (await res.json()) as SettingsView } : { status: res.status };
     },
+
+    /** Server-side read of the account's devices for the settings page. Null means the user must sign in again. */
+    async loadDevices(ctx: SessionContext): Promise<{ status: number; view?: DevicesView } | null> {
+      const res = await callApi(ctx, '/v1/me/devices', { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, view: (await res.json()) as DevicesView } : { status: res.status };
+    },
+
+    /** GET /bff/devices */
+    getDevices: (req: Request) =>
+      timed(req, '/bff/devices', async (requestId) => {
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        const upstream = await callApi(ctx, '/v1/me/devices', { method: 'GET' }, requestId);
+        if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        return passthrough(upstream, requestId);
+      }),
 
     /** GET /bff/settings */
     getSettings: (req: Request) =>

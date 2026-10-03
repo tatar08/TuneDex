@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { SettingsView } from '@/lib/bff';
+import type { DeviceView, SettingsView } from '@/lib/bff';
 import { strings } from '@/lib/i18n';
 
 type Values = SettingsView['settings'];
@@ -19,7 +19,20 @@ type Problem =
   | { kind: 'expired' }
   | { kind: 'unavailable' };
 
-export function SettingsForm({ initial, csrfToken }: { initial: SettingsView; csrfToken: string }) {
+/** Last-seen times are shown in Thailand time whatever the browser's zone, so staff and users read the same clock. */
+const seenFormat = (lang: string) =>
+  new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'th-TH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Bangkok' });
+
+export function SettingsForm({
+  initial,
+  devices,
+  csrfToken,
+}: {
+  initial: SettingsView;
+  /** Null when the device list could not be loaded. */
+  devices: DeviceView[] | null;
+  csrfToken: string;
+}) {
   const [saved, setSaved] = useState(initial);
   const [values, setValues] = useState<Values>(initial.settings);
   const [busy, setBusy] = useState(false);
@@ -169,8 +182,26 @@ export function SettingsForm({ initial, csrfToken }: { initial: SettingsView; cs
 
       <section className="device" aria-labelledby="device-title">
         <h2 id="device-title">{t.deviceTitle}</h2>
-        <span className="chip">{t.devicePending}</span>
-        <p className="status">{t.deviceText(saved.revision)}</p>
+        {devices === null && <p className="status">{t.devicesLoadError}</p>}
+        {devices?.filter((d) => !d.revokedAt).length === 0 && <p className="status">{t.devicesNone(saved.revision)}</p>}
+        {devices && devices.some((d) => !d.revokedAt) && (
+          <ul className="devices">
+            {devices
+              .filter((d) => !d.revokedAt)
+              .map((d) => {
+                const current = d.appliedSettingsRevision >= saved.revision;
+                return (
+                  <li key={d.id} data-testid="device">
+                    <span className="device-name">{t.deviceName(d.platform, d.osMajor)}</span>
+                    <span className={`chip${current ? ' ok' : ''}`}>{current ? t.deviceApplied : t.devicePending}</span>
+                    <span className="status">
+                      {t.deviceDetail(d.appliedSettingsRevision, d.appBuild, seenFormat(saved.settings.language).format(new Date(d.lastSeenAt)))}
+                    </span>
+                  </li>
+                );
+              })}
+          </ul>
+        )}
       </section>
     </main>
   );

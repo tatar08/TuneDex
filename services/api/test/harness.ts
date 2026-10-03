@@ -19,7 +19,7 @@ export const AUDIENCE = 'tunedeck-api';
 
 export interface TestIdentity {
   keyResolver: JWTVerifyGetKey;
-  token(sub: string, overrides?: { iss?: string; aud?: string; expSeconds?: number; key?: KeyLike; kid?: string }): Promise<string>;
+  token(sub: string, overrides?: { iss?: string; aud?: string; expSeconds?: number; key?: KeyLike; kid?: string; authTime?: number }): Promise<string>;
   foreignKey: KeyLike;
 }
 
@@ -32,7 +32,7 @@ export async function createIdentity(): Promise<TestIdentity> {
     foreignKey: foreign.privateKey,
     async token(sub, o = {}) {
       const now = Math.floor(Date.now() / 1000);
-      return new SignJWT({})
+      return new SignJWT(o.authTime !== undefined ? { auth_time: o.authTime } : {})
         .setProtectedHeader({ alg: 'RS256', kid: o.kid ?? 'test-key-1' })
         .setSubject(sub)
         .setIssuer(o.iss ?? ISSUER)

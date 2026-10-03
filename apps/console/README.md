@@ -7,7 +7,7 @@ Next.js web app with a server-side BFF. This folder is COL-03 from [Doc 19](../.
 - **Sign-in:** `/auth/login` starts OIDC authorization code + PKCE S256 with `state` and `nonce`, kept in a signed 10-minute HttpOnly cookie. `/auth/callback` checks state, exchanges the code as a confidential client (`client_secret_basic`), verifies the ID token (issuer, audience, signature, nonce) and starts a new session. After login it only redirects to `/app/...` paths.
 - **Session:** tokens stay on the server. The browser gets one opaque, HttpOnly, `SameSite=Lax` cookie (`__Host-td_session` with `Secure` outside localhost). Idle timeout 12 hours (Doc 17), absolute 7 days (proposal). Access tokens refresh automatically with rotation; a rejected refresh ends the session.
 - **CSRF:** every change (`PATCH /bff/settings`, `POST /auth/logout`) must come from the console's own `Origin` and carry the session's CSRF token.
-- **Settings page** (`/app/settings`): theme, language and mobile-data policy as keyboard-friendly radio groups, Thai labels by default, English once the user saves `language = en`. Shows the saved revision. A device-status line always says "waiting for sync", because per-device applied status needs the device registry (later ticket). On a 412 conflict the user can take the server's values or resend only the fields they changed, so changes made elsewhere to other fields are kept.
+- **Settings page** (`/app/settings`): theme, language and mobile-data policy as keyboard-friendly radio groups, Thai labels by default, English once the user saves `language = en`. Shows the saved revision. Below the form, each signed-in device shows "up to date" or "waiting for sync" by comparing the revision it last applied with the saved revision, plus app build and last-seen time in Thailand time (via `GET /bff/devices` and `GET /v1/me/devices`). If the device list fails to load, settings still work. On a 412 conflict the user can take the server's values or resend only the fields they changed, so changes made elsewhere to other fields are kept.
 - **Logout:** deletes the server session, clears the cookie and sends the browser to the IdP's end-session endpoint when it has one.
 - **Logs:** one JSON line per BFF request with method, route, status, duration and a request id that is also sent to the API. No tokens, cookies, codes or bodies.
 
@@ -33,4 +33,4 @@ The integration and browser tests run the real `services/api` build against Post
 
 ## Not in this ticket
 
-Shared session store (the in-memory store limits this to one console instance), device list and per-device applied revision, account deletion/export, admin console and its five themes, rate limiting, CI.
+Shared session store (the in-memory store limits this to one console instance), revoking a device from the web (the API supports it but needs a fresh sign-in, so the console needs a re-auth step first), account deletion/export, admin console and its five themes, rate limiting, CI.

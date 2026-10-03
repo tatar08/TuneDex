@@ -193,6 +193,34 @@ describe('settings through the BFF and the real API', () => {
   });
 });
 
+describe('devices through the BFF and the real API', () => {
+  const devices = (cookie: string) => bff.getDevices(new Request(`${BASE}/bff/devices`, { headers: { cookie } }));
+
+  it('lists only the signed-in account\'s devices, with their applied revision', async () => {
+    const cookie = await signIn('bff-devices');
+    const empty = await devices(cookie);
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toEqual({ settingsRevision: 0, devices: [] });
+
+    const phone = await idp.accessTokenFor('bff-devices');
+    const put = await fetch(`${api.url}/v1/me/devices/0b9a4f8e-6c1d-4e2a-9f3b-1a2b3c4d5e6f`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${phone}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'android', osMajor: 15, appBuild: '1.0.0+7', appliedSettingsRevision: 0 }),
+    });
+    expect(put.status).toBe(200);
+
+    const listed = await (await devices(cookie)).json();
+    expect(listed.devices).toHaveLength(1);
+    expect(listed.devices[0]).toMatchObject({ platform: 'android', appliedSettingsRevision: 0 });
+    expect((await (await devices(await signIn('bff-devices-other'))).json()).devices).toEqual([]);
+  });
+
+  it('returns 401 SESSION_EXPIRED without a session', async () => {
+    expect((await devices('')).status).toBe(401);
+  });
+});
+
 describe('CSRF', () => {
   let cookie: string;
   beforeAll(async () => {

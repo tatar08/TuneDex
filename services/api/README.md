@@ -10,9 +10,13 @@ NestJS + PostgreSQL backend. This folder is COL-01 from [Doc 19](../../Docs/19-C
 | `GET /health/ready` | 200 when PostgreSQL answers, else 503 |
 | `GET /v1/me/settings` | The signed-in account's settings with `ETag: "<revision>"`. New accounts get defaults at revision 0 |
 | `PATCH /v1/me/settings` | Partial update. Requires `If-Match: "<revision>"`; stale → 412 `REVISION_MISMATCH` with `currentRevision` |
+| `GET /v1/me/devices` | The account's devices plus the current `settingsRevision`, active first, most recently seen first |
+| `PUT /v1/me/devices/{deviceId}` | The phone app's check-in: registers the device on first call, then records platform, OS major, app build and the settings revision it has applied |
+| `DELETE /v1/me/devices/{deviceId}/session` | Revokes a device. Needs a sign-in within the last 5 minutes (`auth_time`), else 401 `REAUTH_REQUIRED` |
 
 - **Auth:** every `/v1` call needs an OIDC bearer token verified against the JWKS for issuer, audience, expiry and an asymmetric algorithm. The account comes from the token `sub`, never from the body or URL. Unknown key or bad token → 401; key set unreachable → 503 (fails closed). Accounts in `deleting`/`disabled` status → 403. There is no dev bypass; fake identity exists only in `test/`.
 - **Settings allowlist** (proposal, see `openapi.proposal.yaml`): `theme` system/light/dark, `language` th/en, `cellularPolicy` allow/wifi_only. Defaults: system, th, allow.
+- **Devices:** `deviceId` is a UUID the app generates once per install. Check-ins accept only `platform` (ios/android), `osMajor`, `appBuild` and `appliedSettingsRevision`; no device name, model or advertising id is stored. An applied revision higher than the server's → 400; a late, older report never moves the applied revision backwards. A revoked device's check-in → 403 `DEVICE_REVOKED` (the app should sign out). At most 20 active devices per account → 409 `DEVICE_LIMIT`. Device ids are scoped per account, so another account's id is simply not found.
 - **Errors** use `{code, messageKey, requestId, details}` with no tokens or PII. Bodies over 16 KiB → 413.
 - **Logs:** one JSON line per request (timestamp, severity, service, environment, build, eventCode, requestId, method, route template, status, durationMs, internal account id). Headers, bodies and query strings are never logged. A well-formed inbound `X-Request-Id` is reused, otherwise one is generated.
 
@@ -39,8 +43,8 @@ npm run typecheck
 
 ## Migrations
 
-`001_users_and_account_preferences.sql` creates `users` (OIDC subject, status, no password) and `account_preferences` (owner, schema version, revision, JSON value). Migrations are forward-only and serialized with an advisory lock; to undo, add a new migration.
+`001_users_and_account_preferences.sql` creates `users` (OIDC subject, status, no password) and `account_preferences` (owner, schema version, revision, JSON value). `002_devices.sql` creates `devices` keyed by (owner, device id). Migrations are forward-only and serialized with an advisory lock; to undo, add a new migration.
 
 ## Not in this slice
 
-Rate limits, CSRF/BFF (COL-03), device preferences, audit outbox, metrics/traces, Dockerfile and CI. Shared OpenAPI, root scripts and CI belong to COL-00.
+Rate limits, CSRF/BFF (COL-03), per-device preference overrides, invalidating a revoked device's refresh token at the IdP (needs the Keycloak admin API), audit outbox, metrics/traces, Dockerfile and CI. Shared OpenAPI, root scripts and CI belong to COL-00.

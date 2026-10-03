@@ -14,8 +14,12 @@ export default async function SettingsPage() {
   const ctx = await bff.sessionFromCookie(cookieHeader);
   if (!ctx) redirect(hadCookie ? '/login?expired=1' : '/login?returnTo=/app/settings');
 
-  const result = await bff.loadSettings(ctx).catch(() => ({ status: 503 }) as const);
-  if (result === null) redirect('/login?expired=1');
+  const [result, devices] = await Promise.all([
+    bff.loadSettings(ctx).catch(() => ({ status: 503 }) as const),
+    // Device status is secondary: if it fails, the settings still load and the section says so.
+    bff.loadDevices(ctx).catch(() => ({ status: 503 }) as const),
+  ]);
+  if (result === null || devices === null) redirect('/login?expired=1');
 
   if (!('view' in result) || !result.view) {
     const t = strings('th');
@@ -30,5 +34,11 @@ export default async function SettingsPage() {
       </main>
     );
   }
-  return <SettingsForm initial={result.view} csrfToken={ctx.session.csrfToken} />;
+  return (
+    <SettingsForm
+      initial={result.view}
+      devices={'view' in devices && devices.view ? devices.view.devices : null}
+      csrfToken={ctx.session.csrfToken}
+    />
+  );
 }

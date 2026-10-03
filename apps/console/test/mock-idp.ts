@@ -14,6 +14,8 @@ export interface MockIdp {
   setUser(sub: string): void;
   setAccessTtl(seconds: number): void;
   revokeRefreshTokens(): void;
+  /** Signs an API access token directly, standing in for the phone app's own login. */
+  accessTokenFor(sub: string): Promise<string>;
   issued: string[];
 }
 
@@ -119,5 +121,6 @@ export async function startMockIdp(): Promise<MockIdp> {
     setUser: (s) => (user = s),
     setAccessTtl: (s) => (accessTtl = s),
     revokeRefreshTokens: () => refresh.clear(),
+    accessTokenFor: (sub) => sign({ sub }, API_AUDIENCE, 300),
   };
 }

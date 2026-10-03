@@ -55,11 +55,58 @@ paths:
         '413': { $ref: '#/components/responses/Error' }
         '428': { $ref: '#/components/responses/Error' }
         '503': { $ref: '#/components/responses/Error' }
+  /v1/me/devices:
+    get:
+      summary: List the signed-in account's devices
+      responses:
+        '200':
+          description: Devices, active first then most recently seen, with the current settings revision for comparison
+          content: { application/json: { schema: { $ref: '#/components/schemas/DeviceList' } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /v1/me/devices/{deviceId}:
+    put:
+      summary: Device check-in (registers on first call)
+      parameters:
+        - { $ref: '#/components/parameters/DeviceId' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DeviceReport' } } }
+      responses:
+        '200':
+          description: Recorded
+          content: { application/json: { schema: { $ref: '#/components/schemas/Device' } } }
+        '400': { description: 'Invalid field, or appliedSettingsRevision ahead of the server (details.reason = ahead_of_server)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { description: 'DEVICE_REVOKED (sign the app out) or account not active', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'DEVICE_LIMIT, 20 active devices per account', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { $ref: '#/components/responses/Error' }
+  /v1/me/devices/{deviceId}/session:
+    delete:
+      summary: Revoke a device
+      description: Requires the token's auth_time to be within the last 300 seconds.
+      parameters:
+        - { $ref: '#/components/parameters/DeviceId' }
+      responses:
+        '200':
+          description: Revoked (repeat calls keep the first revokedAt)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Device' } } }
+        '401': { description: 'Not signed in, or REAUTH_REQUIRED with details.maxAgeSeconds', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
 security:
   - bearer: []
 components:
   securitySchemes:
     bearer: { type: http, scheme: bearer, bearerFormat: JWT, description: OIDC access token (iss/aud/exp/RS256 verified via JWKS) }
+  parameters:
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      description: UUID the app generates once per install
+      schema: { type: string, format: uuid }
   schemas:
     Health:
       type: object
@@ -89,18 +136,44 @@ components:
         schemaVersion: { type: integer, const: 1 }
         settings: { $ref: '#/components/schemas/Settings' }
         updatedAt: { type: [string, 'null'], format: date-time }
+    DeviceReport:
+      type: object
+      additionalProperties: false
+      required: [platform, osMajor, appBuild]
+      properties:
+        platform: { type: string, enum: [ios, android] }
+        osMajor: { type: integer, minimum: 0, maximum: 99 }
+        appBuild: { type: string, pattern: '^[0-9A-Za-z.+-]{1,32}$', example: '1.0.0+42' }
+        appliedSettingsRevision: { type: integer, minimum: 0, default: 0 }
+    Device:
+      type: object
+      required: [id, platform, osMajor, appBuild, appliedSettingsRevision, lastSeenAt, revokedAt]
+      properties:
+        id: { type: string, format: uuid }
+        platform: { type: string, enum: [ios, android] }
+        osMajor: { type: integer }
+        appBuild: { type: string }
+        appliedSettingsRevision: { type: integer }
+        lastSeenAt: { type: string, format: date-time }
+        revokedAt: { type: string, format: date-time, nullable: true }
+    DeviceList:
+      type: object
+      required: [settingsRevision, devices]
+      properties:
+        settingsRevision: { type: integer }
+        devices: { type: array, items: { $ref: '#/components/schemas/Device' } }
     Error:
       type: object
       required: [code, messageKey, requestId, details]
       properties:
         code:
           type: string
-          enum: [AUTH_REQUIRED, AUTH_FORBIDDEN, VALIDATION_FAILED, NOT_FOUND, PRECONDITION_REQUIRED, REVISION_MISMATCH, PAYLOAD_TOO_LARGE, DEPENDENCY_UNAVAILABLE, INTERNAL]
+          enum: [AUTH_REQUIRED, AUTH_FORBIDDEN, VALIDATION_FAILED, NOT_FOUND, PRECONDITION_REQUIRED, REVISION_MISMATCH, PAYLOAD_TOO_LARGE, REAUTH_REQUIRED, DEVICE_REVOKED, DEVICE_LIMIT, DEPENDENCY_UNAVAILABLE, INTERNAL]
         messageKey: { type: string, example: errors.settings.revisionMismatch }
         requestId: { type: string }
         details:
           type: object
-          description: 'No tokens or PII. VALIDATION_FAILED → {field?, reason, allowed?}; REVISION_MISMATCH → {currentRevision}.'
+          description: 'No tokens or PII. VALIDATION_FAILED → {field?, reason, allowed?}; REVISION_MISMATCH → {currentRevision}; REAUTH_REQUIRED → {maxAgeSeconds}; DEVICE_LIMIT → {maxActiveDevices}.'
   responses:
     Error:
       description: Error envelope
