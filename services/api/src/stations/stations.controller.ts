@@ -5,38 +5,61 @@ import { ApiError } from '../common/api-error';
 import { parseIfMatch } from '../settings/settings.schema';
 import { RequireRoles, StaffGuard } from '../staff/staff';
 import { parseNewStation, parseReason, parseStationId, parseStationPatch } from './stations.schema';
+import { HealthCheck, StationHealth, StationHealthService } from './station-health';
 import { AdminStationView, StationActor, StationsService } from './stations.service';
 
 const actorOf = (req: Request): StationActor => ({ userId: req.actor!.userId, roles: req.actor!.roles ?? [], requestId: req.requestId });
 
-function send(res: Response, view: AdminStationView): AdminStationView {
-  res.setHeader('ETag', `"${view.revision}"`);
-  res.setHeader('Cache-Control', 'no-store');
-  return view;
-}
+type WithHealth = AdminStationView & { health: StationHealth };
 
 /** Staff catalog management (Doc 17 /admin/stations). Editors draft; a different admin publishes. */
 @Controller('v1/admin/stations')
 @UseGuards(AuthGuard, StaffGuard)
 @RequireRoles('catalog_editor', 'admin')
 export class AdminStationsController {
-  constructor(private readonly stations: StationsService) {}
+  constructor(
+    private readonly stations: StationsService,
+    private readonly health: StationHealthService,
+  ) {}
+
+  private async send(res: Response, view: AdminStationView): Promise<WithHealth> {
+    res.setHeader('ETag', `"${view.revision}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    return { ...view, health: await this.health.summary(view.id) };
+  }
 
   @Get()
   async list(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     res.setHeader('Cache-Control', 'no-store');
-    return { stations: await this.stations.list(actorOf(req)) };
+    const views = await this.stations.list(actorOf(req));
+    const health = await this.health.summaries(views.map((v) => v.id));
+    return { stations: views.map((v): WithHealth => ({ ...v, health: health.get(v.id) ?? { state: 'unknown', regions: [] } })) };
   }
 
   @Get(':id')
   async get(@Req() req: Request, @Param('id') id: string, @Res({ passthrough: true }) res: Response) {
-    return send(res, await this.stations.get(actorOf(req), parseStationId(id)));
+    return this.send(res, await this.stations.get(actorOf(req), parseStationId(id)));
+  }
+
+  /** The last checks of this station's stream, newest first, with result codes only. */
+  @Get(':id/health')
+  async healthHistory(@Param('id') id: string, @Res({ passthrough: true }) res: Response): Promise<{ checks: HealthCheck[] }> {
+    res.setHeader('Cache-Control', 'no-store');
+    return { checks: await this.health.history(parseStationId(id)) };
+  }
+
+  /** Checks the stream now (Doc 17 bounds apply). At most once a minute per station; audited. */
+  @Post(':id/check')
+  @HttpCode(HttpStatus.OK)
+  async check(@Req() req: Request, @Param('id') id: string, @Res({ passthrough: true }) res: Response): Promise<HealthCheck> {
+    res.setHeader('Cache-Control', 'no-store');
+    return this.health.checkNow(actorOf(req), parseStationId(id));
   }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
   async create(@Req() req: Request, @Body() body: unknown, @Res({ passthrough: true }) res: Response) {
-    return send(res, await this.stations.create(actorOf(req), parseNewStation(body)));
+    return this.send(res, await this.stations.create(actorOf(req), parseNewStation(body)));
   }
 
   @Patch(':id')
@@ -49,7 +72,7 @@ export class AdminStationsController {
   ) {
     const stationId = parseStationId(id);
     const expected = parseIfMatch(ifMatch);
-    return send(res, await this.stations.update(actorOf(req), stationId, expected, parseStationPatch(body)));
+    return this.send(res, await this.stations.update(actorOf(req), stationId, expected, parseStationPatch(body)));
   }
 
   /** If-Match names the draft revision the admin reviewed, so a later edit cannot slip into the publish. */
@@ -65,21 +88,21 @@ export class AdminStationsController {
   ) {
     const stationId = parseStationId(id);
     const expected = parseIfMatch(ifMatch);
-    return send(res, await this.stations.publish(actorOf(req), stationId, expected, parseReason(body)));
+    return this.send(res, await this.stations.publish(actorOf(req), stationId, expected, parseReason(body)));
   }
 
   @Post(':id/disable')
   @HttpCode(HttpStatus.OK)
   @RequireRoles('admin')
   async disable(@Req() req: Request, @Param('id') id: string, @Body() body: unknown, @Res({ passthrough: true }) res: Response) {
-    return send(res, await this.stations.setDisabled(actorOf(req), parseStationId(id), true, parseReason(body)));
+    return this.send(res, await this.stations.setDisabled(actorOf(req), parseStationId(id), true, parseReason(body)));
   }
 
   @Post(':id/enable')
   @HttpCode(HttpStatus.OK)
   @RequireRoles('admin')
   async enable(@Req() req: Request, @Param('id') id: string, @Body() body: unknown, @Res({ passthrough: true }) res: Response) {
-    return send(res, await this.stations.setDisabled(actorOf(req), parseStationId(id), false, parseReason(body)));
+    return this.send(res, await this.stations.setDisabled(actorOf(req), parseStationId(id), false, parseReason(body)));
   }
 }
 

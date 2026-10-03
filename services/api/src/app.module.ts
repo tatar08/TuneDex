@@ -18,7 +18,9 @@ import { SettingsController } from './settings/settings.controller';
 import { SettingsService } from './settings/settings.service';
 import { StaffController, StaffGuard, StaffService } from './staff/staff';
 import { AdminStationsController, CatalogController } from './stations/stations.controller';
+import { PROBE_DEPS, StationHealthService } from './stations/station-health';
 import { StationsService } from './stations/stations.service';
+import type { ProbeDeps } from './stations/stream-probe';
 import { UsersService } from './users/users.service';
 
 export interface AppDeps {
@@ -26,6 +28,8 @@ export interface AppDeps {
   pool: Pool;
   keyResolver: JWTVerifyGetKey;
   logWriter?: LogWriter;
+  /** Tests only: fake DNS/HTTPS for the stream checker. Production uses the real ones. */
+  probeDeps?: ProbeDeps;
 }
 
 @Module({})
@@ -50,6 +54,8 @@ export class AppModule {
         DevicesService,
         StaffService,
         StationsService,
+        StationHealthService,
+        ...(deps.probeDeps ? [{ provide: PROBE_DEPS, useValue: deps.probeDeps }] : []),
         AuthGuard,
         StaffGuard,
       ],

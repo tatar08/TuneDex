@@ -79,10 +79,39 @@ export interface AdminStation {
   disabledAt: string | null;
   updatedAt: string;
   publishBlockers: string[];
+  health: StationHealth;
+}
+
+export type HealthState = 'unknown' | 'ok' | 'failing' | 'suspect';
+
+export interface RegionHealth {
+  region: string;
+  state: Exclude<HealthState, 'unknown'>;
+  checkedAt: string;
+  reason: string;
+  httpStatus: number | null;
+  latencyMs: number | null;
+  consecutiveFailures: number;
+}
+
+/** Health of the published stream, from the API's scheduled checks (Doc 17). */
+export interface StationHealth {
+  state: HealthState;
+  regions: RegionHealth[];
+}
+
+export interface HealthCheck {
+  region: string;
+  checkedAt: string;
+  target: 'published' | 'draft';
+  ok: boolean;
+  reason: string;
+  httpStatus: number | null;
+  latencyMs: number | null;
 }
 
 const STATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const STATION_ACTIONS = ['publish', 'disable', 'enable'] as const;
+const STATION_ACTIONS = ['publish', 'disable', 'enable', 'check'] as const;
 export type StationAction = (typeof STATION_ACTIONS)[number];
 
 export type SessionContext = { id: string; session: Session };
@@ -316,6 +345,12 @@ export function createBff(deps: BffDeps) {
       if (!res) return null;
       return res.ok ? { status: 200, station: (await res.json()) as AdminStation } : { status: res.status };
     },
+    async loadStationHealth(ctx: SessionContext, id: string): Promise<{ status: number; checks?: HealthCheck[] } | null> {
+      if (!STATION_ID.test(id)) return { status: 404 };
+      const res = await callApi(ctx, `/v1/admin/stations/${id}/health`, { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, checks: ((await res.json()) as { checks: HealthCheck[] }).checks } : { status: res.status };
+    },
 
     /** Server-side log search for /admin/logs. Null means the user must sign in again. */
     async loadLogs(
@@ -361,7 +396,7 @@ export function createBff(deps: BffDeps) {
         STATION_ID.test(id) ? adminProxy(req, requestId, `/v1/admin/stations/${id}`, req.method === 'PATCH') : notFound(requestId),
       ),
 
-    /** POST /bff/admin/stations/{id}/{publish|disable|enable} */
+    /** POST /bff/admin/stations/{id}/{publish|disable|enable|check} */
     stationAction: (req: Request, id: string, action: string) =>
       timed(req, '/bff/admin/stations/:id/:action', async (requestId) =>
         STATION_ID.test(id) && (STATION_ACTIONS as readonly string[]).includes(action)

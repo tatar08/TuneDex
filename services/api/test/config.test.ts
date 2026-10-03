@@ -26,4 +26,17 @@ describe('loadConfig', () => {
   it('refuses an unknown environment name', () => {
     expect(() => loadConfig({ ...base, APP_ENV: 'prod' })).toThrow('APP_ENV');
   });
+
+  it('keeps stream checks off by default', () => {
+    expect(loadConfig(base).stationCheck).toEqual({ enabled: false, intervalMinutes: 15, region: 'default' });
+  });
+
+  it.each([
+    ['STATION_CHECK_ENABLED', 'yes'],
+    ['STATION_CHECK_INTERVAL_MIN', '1'],
+    ['STATION_CHECK_INTERVAL_MIN', '7.5'],
+    ['STATION_CHECK_REGION', 'Asia Southeast'],
+  ])('refuses %s=%s', (key, value) => {
+    expect(() => loadConfig({ ...base, [key]: value })).toThrow(key);
+  });
 });

@@ -499,7 +499,7 @@
 .t-minimal .fv-tabs a { font-size: 12.5px; font-weight: 600; color: var(--m); text-decoration: none; padding: 7px 12px; border-radius: 12px; }
 .t-minimal .fv-tabs a.on { background: var(--p); color: var(--t); box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08); }
 .t-minimal .fv-rows { list-style: none; margin: 0; padding: 0; }
-.t-minimal .fv-rows li { display: grid; grid-template-columns: 42px minmax(0, 1.6fr) minmax(0, 1.3fr) 110px minmax(0, 1.2fr) 44px; gap: 14px; align-items: center; padding: 10px 6px; border-top: 1px solid var(--l); }
+.t-minimal .fv-rows li { display: grid; grid-template-columns: 42px minmax(0, 1.6fr) minmax(0, 1.3fr) 110px 110px minmax(0, 1.2fr) 44px; gap: 14px; align-items: center; padding: 10px 6px; border-top: 1px solid var(--l); }
 .t-minimal .fv-rows .nm { font-weight: 700; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .t-minimal .fv-rows .nm:hover { color: var(--a); }
 .t-minimal .fv-rows small { color: var(--m); font-size: 12px; }
@@ -549,3 +549,61 @@
   .adm .ed-grid { grid-template-columns: 1fr; }
   .adm.t-daylight-bento { padding: 12px 12px; }
 }
+
+/* Stream health (all themes): ok / failing / suspect / unknown */
+.adm .hl-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--ok); flex: none; }
+.adm .hl-dot.failing { background: var(--w); }
+.adm .hl-dot.suspect { background: var(--e); }
+.adm .hl-dot.unknown { background: transparent; box-shadow: inset 0 0 0 1.5px var(--u); }
+.adm .hl-line, .adm .hl-sig, .adm .hl-chip { white-space: nowrap; }
+.adm .hl-line.failing, .adm .hl-sig.failing { color: var(--w); }
+.adm .hl-line.suspect, .adm .hl-sig.suspect { color: var(--e); font-weight: 600; }
+.adm .hl-pill { display: inline-flex; align-items: center; padding: 3px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); white-space: nowrap; }
+.adm .hl-pill.failing { background: color-mix(in srgb, var(--w) 16%, transparent); color: var(--w); }
+.adm .hl-pill.suspect { background: color-mix(in srgb, var(--e) 14%, transparent); color: var(--e); }
+.adm .hl-pill.unknown { background: color-mix(in srgb, var(--u) 16%, transparent); color: var(--m); }
+.adm .hl-state { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 10px; }
+.adm .hl-note { border-left: 3px solid var(--e); padding: 6px 10px; margin: 0 0 10px; background: color-mix(in srgb, var(--e) 8%, transparent); font-size: 13px; }
+.adm .hl-regions { margin: 0 0 12px; display: grid; gap: 8px; }
+.adm .hl-regions > div { display: grid; grid-template-columns: minmax(90px, auto) 1fr; gap: 10px; }
+.adm .hl-regions dt { font-family: var(--mono); font-size: 12px; color: var(--m); }
+.adm .hl-regions dd { margin: 0; font-size: 13px; }
+.adm .hl-regions small { display: block; color: var(--m); font-size: 12px; }
+.adm .hl-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.adm .hl-actions .dim { font-size: 12px; }
+.adm .hl-history { margin-top: 12px; font-size: 13px; }
+.adm .hl-history summary { cursor: pointer; color: var(--m); }
+.adm .hl-history ol { list-style: none; margin: 8px 0 0; padding: 0; max-height: 260px; overflow: auto; }
+.adm .hl-history li { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; padding: 6px 0; border-top: 1px solid var(--l); }
+.adm .hl-history li small { grid-column: 2; color: var(--m); font-size: 12px; }
+.adm .hl-history li.bad > span:nth-child(2) { color: var(--e); }
+.adm .hl-history .mono { font-family: var(--mono); font-size: 12px; color: var(--m); }
+/* Control Room: bordered mono tag like the status column */
+.t-control-room .tag.hl-ok { color: var(--ok); border-color: #1f5a43; }
+.t-control-room .tag.hl-failing { color: var(--w); border-color: #6a5420; }
+.t-control-room .tag.hl-suspect { color: var(--e); border-color: #6a2a2a; }
+/* Broadcast Rack: signal line on each preset */
+.t-broadcast-rack .pre .sig { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; color: var(--m); display: flex; align-items: center; gap: 8px; }
+.t-broadcast-rack .pre .sig .hl-dot { width: 9px; height: 9px; box-shadow: 0 0 7px currentColor; color: var(--ok); }
+.t-broadcast-rack .pre .sig .hl-dot.failing { color: var(--w); }
+.t-broadcast-rack .pre .sig .hl-dot.suspect { color: var(--e); }
+.t-broadcast-rack .pre .sig .hl-dot.unknown { box-shadow: none; }
+/* Daylight Bento: soft chip under the card footer */
+.t-daylight-bento .st .hl-chip { align-self: flex-start; display: inline-flex; align-items: center; font-size: 12px; padding: 3px 10px; border-radius: 999px; background: #e9f6f1; color: var(--ok); }
+.t-daylight-bento .st .hl-chip.failing { background: #fdf1e1; color: var(--w); }
+.t-daylight-bento .st .hl-chip.suspect { background: #fdecea; color: var(--e); }
+.t-daylight-bento .st .hl-chip.unknown { background: #f1f3f5; color: var(--m); }
+/* Minimal: health summary tiles and tile tints */
+.t-minimal .fv-health { list-style: none; margin: 4px 0 12px; padding: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.t-minimal .fv-health li { border-radius: 12px; padding: 8px 12px; display: flex; align-items: baseline; gap: 8px; background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.t-minimal .fv-health li b { font-size: 20px; font-weight: 800; color: var(--ok); }
+.t-minimal .fv-health li small { color: var(--m); font-size: 12px; white-space: nowrap; }
+.t-minimal .fv-health li.failing { background: color-mix(in srgb, var(--w) 10%, transparent); }
+.t-minimal .fv-health li.failing b { color: var(--w); }
+.t-minimal .fv-health li.suspect { background: color-mix(in srgb, var(--e) 10%, transparent); }
+.t-minimal .fv-health li.suspect b { color: var(--e); }
+.t-minimal .fv-health li.unknown { background: color-mix(in srgb, var(--u) 12%, transparent); }
+.t-minimal .fv-health li.unknown b { color: var(--m); }
+.t-minimal .fv-tile.hl-failing { background: color-mix(in srgb, var(--w) 16%, transparent); color: var(--w); }
+.t-minimal .fv-tile.hl-suspect { background: color-mix(in srgb, var(--e) 14%, transparent); color: var(--e); }
+.t-minimal .fv-rows .hl-line { display: inline-flex; align-items: center; }

@@ -1,4 +1,4 @@
-import type { AdminStation, AuditEvent, StaffRole } from './bff';
+import type { AdminStation, AuditEvent, HealthState, StaffRole, StationHealth } from './bff';
 
 /** The five staff console themes Tar approved on 2026-10-03; each keeps its own layout. Minimal is the default. */
 export const THEMES = [
@@ -263,6 +263,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'station.publish': 'เผยแพร่สถานี',
   'station.disable': 'ปิดสถานี',
   'station.enable': 'เปิดสถานีอีกครั้ง',
+  'station.check': 'ตรวจสตรีม',
   'staff_role.grant': 'ให้สิทธิ์ทีมงาน',
   'staff_role.revoke': 'ถอนสิทธิ์ทีมงาน',
   'logs.search': 'ค้นบันทึกระบบ',
@@ -349,8 +350,10 @@ export function changeSummary(e: AuditEvent): string {
   if (typeof c.role === 'string') parts.push(`บทบาท: ${ROLE_LABELS[c.role as StaffRole] ?? c.role}`);
   if (c.revision !== undefined) parts.push(`revision ${c.revision}`);
   if (c.previousPublishedRevision !== undefined && c.previousPublishedRevision !== null) parts.push(`แทน r${c.previousPublishedRevision}`);
+  if (typeof c.target === 'string') parts.push(c.target === 'draft' ? 'ตรวจสตรีมของร่าง' : 'ตรวจสตรีมที่เผยแพร่');
+  if (typeof c.result === 'string') parts.push(`ผล: ${PROBE_REASON_LABELS[c.result] ?? c.result}`);
   for (const [k, v] of Object.entries(c)) {
-    if (['fields', 'role', 'revision', 'previousPublishedRevision'].includes(k)) continue;
+    if (['fields', 'role', 'revision', 'previousPublishedRevision', 'target', 'result'].includes(k)) continue;
     parts.push(`${k}: ${Array.isArray(v) ? v.join(',') : typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)}`);
   }
   return parts.join(' · ');
@@ -358,3 +361,44 @@ export function changeSummary(e: AuditEvent): string {
 
 const dayFmt = new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 export const formatDay = (iso: string) => dayFmt.format(new Date(iso));
+
+export const HEALTH_LABELS: Record<HealthState, string> = {
+  unknown: 'ยังไม่ได้ตรวจ',
+  ok: 'เล่นได้',
+  failing: 'ตรวจไม่ผ่าน',
+  suspect: 'น่าสงสัย',
+};
+
+/** Probe result codes from the API (stream-probe.ts). */
+export const PROBE_REASON_LABELS: Record<string, string> = {
+  ok: 'เล่นได้',
+  invalid_url: 'ที่อยู่สตรีมไม่ถูกต้อง',
+  dns_failed: 'หาโดเมนไม่เจอ',
+  blocked_address: 'ชี้ไปที่อยู่ภายในหรือไม่ใช่สาธารณะ',
+  timeout: 'ไม่ตอบภายใน 10 วินาที',
+  connect_failed: 'เชื่อมต่อไม่ได้',
+  http_status: 'เซิร์ฟเวอร์ตอบข้อผิดพลาด',
+  too_many_redirects: 'เปลี่ยนเส้นทางเกิน 3 ครั้ง',
+  not_audio: 'ไม่ใช่สตรีมเสียง',
+};
+
+export const probeReason = (reason: string, httpStatus: number | null) =>
+  `${PROBE_REASON_LABELS[reason] ?? reason}${reason === 'http_status' && httpStatus ? ` (${httpStatus})` : ''}`;
+
+/** One line for lists: state plus the latest result when it is not fine. */
+export function healthLine(h: StationHealth): string {
+  if (h.state === 'unknown') return HEALTH_LABELS.unknown;
+  const worst = [...h.regions].sort((a, b) => b.consecutiveFailures - a.consecutiveFailures)[0];
+  if (h.state === 'ok') return worst?.latencyMs != null ? `${HEALTH_LABELS.ok} · ${worst.latencyMs} ms` : HEALTH_LABELS.ok;
+  return `${HEALTH_LABELS[h.state]} · ${probeReason(worst.reason, worst.httpStatus)} · ${worst.consecutiveFailures} ครั้งติด`;
+}
+
+export function countByHealth(stations: AdminStation[]): Record<HealthState, number> {
+  const c: Record<HealthState, number> = { unknown: 0, ok: 0, failing: 0, suspect: 0 };
+  for (const s of stations) if (isLive(s)) c[healthOf(s).state]++;
+  return c;
+}
+
+/** Health only matters for stations the apps can see; drafts and disabled stations show none. */
+export const isLive = (s: AdminStation) => s.publishedRevision !== null && !s.disabledAt;
+export const healthOf = (s: AdminStation): StationHealth => s.health ?? { state: 'unknown', regions: [] };

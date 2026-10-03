@@ -5,7 +5,7 @@ import { Test } from '@nestjs/testing';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { createLocalJWKSet, exportJWK, generateKeyPair, JWTVerifyGetKey, KeyLike, SignJWT } from 'jose';
 import { Client, Pool } from 'pg';
-import { AppModule, configureApp } from '../src/app.module';
+import { AppDeps, AppModule, configureApp } from '../src/app.module';
 import { AppConfig } from '../src/config';
 import { createPool } from '../src/db/database';
 import { migrate } from '../src/db/migrate';
@@ -51,6 +51,7 @@ export function testConfig(databaseUrl: string): AppConfig {
     port: 0,
     databaseUrl,
     oidc: { issuer: ISSUER, audience: AUDIENCE, jwksUri: 'https://idp.test/unused', algorithms: ['RS256'] },
+    stationCheck: { enabled: false, intervalMinutes: 15, region: 'test-region' },
   };
 }
 
@@ -79,11 +80,11 @@ export async function createTestDatabase(): Promise<{ url: string; drop: () => P
   };
 }
 
-export async function createTestApp(databaseUrl: string, keyResolver: JWTVerifyGetKey) {
+export async function createTestApp(databaseUrl: string, keyResolver: JWTVerifyGetKey, extra: Pick<AppDeps, 'probeDeps'> = {}) {
   const pool = createPool(databaseUrl);
   const logs: string[] = [];
   const moduleRef = await Test.createTestingModule({
-    imports: [AppModule.forRoot({ config: testConfig(databaseUrl), pool, keyResolver, logWriter: (l) => logs.push(l) })],
+    imports: [AppModule.forRoot({ config: testConfig(databaseUrl), pool, keyResolver, logWriter: (l) => logs.push(l), ...extra })],
   }).compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false, bodyParser: false });
   configureApp(app);

@@ -46,7 +46,10 @@ function text(field: string, v: unknown, max: number): string {
   return s;
 }
 
-/** Stream endpoints must be plain public HTTPS URLs; nothing here is ever fetched by the API itself. */
+/**
+ * Stream endpoints must be plain public HTTPS URLs. The API only ever touches them through the
+ * bounded health check in stream-probe.ts, which re-checks every resolved address and redirect.
+ */
 export function parseStreamUrl(v: unknown): string {
   if (typeof v !== 'string' || v.length > 2048) throw invalid('streamUrl', 'must_be_url');
   let url: URL;

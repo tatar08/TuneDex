@@ -8,6 +8,10 @@ import {
   FILTER_LABELS,
   formatDate,
   formatDateTime,
+  HEALTH_LABELS,
+  healthLine,
+  healthOf,
+  isLive,
   initials,
   rightsLine,
   rightsSoon,
@@ -46,6 +50,18 @@ function Filters({ filter, counts, className }: { filter: StatusFilter; counts: 
 
 function Empty({ filter }: { filter: StatusFilter }) {
   return <p className="adm-empty">{filter === 'all' ? 'ยังไม่มีสถานี' : `ไม่มีสถานีที่${FILTER_LABELS[filter]}`}</p>;
+}
+
+/** Stream health for live stations; drafts and disabled stations show a dash. */
+function Health({ s, className = 'hl-line' }: { s: AdminStation; className?: string }) {
+  if (!isLive(s)) return <span className={`${className} dim`}>—</span>;
+  const h = healthOf(s);
+  return (
+    <span className={`${className} ${h.state}`} title={healthLine(h)}>
+      <i className={`hl-dot ${h.state}`} aria-hidden="true" />
+      {HEALTH_LABELS[h.state]}
+    </span>
+  );
 }
 
 function NewButton({ className }: { className: string }) {
@@ -120,6 +136,12 @@ export function WorkbenchSplit({
                 <span className="r">r{s.revision}</span>
                 <small>
                   {STATUS_LABELS[s.status]} · {subtitle(s)} · <span className={rightsSoon(s) ? 'wr' : undefined}>{rightsLine(s)}</span>
+                  {isLive(s) && (
+                    <>
+                      {' · '}
+                      <Health s={s} />
+                    </>
+                  )}
                 </small>
               </li>
             ))}
@@ -164,6 +186,7 @@ export function StationsView({ stations, filter, query: initialQuery = '' }: { s
                   <th scope="col">ภาษา / แนว</th>
                   <th scope="col">สถานะ</th>
                   <th scope="col">สิทธิ์</th>
+                  <th scope="col">สตรีม</th>
                   <th scope="col">Rev</th>
                   <th scope="col">แก้ไขล่าสุด</th>
                   <th scope="col">
@@ -185,6 +208,7 @@ export function StationsView({ stations, filter, query: initialQuery = '' }: { s
                       <span className={`tag ${s.status}`}>{STATUS_LABELS[s.status]}</span>
                     </td>
                     <td className={rightsSoon(s) ? 'wr' : undefined}>{rightsLine(s)}</td>
+                    <td>{isLive(s) ? <span className={`tag hl-${healthOf(s).state}`} title={healthLine(healthOf(s))}>{HEALTH_LABELS[healthOf(s).state]}</span> : <span className="dim">—</span>}</td>
                     <td className="mo">r{s.revision}</td>
                     <td className="mo">{formatDateTime(s.updatedAt)}</td>
                     <td>
@@ -229,6 +253,9 @@ export function StationsView({ stations, filter, query: initialQuery = '' }: { s
                   {STATUS_LABELS[s.status]}
                 </span>
                 <small className={rightsSoon(s) ? 'wr' : undefined}>{rightsLine(s)}</small>
+                <span className="sig">
+                  SIG <Health s={s} className="hl-sig" />
+                </span>
               </Link>
             ))}
           </div>
@@ -267,6 +294,7 @@ export function StationsView({ stations, filter, query: initialQuery = '' }: { s
                   <span className={`pill ${s.status}`}>{STATUS_LABELS[s.status]}</span>
                   <span className={rightsSoon(s) ? 'wr' : undefined}>{rightsLine(s)}</span>
                 </span>
+                {isLive(s) && <Health s={s} className="hl-chip" />}
               </Link>
             ))}
           </div>

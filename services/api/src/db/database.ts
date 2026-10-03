@@ -71,11 +71,15 @@ export class Database {
 }
 
 export function createPool(databaseUrl: string): Pool {
-  return new Pool({
+  const pool = new Pool({
     connectionString: databaseUrl,
     max: 10,
     connectionTimeoutMillis: 2000,
     idleTimeoutMillis: 30000,
     statement_timeout: 5000,
   });
+  // An idle connection dropped by the server (restart, failover) is discarded by the pool and the
+  // next query reconnects. Without a listener node-postgres would crash the whole process instead.
+  pool.on('error', () => undefined);
+  return pool;
 }

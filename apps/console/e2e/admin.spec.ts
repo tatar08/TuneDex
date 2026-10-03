@@ -264,3 +264,56 @@ test('the audit page has its own layout in each theme', async ({ browser }) => {
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/audit-${theme}.png`, fullPage: true });
   }
 });
+
+/** Scheduled check results, as the API's checker would write them (it is off in tests). */
+async function seedHealth() {
+  const rows = (name: string, n: number, status: 'ok' | 'fail', reason: string, http: number | null, latency: number | null) =>
+    `INSERT INTO station_health (station_id, check_region, checked_at, status, reason, http_status, latency_ms)
+     SELECT id, 'asia-southeast', now() - make_interval(mins => g * 15), '${status}', '${reason}', ${http ?? 'NULL'}, ${latency ?? 'NULL'}
+       FROM radio_stations, generate_series(0, ${n - 1}) g WHERE draft->>'name' = '${name}';`;
+  // Health counts only checks since the last publish, so place the publishes before the seeded checks.
+  await stack.api.sql(
+    `UPDATE radio_stations SET published_at = now() - interval '1 day' WHERE published_at IS NOT NULL;` +
+    rows('News Hour TH', 2, 'ok', 'ok', 200, 184) +
+      rows('Andaman Chill', 3, 'fail', 'timeout', null, 10000) +
+      rows('Lukthung Online', 1, 'fail', 'http_status', 503, 92),
+  );
+}
+
+test('stream health shows in every theme, and staff can check a stream now', async ({ browser }) => {
+  await seedHealth();
+  const page = await signInAs(browser, 'e2e-editor');
+  const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
+  const markers: Record<string, string> = {
+    minimal: '.t-minimal .fv-rows .hl-line.suspect',
+    'control-room': '.t-control-room table .tag.hl-suspect',
+    'broadcast-rack': '.t-broadcast-rack .pre .hl-sig.suspect',
+    'daylight-bento': '.t-daylight-bento .st .hl-chip.suspect',
+    workbench: '.t-workbench .list .hl-line.suspect',
+  };
+  for (const [theme, selector] of Object.entries(markers)) {
+    await picker.selectOption(theme);
+    await expect(page.locator(selector).first()).toBeVisible();
+    await expect(page.locator(selector).first()).toContainText('น่าสงสัย');
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/health-list-${theme}.png`, fullPage: true });
+  }
+  await picker.selectOption('minimal');
+  await expect(page.getByRole('region', { name: 'สตรีมที่ต้องดู' })).toContainText('Andaman Chill');
+
+  // The station page explains a suspect stream and does not disable it.
+  await page.getByRole('link', { name: 'Andaman Chill' }).first().click();
+  const panel = page.getByRole('region', { name: 'สุขภาพสตรีม' });
+  await expect(panel.locator('.hl-pill')).toHaveText('น่าสงสัย');
+  await expect(panel).toContainText('ไม่ผ่าน 3 ครั้งติด');
+  await expect(panel).toContainText('ระบบไม่ปิดสถานีเอง');
+  await expect(page.getByText('เผยแพร่แล้ว').first()).toBeVisible();
+  await panel.getByText('ประวัติการตรวจ 3 ครั้งล่าสุด').click();
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/health-station-minimal.png`, fullPage: true });
+
+  // Check now: the real probe runs against the published URL, so the outcome depends on the network.
+  await panel.getByRole('button', { name: 'ตรวจตอนนี้' }).click();
+  await expect(panel.getByRole('status')).toHaveText(/เล่นได้|ตรวจไม่ผ่าน/, { timeout: 15_000 });
+  await expect(panel).toContainText('ประวัติการตรวจ 4 ครั้งล่าสุด');
+  await panel.getByRole('button', { name: 'ตรวจตอนนี้' }).click();
+  await expect(panel.getByRole('status')).toHaveText('เพิ่งตรวจไปไม่ถึงนาที รอสักครู่แล้วลองใหม่');
+});
