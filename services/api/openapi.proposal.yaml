@@ -1,0 +1,107 @@
+# COL-01 contract PROPOSAL for COL-00 review (Codex owns the shared copy in packages/api_contracts).
+# Nothing here is locked until both sides agree; the API in this folder implements exactly this.
+openapi: 3.1.0
+info:
+  title: TuneDeck API
+  version: 0.1.0-proposal
+servers:
+  - url: /
+paths:
+  /health/live:
+    get:
+      summary: Process is running
+      security: []
+      responses:
+        '200': { description: Live, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
+  /health/ready:
+    get:
+      summary: Process can serve traffic (database reachable)
+      security: []
+      responses:
+        '200': { description: Ready, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
+        '503': { description: Not ready, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
+  /v1/me/settings:
+    get:
+      summary: Read the signed-in account's settings
+      responses:
+        '200':
+          description: Current settings. A new account gets defaults at revision 0.
+          headers:
+            ETag: { schema: { type: string, example: '"3"' }, description: Quoted revision }
+          content: { application/json: { schema: { $ref: '#/components/schemas/SettingsView' } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+    patch:
+      summary: Change some settings (compare-and-set on revision)
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          description: The revision the client last read, quoted, e.g. "3". Use "0" before the first save.
+          schema: { type: string, pattern: '^"\d{1,15}"$' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SettingsPatch' } } }
+      responses:
+        '200':
+          description: Saved; revision incremented by one
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/SettingsView' } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '412': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+        '428': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+security:
+  - bearer: []
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT, description: OIDC access token (iss/aud/exp/RS256 verified via JWKS) }
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties: { status: { type: string, enum: [ok, unavailable] } }
+    Settings:
+      type: object
+      additionalProperties: false
+      required: [theme, language, cellularPolicy]
+      properties:
+        theme: { type: string, enum: [system, light, dark] }
+        language: { type: string, enum: [th, en] }
+        cellularPolicy: { type: string, enum: [allow, wifi_only] }
+    SettingsPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        theme: { type: string, enum: [system, light, dark] }
+        language: { type: string, enum: [th, en] }
+        cellularPolicy: { type: string, enum: [allow, wifi_only] }
+    SettingsView:
+      type: object
+      required: [revision, schemaVersion, settings, updatedAt]
+      properties:
+        revision: { type: integer, minimum: 0 }
+        schemaVersion: { type: integer, const: 1 }
+        settings: { $ref: '#/components/schemas/Settings' }
+        updatedAt: { type: [string, 'null'], format: date-time }
+    Error:
+      type: object
+      required: [code, messageKey, requestId, details]
+      properties:
+        code:
+          type: string
+          enum: [AUTH_REQUIRED, AUTH_FORBIDDEN, VALIDATION_FAILED, NOT_FOUND, PRECONDITION_REQUIRED, REVISION_MISMATCH, PAYLOAD_TOO_LARGE, DEPENDENCY_UNAVAILABLE, INTERNAL]
+        messageKey: { type: string, example: errors.settings.revisionMismatch }
+        requestId: { type: string }
+        details:
+          type: object
+          description: 'No tokens or PII. VALIDATION_FAILED → {field?, reason, allowed?}; REVISION_MISMATCH → {currentRevision}.'
+  responses:
+    Error:
+      description: Error envelope
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
