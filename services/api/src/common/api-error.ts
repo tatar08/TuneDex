@@ -9,6 +9,9 @@ export type ErrorCode =
   | 'REVISION_MISMATCH'
   | 'PAYLOAD_TOO_LARGE'
   | 'DEPENDENCY_UNAVAILABLE'
+  | 'REAUTH_REQUIRED'
+  | 'DEVICE_REVOKED'
+  | 'DEVICE_LIMIT'
   | 'INTERNAL';
 
 export const MESSAGE_KEYS: Record<ErrorCode, string> = {
@@ -20,6 +23,9 @@ export const MESSAGE_KEYS: Record<ErrorCode, string> = {
   REVISION_MISMATCH: 'errors.settings.revisionMismatch',
   PAYLOAD_TOO_LARGE: 'errors.request.tooLarge',
   DEPENDENCY_UNAVAILABLE: 'errors.service.unavailable',
+  REAUTH_REQUIRED: 'errors.auth.reauthRequired',
+  DEVICE_REVOKED: 'errors.devices.revoked',
+  DEVICE_LIMIT: 'errors.devices.limit',
   INTERNAL: 'errors.service.internal',
 };
 

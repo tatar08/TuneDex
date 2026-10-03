@@ -44,5 +44,10 @@ input[type="radio"] { width: 18px; height: 18px; accent-color: var(--accent); ma
 .device h2 { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--warn); }
+.chip.ok::before { background: var(--ok); box-shadow: none; }
+.devices { list-style: none; margin: 0; padding: 0; }
+.devices li { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.devices li .status { grid-column: 1 / -1; }
+.device-name { font-weight: 500; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (max-width: 560px) { fieldset { grid-template-columns: 1fr; } }

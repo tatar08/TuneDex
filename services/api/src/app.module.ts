@@ -8,6 +8,8 @@ import { LOG_WRITER, LogWriter, StructuredLogger, stdoutWriter } from './common/
 import { requestContext } from './common/request-context';
 import { APP_CONFIG, AppConfig } from './config';
 import { Database, PG_POOL } from './db/database';
+import { DevicesController } from './devices/devices.controller';
+import { DevicesService } from './devices/devices.service';
 import { HealthController } from './health/health.controller';
 import { SettingsController } from './settings/settings.controller';
 import { SettingsService } from './settings/settings.service';
@@ -25,7 +27,7 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController],
+      controllers: [HealthController, SettingsController, DevicesController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },
@@ -35,6 +37,7 @@ export class AppModule {
         Database,
         UsersService,
         SettingsService,
+        DevicesService,
         AuthGuard,
       ],
     };

@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SettingsForm } from '@/app/app/settings/SettingsForm';
-import type { SettingsView } from '@/lib/bff';
+import type { DeviceView, SettingsView } from '@/lib/bff';
 
 // jsdom lacks CSS.escape, which user-event uses to walk radio groups with arrow keys.
 if (!globalThis.CSS?.escape) {
@@ -26,13 +26,13 @@ afterEach(() => {
 });
 
 describe('SettingsForm', () => {
-  it('groups each setting as a labelled radio group and shows the pending device state', () => {
-    render(<SettingsForm initial={view(0)} csrfToken="csrf-1" />);
+  it('groups each setting as a labelled radio group and explains that no device has signed in yet', () => {
+    render(<SettingsForm initial={view(0)} devices={[]} csrfToken="csrf-1" />);
     expect(screen.getByRole('group', { name: 'ธีมของแอป' })).toBeTruthy();
     expect(screen.getByRole('group', { name: 'ภาษา' })).toBeTruthy();
     expect(screen.getByRole('group', { name: 'ฟังวิทยุผ่านเน็ตมือถือ' })).toBeTruthy();
     expect((screen.getByRole('radio', { name: 'ตามระบบ' }) as HTMLInputElement).checked).toBe(true);
-    expect(screen.getByText('รอซิงก์')).toBeTruthy();
+    expect(screen.getByText(/ยังไม่มีอุปกรณ์ที่ลงชื่อเข้าใช้/)).toBeTruthy();
     expect(screen.getByText(/ยังไม่เคยบันทึก/)).toBeTruthy();
     expect((screen.getByRole('button', { name: 'บันทึก' }) as HTMLButtonElement).disabled).toBe(true);
   });
@@ -41,7 +41,7 @@ describe('SettingsForm', () => {
     const fetchMock = vi.fn((_url: string, _init?: RequestInit) => reply(200, view(1, { theme: 'dark' })));
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
-    render(<SettingsForm initial={view(0)} csrfToken="csrf-1" />);
+    render(<SettingsForm initial={view(0)} devices={[]} csrfToken="csrf-1" />);
 
     await user.tab(); // sign-out button
     await user.tab(); // theme radio group
@@ -70,7 +70,7 @@ describe('SettingsForm', () => {
       .mockImplementationOnce(() => reply(200, view(5, { theme: 'dark' })));
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
-    render(<SettingsForm initial={view(3)} csrfToken="csrf-1" />);
+    render(<SettingsForm initial={view(3)} devices={[]} csrfToken="csrf-1" />);
     await user.click(screen.getByRole('radio', { name: 'มืด' }));
     await user.click(screen.getByRole('button', { name: 'บันทึก' }));
 
@@ -95,7 +95,7 @@ describe('SettingsForm', () => {
         .mockImplementationOnce(() => reply(200, view(2, { cellularPolicy: 'wifi_only' }))),
     );
     const user = userEvent.setup();
-    render(<SettingsForm initial={view(1)} csrfToken="c" />);
+    render(<SettingsForm initial={view(1)} devices={[]} csrfToken="c" />);
     await user.click(screen.getByRole('radio', { name: 'มืด' }));
     await user.click(screen.getByRole('button', { name: 'บันทึก' }));
     await user.click(await screen.findByRole('button', { name: 'ใช้ค่าล่าสุดจากเซิร์ฟเวอร์' }));
@@ -107,7 +107,7 @@ describe('SettingsForm', () => {
   it('tells the user to sign in again when the session has ended', async () => {
     vi.stubGlobal('fetch', vi.fn(() => reply(401, { code: 'SESSION_EXPIRED' })));
     const user = userEvent.setup();
-    render(<SettingsForm initial={view(1)} csrfToken="c" />);
+    render(<SettingsForm initial={view(1)} devices={[]} csrfToken="c" />);
     await user.click(screen.getByRole('radio', { name: 'เฉพาะ Wi-Fi' }));
     await user.click(screen.getByRole('button', { name: 'บันทึก' }));
     const alert = await screen.findByRole('alert');
@@ -118,7 +118,7 @@ describe('SettingsForm', () => {
   it('shows invalid and unavailable errors without claiming a save', async () => {
     vi.stubGlobal('fetch', vi.fn(() => reply(503, { code: 'UPSTREAM_UNAVAILABLE' })));
     const user = userEvent.setup();
-    render(<SettingsForm initial={view(1)} csrfToken="c" />);
+    render(<SettingsForm initial={view(1)} devices={[]} csrfToken="c" />);
     await user.click(screen.getByRole('radio', { name: 'มืด' }));
     await user.click(screen.getByRole('button', { name: 'บันทึก' }));
     expect((await screen.findByRole('alert')).textContent).toContain('ยังไม่ได้บันทึก');
@@ -128,10 +128,62 @@ describe('SettingsForm', () => {
   it('switches its labels to English after saving language = en', async () => {
     vi.stubGlobal('fetch', vi.fn(() => reply(200, view(2, { language: 'en' }))));
     const user = userEvent.setup();
-    render(<SettingsForm initial={view(1)} csrfToken="c" />);
+    render(<SettingsForm initial={view(1)} devices={[]} csrfToken="c" />);
     await user.click(screen.getByRole('radio', { name: 'English' }));
     await user.click(screen.getByRole('button', { name: 'บันทึก' }));
     await screen.findByRole('heading', { name: 'Settings' });
     expect(document.documentElement.lang).toBe('en');
+  });
+
+  describe('device status', () => {
+    const device = (id: string, applied: number, extra: Partial<DeviceView> = {}): DeviceView => ({
+      id,
+      platform: 'ios',
+      osMajor: 18,
+      appBuild: '1.0.0+42',
+      appliedSettingsRevision: applied,
+      lastSeenAt: '2026-10-03T17:30:00.000Z',
+      revokedAt: null,
+      ...extra,
+    });
+
+    it('marks each signed-in device as up to date or waiting, in Thailand time, and hides revoked ones', () => {
+      render(
+        <SettingsForm
+          initial={view(3)}
+          devices={[
+            device('a', 3),
+            device('b', 2, { platform: 'android', osMajor: 15 }),
+            device('c', 3, { revokedAt: '2026-10-03T10:00:00.000Z', platform: 'android', osMajor: 9 }),
+          ]}
+          csrfToken="c"
+        />,
+      );
+      const rows = screen.getAllByTestId('device');
+      expect(rows).toHaveLength(2);
+      expect(rows[0].textContent).toContain('iPhone · iOS 18');
+      expect(rows[0].textContent).toContain('ใช้ค่าล่าสุดแล้ว');
+      // 17:30 UTC is 00:30 the next day in Bangkok.
+      expect(rows[0].textContent).toMatch(/00:30/);
+      expect(rows[1].textContent).toContain('Android 15');
+      expect(rows[1].textContent).toContain('รอซิงก์');
+      expect(screen.queryByText(/Android 9/)).toBeNull();
+    });
+
+    it('turns an up-to-date device back to waiting once a new revision is saved', async () => {
+      vi.stubGlobal('fetch', vi.fn(() => reply(200, view(4, { theme: 'dark' }))));
+      const user = userEvent.setup();
+      render(<SettingsForm initial={view(3)} devices={[device('a', 3)]} csrfToken="c" />);
+      expect(screen.getByTestId('device').textContent).toContain('ใช้ค่าล่าสุดแล้ว');
+      await user.click(screen.getByRole('radio', { name: 'มืด' }));
+      await user.click(screen.getByRole('button', { name: 'บันทึก' }));
+      await waitFor(() => expect(screen.getByTestId('device').textContent).toContain('รอซิงก์'));
+    });
+
+    it('still lets settings be saved when device status could not load', () => {
+      render(<SettingsForm initial={view(1)} devices={null} csrfToken="c" />);
+      expect(screen.getByText(/โหลดสถานะอุปกรณ์ไม่ได้/)).toBeTruthy();
+      expect(screen.getByRole('group', { name: 'ธีมของแอป' })).toBeTruthy();
+    });
   });
 });

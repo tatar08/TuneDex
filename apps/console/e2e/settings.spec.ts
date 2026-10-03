@@ -104,7 +104,24 @@ test('sign in, save by keyboard, resolve a conflict, sign out', async ({ browser
   await page.reload();
   await expect(page.getByRole('radio', { name: 'สว่าง' })).toBeChecked();
   await expect(page.getByRole('radio', { name: 'เฉพาะ Wi-Fi' })).toBeChecked();
-  await expect(page.getByText('รอซิงก์')).toBeVisible();
+  await expect(page.getByText(/ยังไม่มีอุปกรณ์ที่ลงชื่อเข้าใช้/)).toBeVisible();
+
+  // The phone app checks in: first still on revision 2, then after applying revision 3.
+  const phone = await idp.accessTokenFor('e2e-alice');
+  const checkIn = (applied: number) =>
+    fetch(`${api.url}/v1/me/devices/7c2e9d10-3b4a-4f5e-8a6b-9c0d1e2f3a4b`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${phone}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'ios', osMajor: 18, appBuild: '1.0.0+42', appliedSettingsRevision: applied }),
+    });
+  expect((await checkIn(2)).status).toBe(200);
+  await page.reload();
+  const device = page.getByTestId('device');
+  await expect(device).toContainText('iPhone · iOS 18');
+  await expect(device).toContainText('รอซิงก์');
+  expect((await checkIn(3)).status).toBe(200);
+  await page.reload();
+  await expect(device).toContainText('ใช้ค่าล่าสุดแล้ว');
 
   await page.getByRole('button', { name: 'ออกจากระบบ' }).click();
   await expect(page).toHaveURL(`${base}/login?signedOut=1`);

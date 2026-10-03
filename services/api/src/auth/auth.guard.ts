@@ -40,6 +40,7 @@ export class AuthGuard implements CanActivate {
     if (!match) throw new ApiError(HttpStatus.UNAUTHORIZED, 'AUTH_REQUIRED');
 
     let subject: string;
+    let authTime: number | undefined;
     try {
       const { payload } = await jwtVerify(match[1], this.keys, {
         issuer: this.config.oidc.issuer,
@@ -49,6 +50,7 @@ export class AuthGuard implements CanActivate {
         clockTolerance: 5,
       });
       subject = payload.sub as string;
+      authTime = typeof payload.auth_time === 'number' ? payload.auth_time : undefined;
     } catch (err) {
       if (TOKEN_ERRORS.some((E) => err instanceof E)) {
         throw new ApiError(HttpStatus.UNAUTHORIZED, 'AUTH_REQUIRED');
@@ -59,7 +61,7 @@ export class AuthGuard implements CanActivate {
 
     const user = await this.users.findOrCreateBySubject(subject);
     if (user.status !== 'active') throw new ApiError(HttpStatus.FORBIDDEN, 'AUTH_FORBIDDEN');
-    req.actor = { userId: user.id };
+    req.actor = { userId: user.id, authTime };
     return true;
   }
 }

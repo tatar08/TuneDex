@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { Pool, QueryResultRow } from 'pg';
+import { Pool, PoolClient, QueryResultRow } from 'pg';
 import { DependencyUnavailableError } from '../common/api-error';
 
 export const PG_POOL = Symbol('PG_POOL');
@@ -26,6 +26,36 @@ export class Database {
     } catch (err) {
       if (isAvailabilityError(err)) throw new DependencyUnavailableError('postgres');
       throw err;
+    }
+  }
+
+  /** Runs `work` in one transaction on one connection; rolls back if it throws. */
+  async transaction<R>(work: (query: Database['query']) => Promise<R>): Promise<R> {
+    let client: PoolClient;
+    try {
+      client = await this.pool.connect();
+    } catch (err) {
+      if (isAvailabilityError(err)) throw new DependencyUnavailableError('postgres');
+      throw err;
+    }
+    const query = async <T extends QueryResultRow>(sql: string, params: unknown[] = []): Promise<T[]> => {
+      try {
+        return (await client.query<T>(sql, params)).rows;
+      } catch (err) {
+        if (isAvailabilityError(err)) throw new DependencyUnavailableError('postgres');
+        throw err;
+      }
+    };
+    try {
+      await query('BEGIN');
+      const result = await work(query);
+      await query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
     }
   }
 
