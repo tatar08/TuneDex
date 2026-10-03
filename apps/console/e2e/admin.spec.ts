@@ -192,12 +192,27 @@ test('operators search redacted API logs; editors cannot', async ({ browser }) =
   await expect(editor.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูบันทึกระบบ');
 });
 
-test('admins see logs in every theme', async ({ browser }) => {
+test('the log page has its own layout in each theme', async ({ browser }) => {
   const page = await signInAs(browser, 'e2e-admin', '/admin/logs');
   const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
-  for (const theme of ['control-room', 'broadcast-rack', 'daylight-bento', 'workbench', 'minimal']) {
+  const layouts: Record<string, string> = {
+    'control-room': '.t-control-room .cr-page .cr-filter + .lg-pn table',
+    'broadcast-rack': '.t-broadcast-rack .br-tape li',
+    'daylight-bento': '.t-daylight-bento .db-stats + .db-filter',
+    workbench: '.t-workbench .split .lg-it',
+    minimal: '.t-minimal .fv-logstats + .fv-card .fv-logform',
+  };
+  for (const [theme, selector] of Object.entries(layouts)) {
     await picker.selectOption(theme);
-    await expect(page.locator(`.t-${theme} .logs .lg-filters`)).toBeVisible();
+    await expect(page.locator(selector).first()).toBeVisible();
+    if (theme === 'workbench') {
+      // j moves to the next line and the detail pane follows.
+      const second = await page.locator('.lg-it').nth(1).locator('small').innerText();
+      await page.locator('body').click({ position: { x: 900, y: 600 } });
+      await page.keyboard.press('j');
+      await expect(page.locator('.lg-it.sel small')).toHaveText(second);
+      await expect(page.locator('.lg-fields')).toBeVisible();
+    }
     await expect(page.getByRole('link', { name: 'บันทึกระบบ' }).first()).toBeVisible();
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/logs-${theme}.png`, fullPage: true });
   }
