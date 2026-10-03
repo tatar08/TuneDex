@@ -1,3 +1,4 @@
+import { safeReturnTo } from '@/lib/cookies';
 import { strings } from '@/lib/i18n';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +9,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const params = await searchParams;
   const t = strings('th');
   const key = params.expired ? 'expired' : params.signedOut ? 'signedOut' : params.error === 'unavailable' ? 'unavailable' : params.error ? 'signin' : null;
-  const returnTo = params.returnTo?.startsWith('/app/') ? `?returnTo=${encodeURIComponent(params.returnTo)}` : '';
+  const returnTo = params.returnTo && safeReturnTo(params.returnTo) === params.returnTo ? `?returnTo=${encodeURIComponent(params.returnTo)}` : '';
   return (
     <main className="shell">
       <div className="nav"><span className="brand">{t.appName}</span></div>

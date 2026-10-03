@@ -1,6 +1,7 @@
-import { CanActivate, ExecutionContext, HttpStatus, Injectable, SetMetadata } from '@nestjs/common';
+import { CanActivate, Controller, ExecutionContext, Get, HttpStatus, Injectable, Req, Res, SetMetadata, UseGuards } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
+import { AuthGuard } from '../auth/auth.guard';
 import { ApiError } from '../common/api-error';
 import { Database } from '../db/database';
 
@@ -43,5 +44,18 @@ export class StaffGuard implements CanActivate {
     if (!roles.some((r) => required.includes(r))) throw new ApiError(HttpStatus.FORBIDDEN, 'ROLE_REQUIRED');
     req.actor.roles = roles;
     return true;
+  }
+}
+
+/** Lets the console decide which staff pages to show. Real enforcement stays on each staff route. */
+@Controller('v1/me/staff')
+@UseGuards(AuthGuard)
+export class StaffController {
+  constructor(private readonly staff: StaffService) {}
+
+  @Get()
+  async roles(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<{ roles: StaffRole[] }> {
+    res.setHeader('Cache-Control', 'no-store');
+    return { roles: await this.staff.rolesOf(req.actor!.userId) };
   }
 }

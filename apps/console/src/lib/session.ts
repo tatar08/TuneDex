@@ -6,6 +6,13 @@ export interface Session {
   tokens: TokenSet;
   createdAt: number;
   lastSeenAt: number;
+  /** Set once the account is known to hold a staff role; staff sessions get the shorter staff lifetime. */
+  staff?: boolean;
+}
+
+export interface SessionLimits {
+  idleMs: number;
+  absoluteMs: number;
 }
 
 /**
@@ -34,6 +41,8 @@ export class MemorySessionStore implements SessionStore {
     private readonly idleMs: number,
     private readonly absoluteMs: number,
     private readonly now: () => number = Date.now,
+    /** Doc 17: staff sessions idle 30 minutes, absolute 12 hours. */
+    private readonly staffLimits: SessionLimits = { idleMs: 30 * 60_000, absoluteMs: 12 * 3600_000 },
   ) {}
 
   async create(tokens: TokenSet) {
@@ -49,7 +58,9 @@ export class MemorySessionStore implements SessionStore {
     const s = this.sessions.get(key);
     if (!s) return null;
     const t = this.now();
-    if (t - s.lastSeenAt > this.idleMs || t - s.createdAt > this.absoluteMs) {
+    const idle = s.staff ? this.staffLimits.idleMs : this.idleMs;
+    const absolute = s.staff ? this.staffLimits.absoluteMs : this.absoluteMs;
+    if (t - s.lastSeenAt > idle || t - s.createdAt > absolute) {
       this.sessions.delete(key);
       return null;
     }

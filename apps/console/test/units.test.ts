@@ -33,9 +33,11 @@ describe('login transaction cookie', () => {
     expect(openTransaction(sealed, 'x'.repeat(32))).toBeNull();
     expect(openTransaction(sealed, 'k'.repeat(32), tx.exp + 1)).toBeNull();
   });
-  it('limits return paths to /app/', () => {
+  it('limits return paths to /app/ and /admin', () => {
     expect(safeReturnTo('/app/devices')).toBe('/app/devices');
-    for (const bad of ['https://x', '//x/app/', '/admin', '/app/\\x', null]) expect(safeReturnTo(bad)).toBe('/app/settings');
+    expect(safeReturnTo('/admin/stations')).toBe('/admin/stations');
+    expect(safeReturnTo('/admin')).toBe('/admin');
+    for (const bad of ['https://x', '//x/app/', '/administrator', '/adminx/y', '/app/\\x', null]) expect(safeReturnTo(bad)).toBe('/app/settings');
   });
 });
 

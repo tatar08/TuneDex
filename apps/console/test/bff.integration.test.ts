@@ -4,12 +4,12 @@ import { ConsoleConfig } from '@/lib/config';
 import { readCookie } from '@/lib/cookies';
 import { OidcClient } from '@/lib/oidc';
 import { MemorySessionStore } from '@/lib/session';
-import { startApi } from './api-process';
+import { ApiProcess, startApi } from './api-process';
 import { CLIENT_ID, CLIENT_SECRET, MockIdp, startMockIdp } from './mock-idp';
 
 const BASE = 'http://localhost:3200';
 let idp: MockIdp;
-let api: { url: string; stop: () => Promise<void> };
+let api: ApiProcess;
 let clock = Date.now();
 let logs: string[];
 let bff: Bff;
@@ -105,7 +105,7 @@ describe('login', () => {
     for (const token of idp.issued) expect(token).not.toContain(id);
   });
 
-  it.each(['https://evil.example/app', '//evil.example/app/x', '/admin', '/app/\\evil'])(
+  it.each(['https://evil.example/app', '//evil.example/app/x', '/administrator', '/app/\\evil'])(
     'never redirects after login to %s',
     async (returnTo) => {
       idp.setUser('alice-redirect');
@@ -218,6 +218,65 @@ describe('devices through the BFF and the real API', () => {
 
   it('returns 401 SESSION_EXPIRED without a session', async () => {
     expect((await devices('')).status).toBe(401);
+  });
+});
+
+describe('staff routes through the BFF', () => {
+  const station = {
+    name: 'BFF FM', country: 'TH', language: 'th', genres: [], streamUrl: 'https://stream.example.com/bff.mp3', codec: 'mp3',
+    rightsBasis: 'owner_permission', rightsReference: 'REF-1',
+  };
+  const post = (cookie: string, path: string, body: unknown, o: { csrf?: string; origin?: string; ifMatch?: string } = {}) => {
+    const req = new Request(`${BASE}${path}`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json', origin: o.origin ?? BASE, ...(o.csrf ? { 'x-csrf-token': o.csrf } : {}), ...(o.ifMatch ? { 'if-match': o.ifMatch } : {}) },
+      body: JSON.stringify(body),
+    });
+    const [, , , , id, action] = path.split('/');
+    return id ? bff.stationAction(req, id, action) : bff.stations(req);
+  };
+
+  beforeAll(() => {
+    api.staff('grant', 'bff-editor', 'catalog_editor', '--by', 'test', '--reason', 'test');
+    api.staff('grant', 'bff-admin', 'admin', '--by', 'test', '--reason', 'test');
+  });
+
+  it('lets an editor create and an admin publish, with CSRF required on every change', async () => {
+    const editor = await signIn('bff-editor');
+    expect((await post(editor, '/bff/admin/stations', station)).status).toBe(403);
+    expect((await post(editor, '/bff/admin/stations', station, { csrf: await csrfFor(editor), origin: 'https://evil.example' })).status).toBe(403);
+    const created = await post(editor, '/bff/admin/stations', station, { csrf: await csrfFor(editor) });
+    expect(created.status).toBe(201);
+    const { id } = await created.json();
+
+    const admin = await signIn('bff-admin');
+    const listed = await bff.stations(new Request(`${BASE}/bff/admin/stations`, { headers: { cookie: admin } }));
+    expect((await listed.json()).stations.map((s: { id: string }) => s.id)).toContain(id);
+    const published = await post(admin, `/bff/admin/stations/${id}/publish`, { reason: 'ok' }, { csrf: await csrfFor(admin), ifMatch: '"1"' });
+    expect(published.status).toBe(200);
+    expect((await published.json()).status).toBe('published');
+  });
+
+  it('passes the API refusal through for accounts without a staff role', async () => {
+    const customer = await signIn('bff-customer');
+    expect((await bff.stations(new Request(`${BASE}/bff/admin/stations`, { headers: { cookie: customer } }))).status).toBe(403);
+  });
+
+  it('never builds an API path from an unchecked id or action', async () => {
+    const admin = await signIn('bff-admin');
+    const csrf = await csrfFor(admin);
+    expect((await bff.station(new Request(`${BASE}/bff/admin/stations/x`, { headers: { cookie: admin } }), '../../me/settings')).status).toBe(404);
+    expect((await post(admin, '/bff/admin/stations/0b9a4f8e-6c1d-4e2a-9f3b-1a2b3c4d5e6f/delete', {}, { csrf })).status).toBe(404);
+  });
+
+  it('gives staff accounts the 30-minute idle limit from sign-in', async () => {
+    const admin = await signIn('bff-admin');
+    expect((await bff.sessionFromCookie(admin))!.session.staff).toBe(true);
+    const customer = await signIn('bff-customer-2');
+    expect((await bff.sessionFromCookie(customer))!.session.staff).toBeFalsy();
+    clock += 31 * 60_000;
+    expect(await bff.sessionFromCookie(admin)).toBeNull();
+    expect(await bff.sessionFromCookie(customer)).not.toBeNull();
   });
 });
 

@@ -13,6 +13,7 @@ NestJS + PostgreSQL backend. This folder started as COL-01 from [Doc 19](../../D
 | `GET /v1/me/devices` | The account's devices plus the current `settingsRevision`, active first, most recently seen first |
 | `PUT /v1/me/devices/{deviceId}` | The phone app's check-in: registers the device on first call, then records platform, OS major, app build and the settings revision it has applied |
 | `DELETE /v1/me/devices/{deviceId}/session` | Revokes a device. Needs a sign-in within the last 5 minutes (`auth_time`), else 401 `REAUTH_REQUIRED` |
+| `GET /v1/me/staff` | The caller's current staff roles (empty for customers), so the console knows which pages to show |
 | `GET /v1/catalog/radio?cursor=&limit=` | Public, no sign-in. Published, enabled stations with current rights; opaque cursor, `limit` ≤100, weak ETag and `If-None-Match` → 304, `Cache-Control: public, max-age=300` |
 | `GET /v1/admin/stations`, `GET /v1/admin/stations/{id}` | `catalog_editor` or `admin`. Draft, published snapshot, status and the reasons the caller could not publish right now |
 | `POST /v1/admin/stations`, `PATCH /v1/admin/stations/{id}` | `catalog_editor` or `admin`. Edits the draft only; PATCH needs `If-Match` |

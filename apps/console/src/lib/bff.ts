@@ -53,6 +53,38 @@ export interface DevicesView {
   devices: DeviceView[];
 }
 
+export type StaffRole = 'support' | 'catalog_editor' | 'operator' | 'admin' | 'auditor';
+
+export interface StationDraft {
+  name: string;
+  country: string;
+  language: string;
+  genres: string[];
+  streamUrl: string;
+  codec: 'mp3' | 'aac' | 'hls';
+  bitrateKbps: number | null;
+  rightsBasis: string | null;
+  rightsReference: string | null;
+  rightsExpiresAt: string | null;
+}
+
+export interface AdminStation {
+  id: string;
+  revision: number;
+  status: 'draft' | 'published' | 'changes_pending' | 'disabled';
+  draft: StationDraft;
+  published: StationDraft | null;
+  publishedRevision: number | null;
+  publishedAt: string | null;
+  disabledAt: string | null;
+  updatedAt: string;
+  publishBlockers: string[];
+}
+
+const STATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const STATION_ACTIONS = ['publish', 'disable', 'enable'] as const;
+export type StationAction = (typeof STATION_ACTIONS)[number];
+
 export type SessionContext = { id: string; session: Session };
 
 const LOGIN_TX_SECONDS = 600;
@@ -172,9 +204,91 @@ export function createBff(deps: BffDeps) {
     });
   }
 
+  async function markStaffAtLogin(id: string, session: Session): Promise<void> {
+    const res = await fetchImpl(`${config.apiBaseUrl}/v1/me/staff`, {
+      headers: { authorization: `Bearer ${session.tokens.accessToken}`, accept: 'application/json', 'x-request-id': `web_${randomUUID()}` },
+      signal: AbortSignal.timeout(5_000),
+      redirect: 'error',
+    });
+    if (!res.ok) return;
+    const { roles } = (await res.json()) as { roles: StaffRole[] };
+    if (roles.length > 0) {
+      session.staff = true;
+      await store.update(id, session);
+    }
+  }
+
+  /** Reads the caller's staff roles and marks the session as a staff session when there are any. */
+  async function loadStaff(ctx: SessionContext): Promise<{ roles: StaffRole[] } | { status: number } | null> {
+    const res = await callApi(ctx, '/v1/me/staff', { method: 'GET' }, `web_${randomUUID()}`);
+    if (!res) return null;
+    if (!res.ok) return { status: res.status };
+    const { roles } = (await res.json()) as { roles: StaffRole[] };
+    if (roles.length > 0 && !ctx.session.staff) {
+      ctx.session.staff = true;
+      await store.update(ctx.id, ctx.session);
+    }
+    return { roles };
+  }
+
+  /** Forwards one staff call to the API. The API enforces roles; the BFF adds session, CSRF and size checks. */
+  async function adminProxy(req: Request, requestId: string, apiPath: string, mutation: boolean): Promise<Response> {
+    const ctx = await sessionFromCookie(req.headers.get('cookie'));
+    if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+    const headers: Record<string, string> = {};
+    let body: string | undefined;
+    if (mutation) {
+      if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
+      if (!req.headers.get('content-type')?.startsWith('application/json')) return error(415, 'UNSUPPORTED_MEDIA_TYPE', requestId);
+      body = await req.text();
+      if (Buffer.byteLength(body) > MAX_BODY_BYTES) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
+      headers['content-type'] = 'application/json';
+      const ifMatch = req.headers.get('if-match');
+      if (ifMatch) headers['if-match'] = ifMatch;
+    }
+    const upstream = await callApi(ctx, apiPath, { method: req.method, headers, body }, requestId);
+    if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+    return passthrough(upstream, requestId);
+  }
+
+  const notFound = (requestId: string) =>
+    json(404, { code: 'NOT_FOUND', messageKey: 'errors.request.notFound', requestId, details: {} }, requestId);
+
   return {
     names,
     sessionFromCookie,
+    loadStaff,
+
+    /** Server-side read for staff pages: list (no id) or one station. Null means the user must sign in again. */
+    async loadStations(ctx: SessionContext): Promise<{ status: number; stations?: AdminStation[] } | null> {
+      const res = await callApi(ctx, '/v1/admin/stations', { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, stations: ((await res.json()) as { stations: AdminStation[] }).stations } : { status: res.status };
+    },
+    async loadStation(ctx: SessionContext, id: string): Promise<{ status: number; station?: AdminStation } | null> {
+      if (!STATION_ID.test(id)) return { status: 404 };
+      const res = await callApi(ctx, `/v1/admin/stations/${id}`, { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, station: (await res.json()) as AdminStation } : { status: res.status };
+    },
+
+    /** GET/POST /bff/admin/stations */
+    stations: (req: Request) =>
+      timed(req, '/bff/admin/stations', (requestId) => adminProxy(req, requestId, '/v1/admin/stations', req.method === 'POST')),
+
+    /** GET/PATCH /bff/admin/stations/{id} */
+    station: (req: Request, id: string) =>
+      timed(req, '/bff/admin/stations/:id', async (requestId) =>
+        STATION_ID.test(id) ? adminProxy(req, requestId, `/v1/admin/stations/${id}`, req.method === 'PATCH') : notFound(requestId),
+      ),
+
+    /** POST /bff/admin/stations/{id}/{publish|disable|enable} */
+    stationAction: (req: Request, id: string, action: string) =>
+      timed(req, '/bff/admin/stations/:id/:action', async (requestId) =>
+        STATION_ID.test(id) && (STATION_ACTIONS as readonly string[]).includes(action)
+          ? adminProxy(req, requestId, `/v1/admin/stations/${id}/${action}`, true)
+          : notFound(requestId),
+      ),
 
     /** GET /auth/login — starts authorization code + PKCE; the destination is limited to /app/ paths. */
     login: (req: Request) =>
@@ -209,7 +323,11 @@ export function createBff(deps: BffDeps) {
         // Never reuse a session id that existed before login (session fixation).
         const previous = readCookie(cookieHeader, names.session);
         if (previous) await store.delete(previous);
-        const { id } = await store.create(tokens);
+        const created = await store.create(tokens);
+        const { id } = created;
+        // Staff accounts get the shorter staff session lifetime from the start. This uses the new access token once,
+        // with no refresh and no session cleanup, so a failed lookup never ends a fresh login; /admin checks again.
+        await markStaffAtLogin(id, created.session).catch(() => undefined);
         return redirect(tx.returnTo, 302, [clearTx, serializeCookie(names.session, id, { secure })]);
       }),
 
