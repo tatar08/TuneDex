@@ -1,0 +1,283 @@
+import request from 'supertest';
+import { Database } from '../src/db/database';
+import { runStaffCli } from '../src/staff/staff-cli';
+import { createIdentity, createTestApp, createTestDatabase, TestIdentity } from './harness';
+
+const station = {
+  name: 'Bangkok Jazz FM',
+  country: 'TH',
+  language: 'th',
+  genres: ['jazz'],
+  streamUrl: 'https://stream.example.com/jazz.mp3',
+  codec: 'mp3',
+  bitrateKbps: 128,
+  rightsBasis: 'owner_permission',
+  rightsReference: 'CONTRACT-2026-014',
+  rightsExpiresAt: null,
+};
+
+describe('station catalog', () => {
+  let db: Awaited<ReturnType<typeof createTestDatabase>>;
+  let id: TestIdentity;
+  let t: Awaited<ReturnType<typeof createTestApp>>;
+  let tokens: Record<'editor' | 'admin' | 'admin2' | 'user', string>;
+  const http = () => request(t.app.getHttpServer());
+  const as = (who: keyof typeof tokens) => ({ Authorization: `Bearer ${tokens[who]}` });
+  const out: string[] = [];
+  const staff = (...args: string[]) => runStaffCli(args, new Database(t.pool), (l) => out.push(l));
+
+  const create = (who: keyof typeof tokens, body: object = station) => http().post('/v1/admin/stations').set(as(who)).send(body);
+  const patch = (who: keyof typeof tokens, sid: string, rev: number, body: object) =>
+    http().patch(`/v1/admin/stations/${sid}`).set(as(who)).set('If-Match', `"${rev}"`).send(body);
+  const publish = (who: keyof typeof tokens, sid: string, rev: number, reason = 'reviewed stream and rights') =>
+    http().post(`/v1/admin/stations/${sid}/publish`).set(as(who)).set('If-Match', `"${rev}"`).send({ reason });
+  const catalog = (q = '') => http().get(`/v1/catalog/radio${q}`);
+
+  beforeAll(async () => {
+    db = await createTestDatabase();
+    id = await createIdentity();
+    t = await createTestApp(db.url, id.keyResolver);
+    tokens = {
+      editor: await id.token('staff-editor'),
+      admin: await id.token('staff-admin'),
+      admin2: await id.token('staff-admin-2'),
+      user: await id.token('plain-user'),
+    };
+    expect(await staff('grant', 'staff-editor', 'catalog_editor', '--by', 'tar', '--reason', 'catalog team')).toBe(0);
+    expect(await staff('grant', 'staff-admin', 'admin', '--by', 'tar', '--reason', 'reviewer')).toBe(0);
+    expect(await staff('grant', 'staff-admin-2', 'admin', '--by', 'tar', '--reason', 'reviewer')).toBe(0);
+  });
+  afterAll(async () => {
+    await t.close();
+    await db.drop();
+  });
+
+  describe('roles', () => {
+    it('keeps signed-out callers and ordinary users out of every admin route', async () => {
+      expect((await http().get('/v1/admin/stations')).status).toBe(401);
+      for (const res of [
+        await http().get('/v1/admin/stations').set(as('user')),
+        await create('user'),
+        await http().get('/v1/admin/stations/0b9a4f8e-6c1d-4e2a-9f3b-1a2b3c4d5e6f').set(as('user')),
+      ]) {
+        expect(res.status).toBe(403);
+        expect(res.body.code).toBe('ROLE_REQUIRED');
+      }
+    });
+
+    it('lets editors draft but not publish, disable or enable', async () => {
+      const created = await create('editor');
+      expect(created.status).toBe(201);
+      const sid = created.body.id;
+      expect((await publish('editor', sid, 1)).status).toBe(403);
+      expect((await http().post(`/v1/admin/stations/${sid}/disable`).set(as('editor')).send({ reason: 'x' })).status).toBe(403);
+      expect((await http().post(`/v1/admin/stations/${sid}/enable`).set(as('editor')).send({ reason: 'x' })).status).toBe(403);
+    });
+
+    it('stops working as soon as the role is revoked', async () => {
+      await staff('grant', 'temp-editor', 'catalog_editor', '--by', 'tar', '--reason', 'temp');
+      const token = await id.token('temp-editor');
+      expect((await http().get('/v1/admin/stations').set('Authorization', `Bearer ${token}`)).status).toBe(200);
+      expect(await staff('revoke', 'temp-editor', 'catalog_editor', '--by', 'tar', '--reason', 'left team')).toBe(0);
+      expect((await http().get('/v1/admin/stations').set('Authorization', `Bearer ${token}`)).status).toBe(403);
+    });
+
+    it('refuses unknown roles and duplicate grants in the CLI', async () => {
+      expect(await staff('grant', 'x', 'superuser', '--by', 'tar', '--reason', 'r')).toBe(2);
+      expect(await staff('grant', 'staff-admin', 'admin', '--by', 'tar', '--reason', 'again')).toBe(1);
+      expect(await staff('grant', 'x', 'admin')).toBe(2);
+    });
+  });
+
+  describe('draft → publish', () => {
+    it('serves nothing publicly until a different admin publishes, then serves only the published snapshot', async () => {
+      const created = await create('editor', { ...station, name: 'Draft Only FM' });
+      const sid = created.body.id;
+      expect(created.body).toMatchObject({ revision: 1, status: 'draft', published: null });
+      expect((await catalog()).body.stations.find((s: { id: string }) => s.id === sid)).toBeUndefined();
+
+      const published = await publish('admin', sid, 1);
+      expect(published.status).toBe(200);
+      expect(published.body).toMatchObject({ status: 'published', publishedRevision: 1 });
+
+      // An edit after publishing does not change what the apps see until it is published again.
+      const edited = await patch('editor', sid, 1, { name: 'Renamed FM' });
+      expect(edited.body).toMatchObject({ revision: 2, status: 'changes_pending' });
+      const pub = (await catalog()).body.stations.find((s: { id: string }) => s.id === sid);
+      expect(pub).toEqual({
+        id: sid,
+        revision: 1,
+        name: 'Draft Only FM',
+        country: 'TH',
+        language: 'th',
+        genres: ['jazz'],
+        streamUrl: 'https://stream.example.com/jazz.mp3',
+        codec: 'mp3',
+        bitrateKbps: 128,
+      });
+    });
+
+    it('never lets someone publish a change they made themselves', async () => {
+      const created = await create('admin');
+      const sid = created.body.id;
+      expect(created.body.publishBlockers).toContain('own_change');
+      const own = await publish('admin', sid, 1);
+      expect(own.status).toBe(409);
+      expect(own.body).toMatchObject({ code: 'PUBLISH_BLOCKED', details: { reasons: ['own_change'] } });
+
+      // Another admin's edit does not clear the first admin's authorship.
+      await patch('admin2', sid, 1, { genres: ['jazz', 'news'] }).expect(200);
+      expect((await publish('admin', sid, 2)).body.details.reasons).toEqual(['own_change']);
+      expect((await publish('admin2', sid, 2)).body.details.reasons).toEqual(['own_change']);
+
+      // After an independent publish, authorship resets for the next round.
+      const editorDraft = await create('editor');
+      await publish('admin2', editorDraft.body.id, 1).expect(200);
+      await patch('editor', editorDraft.body.id, 1, { bitrateKbps: 64 }).expect(200);
+      await publish('admin', editorDraft.body.id, 2).expect(200);
+    });
+
+    it('publishes only the revision the reviewer saw', async () => {
+      const sid = (await create('editor')).body.id;
+      await patch('editor', sid, 1, { name: 'Changed after review' });
+      const stale = await publish('admin', sid, 1);
+      expect(stale.status).toBe(412);
+      expect(stale.body.details.currentRevision).toBe(2);
+      expect((await http().post(`/v1/admin/stations/${sid}/publish`).set(as('admin')).send({ reason: 'ok' })).status).toBe(428);
+    });
+
+    it('requires a reason to publish', async () => {
+      const sid = (await create('editor')).body.id;
+      expect((await publish('admin', sid, 1, '')).status).toBe(400);
+      expect((await http().post(`/v1/admin/stations/${sid}/publish`).set(as('admin')).set('If-Match', '"1"').send({})).status).toBe(400);
+    });
+
+    it('blocks publishing without a complete, current rights record', async () => {
+      const noRights = await create('editor', { ...station, rightsBasis: null, rightsReference: null });
+      expect((await publish('admin', noRights.body.id, 1)).body.details.reasons).toEqual(['rights_basis_missing']);
+      const noRef = await create('editor', { ...station, rightsReference: null });
+      expect((await publish('admin', noRef.body.id, 1)).body.details.reasons).toEqual(['rights_reference_missing']);
+      const expired = await create('editor', { ...station, rightsExpiresAt: '2020-01-01' });
+      expect((await publish('admin', expired.body.id, 1)).body.details.reasons).toEqual(['rights_expired']);
+    });
+
+    it('drops a station from the public catalog once its rights expire, without anyone acting', async () => {
+      const sid = (await create('editor', { ...station, name: 'Expiring FM', rightsExpiresAt: '2099-12-31' })).body.id;
+      await publish('admin', sid, 1).expect(200);
+      expect((await catalog('?limit=100')).body.stations.some((s: { id: string }) => s.id === sid)).toBe(true);
+      // Simulate the date passing.
+      await t.pool.query(`UPDATE radio_stations SET rights_expires_at = now() - interval '1 second' WHERE id = $1`, [sid]);
+      expect((await catalog('?limit=100')).body.stations.some((s: { id: string }) => s.id === sid)).toBe(false);
+    });
+
+    it('rejects a stale draft edit with 412 and the current revision', async () => {
+      const sid = (await create('editor')).body.id;
+      await patch('editor', sid, 1, { name: 'A' }).expect(200);
+      const stale = await patch('admin', sid, 1, { name: 'B' });
+      expect(stale.status).toBe(412);
+      expect(stale.body.details.currentRevision).toBe(2);
+    });
+  });
+
+  describe('disable and enable', () => {
+    it('hides a station from the apps immediately and brings it back', async () => {
+      const sid = (await create('editor', { ...station, name: 'Toggle FM' })).body.id;
+      await publish('admin', sid, 1).expect(200);
+      const disabled = await http().post(`/v1/admin/stations/${sid}/disable`).set(as('admin')).send({ reason: 'stream down for 3 checks' });
+      expect(disabled.body.status).toBe('disabled');
+      expect((await catalog('?limit=100')).body.stations.some((s: { id: string }) => s.id === sid)).toBe(false);
+      await http().post(`/v1/admin/stations/${sid}/enable`).set(as('admin')).send({ reason: 'stream back' }).expect(200);
+      expect((await catalog('?limit=100')).body.stations.some((s: { id: string }) => s.id === sid)).toBe(true);
+    });
+  });
+
+  describe('validation', () => {
+    it.each([
+      ['http stream', { streamUrl: 'http://stream.example.com/a.mp3' }, 'streamUrl', 'https_required'],
+      ['ip literal', { streamUrl: 'https://10.0.0.5/a.mp3' }, 'streamUrl', 'ip_literal_not_allowed'],
+      ['ipv6 literal', { streamUrl: 'https://[::1]/a.mp3' }, 'streamUrl', 'ip_literal_not_allowed'],
+      ['localhost', { streamUrl: 'https://localhost/a.mp3' }, 'streamUrl', 'private_host'],
+      ['internal name', { streamUrl: 'https://radio.internal/a.mp3' }, 'streamUrl', 'private_host'],
+      ['credentials', { streamUrl: 'https://u:p@stream.example.com/a.mp3' }, 'streamUrl', 'credentials_not_allowed'],
+      ['odd port', { streamUrl: 'https://stream.example.com:8443/a.mp3' }, 'streamUrl', 'nonstandard_port'],
+      ['not a url', { streamUrl: 'javascript:alert(1)' }, 'streamUrl', 'https_required'],
+      ['control chars', { name: 'Bad‮FM' }, 'name', 'control_characters'],
+      ['long name', { name: 'x'.repeat(81) }, 'name', 'length'],
+      ['country', { country: 'tha' }, 'country', 'iso_3166_alpha2'],
+      ['codec', { codec: 'flac' }, 'codec', 'value_not_allowed'],
+      ['genres', { genres: ['a b'] }, 'genres', 'slug'],
+      ['bitrate', { bitrateKbps: 1000 }, 'bitrateKbps', 'out_of_range'],
+      ['rights basis', { rightsBasis: 'trust_me' }, 'rightsBasis', 'value_not_allowed'],
+      ['expiry date', { rightsExpiresAt: '31/12/2026' }, 'rightsExpiresAt', 'date_yyyy_mm_dd'],
+      ['unknown field', { createdBy: 'someone' }, 'createdBy', 'unknown_field'],
+    ])('rejects %s', async (_label, override, field, reason) => {
+      const res = await create('editor', { ...station, ...override });
+      expect(res.status).toBe(400);
+      expect(res.body.details).toMatchObject({ field, reason });
+    });
+
+    it('requires the core fields on create', async () => {
+      const { name: _n, ...rest } = station;
+      expect((await create('editor', rest)).body.details).toMatchObject({ field: 'name', reason: 'required' });
+    });
+
+    it('returns 404 for an unknown station and 400 for a malformed id', async () => {
+      expect((await http().get('/v1/admin/stations/0b9a4f8e-6c1d-4e2a-9f3b-1a2b3c4d5e6f').set(as('editor'))).status).toBe(404);
+      expect((await http().get('/v1/admin/stations/123').set(as('editor'))).status).toBe(400);
+    });
+  });
+
+  describe('public catalog', () => {
+    it('needs no sign-in, pages with an opaque cursor and supports conditional requests', async () => {
+      const first = await catalog('?limit=2');
+      expect(first.status).toBe(200);
+      expect(first.headers['cache-control']).toBe('public, max-age=300');
+      expect(first.body.stations).toHaveLength(2);
+      expect(first.body.nextCursor).toEqual(expect.any(String));
+      const second = await catalog(`?limit=2&cursor=${first.body.nextCursor}`);
+      expect(second.body.stations[0].id > first.body.stations[1].id).toBe(true);
+
+      const again = await catalog('?limit=2').set('If-None-Match', first.headers.etag);
+      expect(again.status).toBe(304);
+      expect((await catalog('?cursor=not-a-cursor!')).status).toBe(400);
+      expect((await catalog('?limit=abc')).status).toBe(400);
+    });
+
+    it('never exposes rights details or drafts', async () => {
+      const raw = JSON.stringify((await catalog('?limit=100')).body);
+      expect(raw).not.toContain('CONTRACT-');
+      expect(raw).not.toContain('rights');
+      expect(raw).not.toContain('Renamed FM');
+    });
+  });
+
+  describe('audit trail', () => {
+    it('records every catalog and role change with actor and reason, and cannot be edited', async () => {
+      const sid = (await create('editor', { ...station, name: 'Audited FM' })).body.id;
+      await publish('admin', sid, 1, 'checked contract CONTRACT-2026-014').expect(200);
+      const rows = (
+        await t.pool.query(`SELECT actor, action, reason, changes FROM audit_events WHERE target_id = $1 ORDER BY id`, [sid])
+      ).rows;
+      expect(rows.map((r) => r.action)).toEqual(['station.create', 'station.publish']);
+      expect(rows[0].actor).toMatch(/^user:[0-9a-f-]{36}$/);
+      expect(rows[1]).toMatchObject({ reason: 'checked contract CONTRACT-2026-014', changes: { revision: 1, previousPublishedRevision: null } });
+
+      const roles = (await t.pool.query(`SELECT actor, action FROM audit_events WHERE action LIKE 'staff_role.%'`)).rows;
+      expect(roles).toContainEqual({ actor: 'operator:tar', action: 'staff_role.revoke' });
+
+      await expect(t.pool.query('DELETE FROM audit_events')).rejects.toThrow(/append-only/);
+      await expect(t.pool.query(`UPDATE audit_events SET reason = 'x'`)).rejects.toThrow(/append-only/);
+    });
+
+    it('rolls the change back if the audit write fails', async () => {
+      const before = (await t.pool.query('SELECT count(*)::int AS n FROM radio_stations')).rows[0].n;
+      await t.pool.query(`ALTER TABLE audit_events ADD CONSTRAINT block_for_test CHECK (action <> 'station.create') NOT VALID`);
+      try {
+        expect((await create('editor')).status).toBe(500);
+      } finally {
+        await t.pool.query('ALTER TABLE audit_events DROP CONSTRAINT block_for_test');
+      }
+      expect((await t.pool.query('SELECT count(*)::int AS n FROM radio_stations')).rows[0].n).toBe(before);
+    });
+  });
+});

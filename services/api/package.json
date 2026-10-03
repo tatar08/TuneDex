@@ -2,7 +2,7 @@
   "name": "@tunedeck/api",
   "version": "0.1.0",
   "private": true,
-  "description": "TuneDeck backend API (NestJS). COL-01: health + account settings slice.",
+  "description": "TuneDeck backend API (NestJS): settings, devices, staff roles and the radio station catalog.",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=22"
@@ -12,7 +12,8 @@
     "start": "node dist/main.js",
     "migrate": "node dist/db/migrate.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "staff": "node dist/staff/staff-cli.js"
   },
   "dependencies": {
     "@nestjs/common": "11.2.7",

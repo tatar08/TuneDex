@@ -6,6 +6,8 @@ export interface Actor {
   userId: string;
   /** When the user last actually authenticated (OIDC `auth_time`, epoch seconds), if the token says. */
   authTime?: number;
+  /** Staff roles, filled in by StaffGuard on staff routes only. */
+  roles?: string[];
 }
 
 declare module 'express-serve-static-core' {
