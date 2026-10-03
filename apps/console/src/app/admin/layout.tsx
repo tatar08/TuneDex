@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { THEME_COOKIE, themeFrom } from '@/lib/admin';
+import { MODE_COOKIE, modeFrom, summarize, THEME_COOKIE, themeFrom } from '@/lib/admin';
 import { getBff } from '@/lib/runtime';
 import { AdminShell } from './AdminShell';
 import { fontVariables } from './fonts';
@@ -34,8 +34,19 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     );
   }
 
+  // Catalog counts for the header and menu badge; the page still works if this read fails.
+  const list = await bff.loadStations(ctx).catch(() => null);
+  const summary = list && 'stations' in list && list.stations ? summarize(list.stations) : null;
+
   return (
-    <AdminShell theme={theme} roles={staff.roles} csrfToken={ctx.session.csrfToken} fontClass={fontVariables}>
+    <AdminShell
+      theme={theme}
+      mode={modeFrom(jar.get(MODE_COOKIE)?.value)}
+      roles={staff.roles}
+      summary={summary}
+      csrfToken={ctx.session.csrfToken}
+      fontClass={fontVariables}
+    >
       {children}
     </AdminShell>
   );

@@ -67,6 +67,9 @@ export function StationEditor({ station: initial }: { station?: AdminStation }) 
   const [notice, setNotice] = useState('');
   const [reason, setReason] = useState('');
   const [toggleReason, setToggleReason] = useState('');
+  // Until hydration a click would fall back to a native GET submit and drop the typed values.
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
   const alertRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -233,7 +236,7 @@ export function StationEditor({ station: initial }: { station?: AdminStation }) 
           {input('rightsExpiresAt', { type: 'date' })}
           {canEdit && (
             <div className="ed-actions">
-              <button type="submit" className="btn" disabled={busy || (!!station && !dirty)}>
+              <button type="submit" className="btn" disabled={!ready || busy || (!!station && !dirty)}>
                 {busy ? 'กำลังบันทึก…' : station ? 'บันทึกร่าง' : 'สร้างร่าง'}
               </button>
               {station && <span className="dim">{dirty ? `แก้ไข ${changed.length} ช่อง ยังไม่บันทึก` : 'ไม่มีอะไรเปลี่ยน'}</span>}

@@ -18,6 +18,7 @@ import {
 } from '@/lib/admin';
 import type { AdminStation } from '@/lib/bff';
 import { useAdmin } from '../AdminShell';
+import { MinimalDashboard } from './MinimalDashboard';
 
 const href = (s: AdminStation) => `/admin/stations/${s.id}`;
 const filterHref = (f: StatusFilter) => (f === 'all' ? '/admin/stations' : `/admin/stations?status=${f}`);
@@ -133,7 +134,7 @@ export function WorkbenchSplit({
   );
 }
 
-export function StationsView({ stations, filter }: { stations: AdminStation[]; filter: StatusFilter }) {
+export function StationsView({ stations, filter, query: initialQuery = '' }: { stations: AdminStation[]; filter: StatusFilter; query?: string }) {
   const { theme } = useAdmin();
   const [query, setQuery] = useState('');
   const counts = useMemo(() => countByStatus(stations), [stations]);
@@ -274,38 +275,5 @@ export function StationsView({ stations, filter }: { stations: AdminStation[]; f
     );
   }
 
-  // Minimal
-  return (
-    <div className="mn-page">
-      <h1>สถานี</h1>
-      <p className="lede">
-        {summary} <NewButton className="lnk" />
-      </p>
-      <Filters filter={filter} counts={counts} className="tabs" />
-      {shown.length === 0 ? (
-        <Empty filter={filter} />
-      ) : (
-        <ul className="rows">
-          {shown.map((s) => (
-            <li key={s.id}>
-              <Link href={href(s)} className="nm">
-                {s.draft.name}
-              </Link>
-              <small>{subtitle(s)}</small>
-              <span>
-                <i className={`dot ${s.status}`} aria-hidden="true" />
-                {STATUS_LABELS[s.status]}
-              </span>
-              <small className={rightsSoon(s) ? 'wr' : undefined}>
-                {s.draft.rightsExpiresAt ? `สิทธิ์ถึง ${formatDate(s.draft.rightsExpiresAt)}` : rightsLine(s)}
-              </small>
-              <Link href={href(s)} className="lnk" aria-label={`${actionLabel(s)} ${s.draft.name}`}>
-                {actionLabel(s)}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
+  return <MinimalDashboard stations={stations} filter={filter} query={initialQuery} />;
 }

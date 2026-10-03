@@ -10,5 +10,6 @@ export default async function StationsPage({ searchParams }: { searchParams: Pro
   const result = await bff.loadStations(ctx).catch(() => ({ status: 503 }) as const);
   if (result === null) redirect('/login?expired=1&returnTo=/admin/stations');
   if (!('stations' in result) || !result.stations) return <LoadError status={result.status} />;
-  return <StationsView stations={result.stations} filter={filterFrom((await searchParams).status)} />;
+  const sp = await searchParams;
+  return <StationsView stations={result.stations} filter={filterFrom(sp.status)} query={sp.q?.slice(0, 80) ?? ''} />;
 }

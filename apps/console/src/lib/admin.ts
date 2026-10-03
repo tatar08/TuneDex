@@ -11,6 +11,10 @@ export const THEMES = [
 export type ThemeId = (typeof THEMES)[number]['id'];
 export const DEFAULT_THEME: ThemeId = 'minimal';
 export const THEME_COOKIE = 'td_admin_theme';
+/** Light or dark for the Minimal theme (the other four have a fixed palette). */
+export const MODE_COOKIE = 'td_admin_mode';
+export type Mode = 'light' | 'dark';
+export const modeFrom = (v: string | undefined): Mode => (v === 'dark' ? 'dark' : 'light');
 export const themeFrom = (v: string | undefined): ThemeId =>
   (THEMES.some((t) => t.id === v) ? v : DEFAULT_THEME) as ThemeId;
 
@@ -120,4 +124,30 @@ export function countByStatus(stations: AdminStation[]): Record<StatusFilter, nu
   const out = { all: stations.length, draft: 0, changes_pending: 0, published: 0, disabled: 0 };
   for (const s of stations) out[s.status]++;
   return out;
+}
+
+/** What the apps can see right now: published, enabled, and the published rights have not ended. */
+export function visibleInApps(s: AdminStation, now = Date.now()): boolean {
+  if (!s.published || s.disabledAt) return false;
+  const end = s.published.rightsExpiresAt;
+  return !end || Date.parse(`${end}T23:59:59Z`) >= now;
+}
+
+export interface CatalogSummary {
+  total: number;
+  visible: number;
+  pending: number;
+  drafts: number;
+  disabled: number;
+}
+
+export function summarize(stations: AdminStation[]): CatalogSummary {
+  const c = countByStatus(stations);
+  return { total: c.all, visible: stations.filter((s) => visibleInApps(s)).length, pending: c.changes_pending, drafts: c.draft, disabled: c.disabled };
+}
+
+/** Days until the rights end (negative once ended), or null when there is no end date. */
+export function rightsDaysLeft(s: AdminStation, now = Date.now()): number | null {
+  const end = s.draft.rightsExpiresAt;
+  return end ? Math.ceil((Date.parse(`${end}T23:59:59Z`) - now) / 86_400_000) : null;
 }

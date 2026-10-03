@@ -25,8 +25,10 @@ const SHOTS = process.env.ADMIN_SHOTS_DIR;
 
 test('an editor drafts a station and a different admin publishes it', async ({ browser }) => {
   const editor = await signInAs(browser, 'e2e-editor');
-  await expect(editor.getByRole('heading', { name: 'สถานี' })).toBeVisible();
+  await expect(editor.getByRole('heading', { name: 'รายการสถานี' })).toBeVisible();
   await editor.getByRole('link', { name: '+ เพิ่มสถานี' }).click();
+  // The Minimal dashboard has its own quick-add form with the same labels, so wait for the full editor.
+  await expect(editor.getByRole('heading', { name: 'เพิ่มสถานี', exact: true })).toBeVisible();
   await editor.getByLabel('ชื่อสถานี').fill('Bangkok Jazz 24');
   await editor.getByLabel('แนวเพลง').fill('jazz');
   await editor.getByLabel('ลิงก์สตรีม').fill('https://10.0.0.1/live.mp3');
@@ -108,7 +110,7 @@ test('each theme has its own layout and the choice sticks', async ({ browser }) 
   const page = await signInAs(browser, 'e2e-admin');
   const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
   const layouts: Record<string, string> = {
-    minimal: '.t-minimal .rows',
+    minimal: '.t-minimal .fv-side + .fv-main .fv-grid',
     'control-room': '.t-control-room .side + .main table',
     'broadcast-rack': '.t-broadcast-rack .bar .vfd',
     'daylight-bento': '.t-daylight-bento .stgrid .art',
@@ -125,6 +127,13 @@ test('each theme has its own layout and the choice sticks', async ({ browser }) 
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/edit-${theme}.png`, fullPage: true });
     await page.goto(`${stack.base}/admin/stations`);
   }
+  // Minimal has its own light/dark switch, remembered in a cookie.
+  await picker.selectOption('minimal');
+  await page.getByRole('button', { name: 'Dark' }).click();
+  await page.reload();
+  await expect(page.locator('.t-minimal[data-mode="dark"] .fv-grid')).toBeVisible();
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/list-minimal-dark.png`, fullPage: true });
+  await page.getByRole('button', { name: 'Light' }).click();
   // Workbench keyboard: j moves the cursor, Enter opens.
   await picker.selectOption('workbench');
   await page.keyboard.press('j');
