@@ -97,6 +97,10 @@ describe('station catalog', () => {
       expect((await http().get('/v1/admin/stations').set('Authorization', `Bearer ${token}`)).status).toBe(200);
       expect(await staff('revoke', 'temp-editor', 'catalog_editor', '--by', 'tar', '--reason', 'left team')).toBe(0);
       expect((await http().get('/v1/admin/stations').set('Authorization', `Bearer ${token}`)).status).toBe(403);
+      const { rows } = await t.pool.query(
+        `SELECT r.revoked_by, r.scope FROM staff_roles r JOIN users u ON u.id = r.user_id WHERE u.oidc_subject = 'temp-editor'`,
+      );
+      expect(rows).toEqual([{ revoked_by: 'tar', scope: 'global' }]);
     });
 
     it('tells each caller their own current roles', async () => {
