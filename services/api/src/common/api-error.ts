@@ -23,6 +23,8 @@ export type ErrorCode =
   | 'PURCHASE_INVALID'
   | 'PURCHASE_CONFLICT'
   | 'MFA_REQUIRED'
+  | 'IDEMPOTENCY_KEY_REUSED'
+  | 'IDEMPOTENCY_IN_PROGRESS'
   | 'INTERNAL';
 
 export const MESSAGE_KEYS: Record<ErrorCode, string> = {
@@ -48,6 +50,8 @@ export const MESSAGE_KEYS: Record<ErrorCode, string> = {
   PURCHASE_INVALID: 'errors.billing.invalid',
   PURCHASE_CONFLICT: 'errors.billing.ownedByAnotherAccount',
   MFA_REQUIRED: 'errors.auth.mfaRequired',
+  IDEMPOTENCY_KEY_REUSED: 'errors.request.idempotencyKeyReused',
+  IDEMPOTENCY_IN_PROGRESS: 'errors.request.inProgress',
   INTERNAL: 'errors.service.internal',
 };
 

@@ -14,6 +14,7 @@ import { ALERT_FETCH, AlertFetch, AlertService } from './overview/alerts';
 import { AdminAuditController, AuditSearchService } from './audit/audit-search';
 import { AuthGuard, KEY_RESOLVER } from './auth/auth.guard';
 import { ErrorEnvelopeFilter } from './common/error.filter';
+import { IdempotencyInterceptor } from './common/idempotency';
 import { RateLimitInterceptor } from './common/rate-limit';
 import { LOG_SINK, LOG_WRITER, LogWriter, StructuredLogger, stdoutWriter } from './common/logger';
 import { requestContext } from './common/request-context';
@@ -97,6 +98,8 @@ export class AppModule {
         AuthGuard,
         StaffGuard,
         { provide: APP_INTERCEPTOR, useClass: RateLimitInterceptor },
+        // After the rate limit, so a replay still counts as a write.
+        { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
       ],
     };
   }
