@@ -252,6 +252,9 @@ export type IncidentCode =
   | 'account_deletion_failed'
   | 'account_deletion_stuck'
   | 'account_deletion_late'
+  | 'account_export_stuck'
+  | 'idp_session_end_stuck'
+  | 'job_dead_letter'
   | 'no_recent_traffic';
 /** GET /v1/admin/overview: aggregates only, with sample sizes and a stale flag (Doc 17). */
 export interface Overview {
@@ -283,25 +286,39 @@ export interface Overview {
   incidents: { code: IncidentCode; severity: 'critical' | 'warning'; count: number; since?: string }[];
 }
 
-/** GET /v1/admin/jobs (Doc 17 /admin/jobs). Ids are opaque hashes; no user ids. */
-export type JobStatus = 'pending' | 'failed' | 'completed';
-export type JobFilter = 'open' | 'failed' | 'completed' | 'all';
+/** GET /v1/admin/jobs (Doc 17 /admin/jobs): every background queue. Ids are opaque; no user ids. */
+export type JobKind = 'account_deletion' | 'account_export' | 'idp_session_end';
+export type JobStatus = 'pending' | 'retrying' | 'dead_letter' | 'completed';
+export type JobFilter = 'open' | 'failed' | 'dead_letter' | 'completed' | 'all';
 export interface Job {
   id: string;
-  kind: 'account_deletion';
+  kind: JobKind;
   status: JobStatus;
   requestedAt: string;
   attempts: number;
+  maxAttempts: number;
   lastAttemptAt: string | null;
+  nextAttemptAt: string | null;
+  /** A short code only (e.g. IDP_DELETE_FAILED), never a message. */
+  lastErrorCode: string | null;
   completedAt: string | null;
-  deadline: string;
+  /** Account deletions only. */
+  deadline: string | null;
+}
+export interface QueueSummary {
+  kind: JobKind;
+  pending: number;
+  retrying: number;
+  deadLetter: number;
+  oldestOpenAt: string | null;
 }
 export interface JobsPage {
   jobs: Job[];
   counts: Record<JobStatus, number>;
+  queues: QueueSummary[];
   truncated: boolean;
 }
-const JOB_ID = /^[0-9a-f]{64}$/;
+const JOB_ID = /^(?:[0-9a-f]{64}|ex_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|se_[0-9a-f]{64})$/;
 
 /** GET /v1/admin/config (Doc 17 /admin/config): the draft, the current and recent releases. */
 export type ConfigFeature = 'catalogBrowse' | 'playlistImport' | 'diagnosticsUpload';
@@ -348,7 +365,7 @@ export interface UserSupportView {
   }[];
   /** `access`: this staff member's running access to the reports, from the customer's code. */
   diagnostics: { reportsLast7Days: number; access: { id: string; expiresAt: string } | null };
-  deletion: { status: 'pending' | 'failed' | 'completed'; requestedAt: string } | null;
+  deletion: { status: 'pending' | 'failed' | 'dead_letter' | 'completed'; requestedAt: string } | null;
 }
 
 export interface AuditPage {
@@ -587,13 +604,13 @@ export function createBff(deps: BffDeps) {
 
     /** Server-side read for /admin/jobs. Null means the user must sign in again. */
     async loadJobs(ctx: SessionContext, filter: string): Promise<{ status: number; page?: JobsPage } | null> {
-      const f = ['open', 'failed', 'completed', 'all'].includes(filter) ? filter : 'open';
+      const f = ['open', 'failed', 'dead_letter', 'completed', 'all'].includes(filter) ? filter : 'open';
       const res = await callApi(ctx, `/v1/admin/jobs?status=${f}`, { method: 'GET' }, `web_${randomUUID()}`);
       if (!res) return null;
       return res.ok ? { status: 200, page: (await res.json()) as JobsPage } : { status: res.status };
     },
 
-    /** POST /bff/admin/jobs/{id}/retry with `{ reason }`; the API checks the role, the cooldown and records it. */
+    /** POST /bff/admin/jobs/{id}/retry with `{ reason }`; the API checks the role, the cooldown and ceiling, and records it. */
     jobRetry: (req: Request, id: string) =>
       timed(req, '/bff/admin/jobs/:id/retry', async (requestId) =>
         JOB_ID.test(id) ? adminProxy(req, requestId, `/v1/admin/jobs/${id}/retry`, true) : notFound(requestId),

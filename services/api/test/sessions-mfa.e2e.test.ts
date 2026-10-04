@@ -57,6 +57,11 @@ describe('device sign-out ends the Keycloak session, and privileged staff action
     } finally {
       t.idp.state.failSessions = false;
     }
+    // The retry waits for the first backoff step (1 minute), then runs.
+    const { rows: [row] } = await t.pool.query(`SELECT idp_session_attempts, idp_session_error_code FROM devices WHERE id = $1 AND idp_session_id = 'kc-phone-2'`, [PHONE]);
+    expect(row).toEqual({ idp_session_attempts: 1, idp_session_error_code: 'IDP_SESSION_FAILED' });
+    expect(await t.app.get(DevicesService).retrySessionEnds()).toBe(0);
+    await t.pool.query(`UPDATE devices SET idp_session_next_attempt_at = now() WHERE idp_session_id = 'kc-phone-2'`);
     expect(await t.app.get(DevicesService).retrySessionEnds()).toBe(1);
     expect(t.idp.endedSessions).toContain('kc-phone-2');
     expect(await t.app.get(DevicesService).retrySessionEnds()).toBe(0);

@@ -18,9 +18,12 @@ const WINDOWS: { id: OverviewWindow; label: string }[] = [
 
 const INCIDENTS: Record<IncidentCode, { title: string; detail: (n: number) => string; href?: string }> = {
   api_error_rate: { title: 'API ตอบ error บ่อย', detail: (n) => `${n} คำขอจบด้วย 5xx เกิน 5% ของทั้งหมด`, href: '/admin/logs?severity=ERROR' },
-  account_deletion_failed: { title: 'ลบบัญชีไม่สำเร็จ', detail: (n) => `${n} คำขอกำลังลองใหม่อัตโนมัติ ดูบันทึก ACCOUNT_PURGE_FAILED`, href: '/admin/logs?eventCode=ACCOUNT_PURGE_FAILED' },
+  account_deletion_failed: { title: 'ลบบัญชีไม่สำเร็จ', detail: (n) => `${n} คำขอลบไม่สำเร็จ (กำลังลองใหม่หรือรอทีมงาน) ดูบันทึก ACCOUNT_PURGE_FAILED`, href: '/admin/jobs?status=failed' },
   account_deletion_late: { title: 'ลบบัญชีใกล้เกินกำหนด 30 วัน', detail: (n) => `${n} คำขอค้างนานกว่า 25 วัน` },
-  account_deletion_stuck: { title: 'คิวลบบัญชีค้าง', detail: (n) => `${n} คำขอยังไม่เริ่มลบหลังผ่านไป 5 นาที`, href: '/admin/jobs' },
+  account_deletion_stuck: { title: 'คิวลบบัญชีค้าง', detail: (n) => `${n} คำขอถึงรอบแล้วแต่ยังไม่ได้ทำเกิน 5 นาที`, href: '/admin/jobs' },
+  account_export_stuck: { title: 'คิวส่งออกข้อมูลค้าง', detail: (n) => `${n} คำขอถึงรอบแล้วแต่ยังไม่ได้ทำเกิน 5 นาที`, href: '/admin/jobs' },
+  idp_session_end_stuck: { title: 'คิวปิดเซสชัน Keycloak ค้าง', detail: (n) => `${n} รายการถึงรอบแล้วแต่ยังไม่ได้ทำเกิน 5 นาที`, href: '/admin/jobs' },
+  job_dead_letter: { title: 'งานเบื้องหลังรอทีมงาน', detail: (n) => `${n} งานลองครบ 5 ครั้งแล้วไม่สำเร็จ ต้องสั่งลองใหม่`, href: '/admin/jobs?status=dead_letter' },
   api_latency: { title: 'API ตอบช้า', detail: (n) => `p95 ${n.toLocaleString('th-TH')} ms เกิน 1 วินาที ใน 10 นาทีล่าสุด`, href: '/admin/logs' },
   stations_suspect: { title: 'สถานีน่าสงสัย', detail: (n) => `${n} สถานีตรวจไม่ผ่าน 3 ครั้งติด รอแอดมินตรวจ`, href: '/admin/stations' },
   station_checker_stale: { title: 'ตัวตรวจสตรีมไม่ได้รัน', detail: () => 'ไม่มีผลตรวจใหม่นานเกิน 2.5 รอบ' },
@@ -417,7 +420,7 @@ export function OverviewView({ overview: o, status, window }: { overview?: Overv
                   <dd className="mo">{o.queues.accountDeletions.open}</dd>
                 </div>
                 <div>
-                  <dt>ลบไม่สำเร็จ (กำลังลองใหม่)</dt>
+                  <dt>ลบไม่สำเร็จ (ลองใหม่หรือรอทีมงาน)</dt>
                   <dd className="mo">{o.queues.accountDeletions.failed}</dd>
                 </div>
                 <div>

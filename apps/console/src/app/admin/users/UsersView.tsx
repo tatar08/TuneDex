@@ -20,7 +20,12 @@ const STATUS: Record<User['user']['status'], { label: string; tone: 'ok' | 'warn
   deleted: { label: 'ลบบัญชีแล้ว', tone: 'mute' },
   disabled: { label: 'ระงับการใช้งาน', tone: 'bad' },
 };
-const DELETION: Record<NonNullable<User['deletion']>['status'], string> = { pending: 'กำลังลบ', failed: 'ลบไม่สำเร็จ กำลังลองใหม่', completed: 'ลบเสร็จแล้ว' };
+const DELETION: Record<NonNullable<User['deletion']>['status'], string> = {
+  pending: 'กำลังลบ',
+  failed: 'ลบไม่สำเร็จ กำลังลองใหม่',
+  dead_letter: 'ลบไม่สำเร็จ ลองครบ 5 ครั้ง รอทีมงานสั่งลองใหม่ (บัญชียังถูกล็อก)',
+  completed: 'ลบเสร็จแล้ว',
+};
 
 const deviceState = (d: Device, revision: number) =>
   d.revokedAt

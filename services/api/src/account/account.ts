@@ -24,13 +24,16 @@ import { StructuredLogger } from '../common/logger';
 import { Database, PG_POOL } from '../db/database';
 import { DevicesService } from '../devices/devices.service';
 import { IdpError, IdpUsersService } from './idp-users';
+import { afterFailure, jobErrorCode, WORKER_TICK_MS } from '../jobs/retry-policy';
 import { SyncService } from '../sync/sync';
 import { SettingsService } from '../settings/settings.service';
 import { subjectHash } from '../users/users.service';
 
-/** Doc 17: the purge must finish within 30 days; failed attempts are retried on this cadence until it does. */
+/**
+ * Doc 17: the purge must finish within 30 days. Failed attempts back off per the shared retry policy; after 5 the
+ * request is dead-lettered (account still locked, alerted, on /admin/jobs) until an operator retries it.
+ */
 export const DELETION_DEADLINE_DAYS = 30;
-const RETRY_EVERY_MS = 10 * 60_000;
 /** Ticket rows are kept a little past the deadline so a user can still read "completed". */
 const TICKET_KEEP_DAYS = 35;
 /** Doc 17: exports hold at most 10k rows. */
@@ -39,6 +42,8 @@ const EXPORT_MAX_EVENTS = 10_000;
 const LOCK_KEY = 7_421_018;
 
 export type DeletionStatus = 'deleting' | 'completed' | 'failed';
+/** A request's state in the queue: 'failed' is retrying, 'dead_letter' waits for an operator. */
+export type DeletionJobState = 'pending' | 'failed' | 'dead_letter' | 'completed';
 
 const hashTicket = (ticket: string) => createHash('sha256').update(ticket).digest('hex');
 const TICKET = /^[A-Za-z0-9_-]{43}$/;
@@ -60,8 +65,8 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
   ) {}
 
   onApplicationBootstrap(): void {
-    // Picks up requests a crashed or restarted instance left behind, and retries failures.
-    this.timer = setInterval(() => void this.processQueue().catch(() => undefined), RETRY_EVERY_MS);
+    // Picks up requests a crashed or restarted instance left behind, and retries failures once they are due.
+    this.timer = setInterval(() => void this.processQueue().catch(() => undefined), WORKER_TICK_MS);
     this.timer.unref();
   }
 
@@ -177,23 +182,23 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
     return { ticket, status: 'deleting' };
   }
 
-  /** Public progress check by ticket. Unknown and expired tickets look the same. */
+  /** Public progress check by ticket. Unknown and expired tickets look the same. A dead-lettered request reads 'failed'. */
   async status(ticket: string): Promise<{ status: DeletionStatus; requestedAt: string; deadline: string; completedAt: string | null }> {
     if (!TICKET.test(ticket)) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
-    const [row] = await this.db.query<{ status: 'pending' | 'completed' | 'failed'; requested_at: Date; completed_at: Date | null }>(
+    const [row] = await this.db.query<{ status: DeletionJobState; requested_at: Date; completed_at: Date | null }>(
       'SELECT status, requested_at, completed_at FROM account_deletions WHERE ticket_hash = $1',
       [hashTicket(ticket)],
     );
     if (!row) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
     return {
-      status: row.status === 'pending' ? 'deleting' : row.status,
+      status: row.status === 'pending' ? 'deleting' : row.status === 'completed' ? 'completed' : 'failed',
       requestedAt: row.requested_at.toISOString(),
       deadline: new Date(row.requested_at.getTime() + DELETION_DEADLINE_DAYS * 86_400_000).toISOString(),
       completedAt: row.completed_at?.toISOString() ?? null,
     };
   }
 
-  /** Purges every open request. Returns how many completed (0 if another instance holds the queue). */
+  /** Purges every request that is due. Returns how many completed (0 if another instance holds the queue). */
   processQueue(): Promise<number> {
     this.working ??= this.drain().finally(() => (this.working = null));
     return this.working;
@@ -201,20 +206,27 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
 
   /**
    * Runs one open request now (staff "retry" on /admin/jobs). Takes the same queue lock as the background
-   * run, so the two never purge at once; 'busy' means another run holds it and will reach this job anyway.
+   * run, so the two never purge at once; 'busy' means another run holds it. A dead-lettered request starts a
+   * new round of attempts first. Returns the request's state afterwards.
    */
-  async retryOne(ticketHash: string): Promise<'completed' | 'failed' | 'busy'> {
+  async retryOne(ticketHash: string): Promise<DeletionJobState | 'busy'> {
     const client = await this.pool.connect();
     try {
       const [{ locked }] = (await client.query<{ locked: boolean }>('SELECT pg_try_advisory_lock($1) AS locked', [LOCK_KEY])).rows;
       if (!locked) return 'busy';
       try {
-        const [job] = await this.db.query<{ user_id: string }>(
-          `SELECT user_id FROM account_deletions WHERE ticket_hash = $1 AND status <> 'completed'`,
+        const [job] = await this.db.query<{ user_id: string; status: DeletionJobState; attempts: number }>(
+          `SELECT user_id, status, attempts FROM account_deletions WHERE ticket_hash = $1 AND status <> 'completed'`,
           [ticketHash],
         );
         if (!job) return 'completed';
-        return (await this.attempt(ticketHash, job.user_id)) ? 'completed' : 'failed';
+        if (job.status === 'dead_letter') {
+          await this.db.query(
+            `UPDATE account_deletions SET status = 'pending', attempts = 0, next_attempt_at = NULL, dead_lettered_at = NULL WHERE ticket_hash = $1`,
+            [ticketHash],
+          );
+        }
+        return this.attempt(ticketHash, job.user_id, job.status === 'dead_letter' ? 0 : job.attempts);
       } finally {
         await client.query('SELECT pg_advisory_unlock($1)', [LOCK_KEY]);
       }
@@ -223,21 +235,32 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
     }
   }
 
-  /** One purge attempt; a failure is counted on the request and logged without details. */
-  private async attempt(ticketHash: string, userId: string): Promise<boolean> {
+  /**
+   * One purge attempt. A failure is counted on the request with its error code and the next try scheduled (or
+   * the request dead-lettered), and logged without details. Returns the request's state afterwards.
+   */
+  private async attempt(ticketHash: string, userId: string, attemptsBefore: number): Promise<DeletionJobState> {
     try {
       await this.purge(ticketHash, userId);
-      return true;
+      return 'completed';
     } catch (err) {
+      const next = afterFailure(attemptsBefore);
       await this.db
-        .query(`UPDATE account_deletions SET status = 'failed', attempts = attempts + 1, last_attempt_at = now() WHERE ticket_hash = $1`, [ticketHash])
+        .query(
+          `UPDATE account_deletions SET attempts = $2, last_attempt_at = now(), last_error_code = $3,
+                  status = CASE WHEN $4::int IS NULL THEN 'dead_letter' ELSE 'failed' END,
+                  next_attempt_at = now() + make_interval(secs => $4::int),
+                  dead_lettered_at = CASE WHEN $4::int IS NULL THEN now() END
+            WHERE ticket_hash = $1`,
+          [ticketHash, next.attempts, jobErrorCode(err), next.retryInSeconds],
+        )
         .catch(() => undefined);
       this.logger.log('ERROR', {
-        eventCode: 'ACCOUNT_PURGE_FAILED',
+        eventCode: next.retryInSeconds === null ? 'ACCOUNT_PURGE_DEAD_LETTERED' : 'ACCOUNT_PURGE_FAILED',
         errorName: (err as Error)?.name ?? 'Error',
         ...(err instanceof IdpError ? { errorCode: `IDP_${err.step.toUpperCase()}_FAILED`, status: err.status } : {}),
       });
-      return false;
+      return next.retryInSeconds === null ? 'dead_letter' : 'failed';
     }
   }
 
@@ -251,13 +274,14 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
           `DELETE FROM account_deletions WHERE status = 'completed' AND completed_at < now() - make_interval(days => $1)`,
           [TICKET_KEEP_DAYS],
         );
-        const open = await this.db.query<{ ticket_hash: string; user_id: string }>(
-          `SELECT ticket_hash, user_id FROM account_deletions WHERE status <> 'completed' ORDER BY requested_at`,
+        const due = await this.db.query<{ ticket_hash: string; user_id: string; attempts: number }>(
+          `SELECT ticket_hash, user_id, attempts FROM account_deletions
+            WHERE status IN ('pending', 'failed') AND (next_attempt_at IS NULL OR next_attempt_at <= now()) ORDER BY requested_at`,
         );
         let done = 0;
-        for (const job of open) {
+        for (const job of due) {
           if (this.stopped) break;
-          if (await this.attempt(job.ticket_hash, job.user_id)) done++;
+          if ((await this.attempt(job.ticket_hash, job.user_id, job.attempts)) === 'completed') done++;
         }
         return done;
       } finally {
@@ -298,7 +322,7 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
         [userId],
       );
       await query(
-        `UPDATE account_deletions SET status = 'completed', attempts = attempts + 1, last_attempt_at = now(), completed_at = now() WHERE ticket_hash = $1`,
+        `UPDATE account_deletions SET status = 'completed', attempts = attempts + 1, last_attempt_at = now(), next_attempt_at = NULL, completed_at = now() WHERE ticket_hash = $1`,
         [ticketHash],
       );
       await writeAudit(query, { actor: 'system:account-deletion', action: 'account.deleted', targetType: 'account', targetId: userId, changes: { idpUser } });
