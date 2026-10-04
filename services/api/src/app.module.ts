@@ -10,6 +10,7 @@ import { AdminConfigController, AppConfigService, CONFIG_SIGNER, createConfigSig
 import { AdminJobsController, JobsService } from './jobs/jobs';
 import { AdminUsersController, AdminUsersService } from './users/admin-users';
 import { AdminOverviewController, OverviewService } from './overview/overview';
+import { ALERT_FETCH, AlertFetch, AlertService } from './overview/alerts';
 import { AdminAuditController, AuditSearchService } from './audit/audit-search';
 import { AuthGuard, KEY_RESOLVER } from './auth/auth.guard';
 import { ErrorEnvelopeFilter } from './common/error.filter';
@@ -48,6 +49,8 @@ export interface AppDeps {
   idpFetch?: IdpFetch;
   /** Tests only: fake Google Play API and Pub/Sub token keys. */
   googleFetch?: GoogleFetch;
+  /** Tests only: replaces the network for the alert webhook. */
+  alertFetch?: AlertFetch;
   googlePushKeys?: JWTVerifyGetKey;
 }
 
@@ -83,6 +86,8 @@ export class AppModule {
         { provide: CONFIG_SIGNER, useValue: createConfigSigner(deps.config.configSigningKey) },
         { provide: IDP_FETCH, useValue: deps.idpFetch ?? ((input: Parameters<IdpFetch>[0], init?: Parameters<IdpFetch>[1]) => fetch(input, init)) },
         OverviewService,
+        AlertService,
+        { provide: ALERT_FETCH, useValue: deps.alertFetch ?? ((url: string, init: Parameters<AlertFetch>[1]) => fetch(url, init)) },
         JobsService,
         AdminUsersService,
         StaffService,

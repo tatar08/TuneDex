@@ -57,6 +57,8 @@ export interface AppConfig {
    */
   staffMfaAcr: string[] | null;
   /** Scheduled stream checks of published stations (Doc 17). Off unless STATION_CHECK_ENABLED=true. */
+  /** Doc 17 alerts: evaluated every minute; transitions go to the logs and, when set, to a webhook. */
+  alerts: { enabled: boolean; webhookUrl: string | null };
   stationCheck: {
     enabled: boolean;
     intervalMinutes: number;
@@ -110,6 +112,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     billing: { apple: loadApple(env), google: loadGoogle(env) },
     auditRetentionEnabled: flag(env, 'AUDIT_RETENTION_ENABLED', true),
     staffMfaAcr: loadStaffMfa(env, appEnv),
+    alerts: loadAlerts(env),
     stationCheck: loadStationCheck(env),
   };
 }
@@ -184,6 +187,21 @@ function loadGoogle(env: NodeJS.ProcessEnv): AppConfig['billing']['google'] {
     pushAudience: required(env, 'GOOGLE_PUBSUB_PUSH_AUDIENCE'),
     pushServiceAccount: required(env, 'GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT'),
   };
+}
+
+/** The webhook URL is a secret (chat webhooks carry their token in the path): it is never logged. */
+function loadAlerts(env: NodeJS.ProcessEnv): AppConfig['alerts'] {
+  const raw = env.ALERT_WEBHOOK_URL?.trim() ?? '';
+  if (raw) {
+    let u: URL;
+    try {
+      u = new URL(raw);
+    } catch {
+      throw new Error('ALERT_WEBHOOK_URL must be an https URL');
+    }
+    if (u.protocol !== 'https:' || u.username || u.password) throw new Error('ALERT_WEBHOOK_URL must be an https URL');
+  }
+  return { enabled: flag(env, 'ALERTS_ENABLED', true), webhookUrl: raw || null };
 }
 
 function loadStaffMfa(env: NodeJS.ProcessEnv, appEnv: AppEnv): string[] | null {

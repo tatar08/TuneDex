@@ -202,7 +202,15 @@ export interface AuditEvent {
   requestId: string | null;
 }
 export type OverviewWindow = '1h' | '24h' | '7d';
-export type IncidentCode = 'api_error_rate' | 'stations_suspect' | 'station_checker_stale' | 'account_deletion_failed' | 'account_deletion_late' | 'no_recent_traffic';
+export type IncidentCode =
+  | 'api_error_rate'
+  | 'api_latency'
+  | 'stations_suspect'
+  | 'station_checker_stale'
+  | 'account_deletion_failed'
+  | 'account_deletion_stuck'
+  | 'account_deletion_late'
+  | 'no_recent_traffic';
 /** GET /v1/admin/overview: aggregates only, with sample sizes and a stale flag (Doc 17). */
 export interface Overview {
   window: { id: OverviewWindow; from: string; to: string };
@@ -230,7 +238,7 @@ export interface Overview {
     accountDeletions: { open: number; failed: number; oldestRequestedAt: string | null; deadlineDays: number };
     diagnosticReports: number;
   };
-  incidents: { code: IncidentCode; severity: 'critical' | 'warning'; count: number }[];
+  incidents: { code: IncidentCode; severity: 'critical' | 'warning'; count: number; since?: string }[];
 }
 
 /** GET /v1/admin/jobs (Doc 17 /admin/jobs). Ids are opaque hashes; no user ids. */

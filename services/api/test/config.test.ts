@@ -105,4 +105,12 @@ describe('loadConfig', () => {
     expect(loadConfig(base).auditRetentionEnabled).toBe(true);
     expect(loadConfig({ ...base, AUDIT_RETENTION_ENABLED: 'false' }).auditRetentionEnabled).toBe(false);
   });
+  it('evaluates alerts by default and accepts only an https webhook', () => {
+    expect(loadConfig(base).alerts).toEqual({ enabled: true, webhookUrl: null });
+    expect(loadConfig({ ...base, ALERTS_ENABLED: 'false' }).alerts.enabled).toBe(false);
+    expect(loadConfig({ ...base, ALERT_WEBHOOK_URL: 'https://hooks.example.test/abc' }).alerts.webhookUrl).toBe('https://hooks.example.test/abc');
+    for (const bad of ['http://hooks.example.test/abc', 'https://user:pw@hooks.example.test/', 'not a url']) {
+      expect(() => loadConfig({ ...base, ALERT_WEBHOOK_URL: bad })).toThrow('ALERT_WEBHOOK_URL');
+    }
+  });
 });

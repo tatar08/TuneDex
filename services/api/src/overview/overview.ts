@@ -7,6 +7,7 @@ import { APP_CONFIG, AppConfig } from '../config';
 import { Database } from '../db/database';
 import { RequireRoles, StaffGuard } from '../staff/staff';
 import { StationHealthService } from '../stations/station-health';
+import { AlertService } from './alerts';
 
 /** Doc 17 /admin/overview windows. Each bucket is one bar in the chart. */
 export const WINDOWS = {
@@ -24,13 +25,23 @@ const STALE_AFTER_MS = 15 * 60_000;
 /** Warn before the 30-day deletion deadline, not on it. */
 const DELETION_WARN_DAYS = 25;
 
-export type IncidentCode = 'api_error_rate' | 'stations_suspect' | 'station_checker_stale' | 'account_deletion_failed' | 'account_deletion_late' | 'no_recent_traffic';
+export type IncidentCode =
+  | 'api_error_rate'
+  | 'api_latency'
+  | 'stations_suspect'
+  | 'station_checker_stale'
+  | 'account_deletion_failed'
+  | 'account_deletion_stuck'
+  | 'account_deletion_late'
+  | 'no_recent_traffic';
 
 export interface Incident {
   code: IncidentCode;
   severity: 'critical' | 'warning';
-  /** How many things are affected (stations, requests, deletions); meaning depends on code. */
+  /** How many things are affected (stations, requests, deletions; p95 milliseconds for api_latency); meaning depends on code. */
   count: number;
+  /** Set when the incident is an open alert (Doc 17 rules, evaluated every minute): when it started. */
+  since?: string;
 }
 
 export interface Overview {
@@ -78,6 +89,7 @@ export class OverviewService {
   constructor(
     private readonly db: Database,
     private readonly health: StationHealthService,
+    private readonly alerts: AlertService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -87,7 +99,7 @@ export class OverviewService {
     const range = [from.toISOString(), now.toISOString()];
     const requests = `FROM operational_logs WHERE event_code = 'HTTP_REQUEST' AND logged_at >= $1 AND logged_at < $2`;
 
-    const [[totals], buckets, topErrors, [last], stationRows, [deletions], [diag], [lastCheck]] = await Promise.all([
+    const [[totals], buckets, topErrors, [last], stationRows, [deletions], [diag], [lastCheck], openAlerts] = await Promise.all([
       this.db.query<{ n: string; s5: string; s4: string; p50: number | null; p95: number | null }>(
         `SELECT count(*) AS n, count(*) FILTER (WHERE status >= 500) AS s5, count(*) FILTER (WHERE status >= 400 AND status < 500) AS s4,
                 percentile_disc(0.5) WITHIN GROUP (ORDER BY duration_ms) AS p50,
@@ -114,6 +126,7 @@ export class OverviewService {
       ),
       this.db.query<{ n: string }>(`SELECT count(*) AS n FROM diagnostic_reports WHERE received_at >= $1 AND received_at < $2`, range),
       this.db.query<{ at: Date | null }>(`SELECT max(checked_at) AS at FROM station_health WHERE target = 'published'`),
+      this.alerts.open(),
     ]);
 
     const live = stationRows.filter((s) => !s.disabled).map((s) => s.id);
@@ -139,6 +152,12 @@ export class OverviewService {
     if (health.suspect > 0) incidents.push({ code: 'stations_suspect', severity: 'warning', count: health.suspect });
     if (checkerLate) incidents.push({ code: 'station_checker_stale', severity: 'warning', count: live.length });
     if (stale) incidents.push({ code: 'no_recent_traffic', severity: 'warning', count: 0 });
+    // Open alerts are about now, whatever window is shown; the window's own findings above take precedence.
+    for (const a of openAlerts) {
+      const existing = incidents.find((i) => i.code === a.code);
+      if (existing) existing.since = a.firedAt;
+      else incidents.push({ code: a.code, severity: a.severity, count: a.code === 'api_error_rate' ? Math.round((a.value ?? 0) * (a.sample ?? 0)) : Math.round(a.value ?? 0), since: a.firedAt });
+    }
 
     return {
       window: { id: windowId, from: from.toISOString(), to: now.toISOString() },

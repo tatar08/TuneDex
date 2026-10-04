@@ -60,6 +60,7 @@ export function testConfig(databaseUrl: string): AppConfig {
     billing: { apple: null, google: null },
     auditRetentionEnabled: false,
     staffMfaAcr: null,
+    alerts: { enabled: false, webhookUrl: null },
     stationCheck: { enabled: false, intervalMinutes: 15, region: 'test-region' },
     configSigningKey: null,
     idpAdmin: {
@@ -139,12 +140,12 @@ export async function createTestDatabase(): Promise<{ url: string; drop: () => P
   };
 }
 
-export async function createTestApp(databaseUrl: string, keyResolver: JWTVerifyGetKey, extra: Pick<AppDeps, 'probeDeps' | 'googleFetch' | 'googlePushKeys'> & { config?: Partial<AppConfig> } = {}) {
+export async function createTestApp(databaseUrl: string, keyResolver: JWTVerifyGetKey, extra: Pick<AppDeps, 'probeDeps' | 'googleFetch' | 'googlePushKeys' | 'alertFetch'> & { config?: Partial<AppConfig> } = {}) {
   const pool = createPool(databaseUrl);
   const logs: string[] = [];
   const idp = createFakeIdp();
   const moduleRef = await Test.createTestingModule({
-    imports: [AppModule.forRoot({ config: { ...testConfig(databaseUrl), ...extra.config }, pool, keyResolver, logWriter: (l) => logs.push(l), probeDeps: extra.probeDeps, idpFetch: idp.fetch, googleFetch: extra.googleFetch, googlePushKeys: extra.googlePushKeys })],
+    imports: [AppModule.forRoot({ config: { ...testConfig(databaseUrl), ...extra.config }, pool, keyResolver, logWriter: (l) => logs.push(l), probeDeps: extra.probeDeps, idpFetch: idp.fetch, googleFetch: extra.googleFetch, googlePushKeys: extra.googlePushKeys, alertFetch: extra.alertFetch })],
   }).compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false, bodyParser: false });
   configureApp(app);

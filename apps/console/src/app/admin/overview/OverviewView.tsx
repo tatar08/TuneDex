@@ -20,10 +20,15 @@ const INCIDENTS: Record<IncidentCode, { title: string; detail: (n: number) => st
   api_error_rate: { title: 'API ตอบ error บ่อย', detail: (n) => `${n} คำขอจบด้วย 5xx เกิน 5% ของทั้งหมด`, href: '/admin/logs?severity=ERROR' },
   account_deletion_failed: { title: 'ลบบัญชีไม่สำเร็จ', detail: (n) => `${n} คำขอกำลังลองใหม่อัตโนมัติ ดูบันทึก ACCOUNT_PURGE_FAILED`, href: '/admin/logs?eventCode=ACCOUNT_PURGE_FAILED' },
   account_deletion_late: { title: 'ลบบัญชีใกล้เกินกำหนด 30 วัน', detail: (n) => `${n} คำขอค้างนานกว่า 25 วัน` },
+  account_deletion_stuck: { title: 'คิวลบบัญชีค้าง', detail: (n) => `${n} คำขอยังไม่เริ่มลบหลังผ่านไป 5 นาที`, href: '/admin/jobs' },
+  api_latency: { title: 'API ตอบช้า', detail: (n) => `p95 ${n.toLocaleString('th-TH')} ms เกิน 1 วินาที ใน 10 นาทีล่าสุด`, href: '/admin/logs' },
   stations_suspect: { title: 'สถานีน่าสงสัย', detail: (n) => `${n} สถานีตรวจไม่ผ่าน 3 ครั้งติด รอแอดมินตรวจ`, href: '/admin/stations' },
   station_checker_stale: { title: 'ตัวตรวจสตรีมไม่ได้รัน', detail: () => 'ไม่มีผลตรวจใหม่นานเกิน 2.5 รอบ' },
   no_recent_traffic: { title: 'ไม่มีคำขอเข้ามาเลย', detail: () => 'ไม่มีคำขอใน 15 นาทีล่าสุด ตัวเลขอาจไม่ใช่สถานะตอนนี้' },
 };
+
+/** An open alert also says since when (Doc 17 rules, checked every minute). */
+const detailOf = (i: Overview['incidents'][number]) => INCIDENTS[i.code].detail(i.count) + (i.since ? ` · ตั้งแต่ ${formatLogTime(i.since)}` : '');
 
 const pct = (r: number | null) => (r === null ? '—' : `${(r * 100).toFixed(r < 0.1 ? 1 : 0)}%`);
 const ms = (v: number | null) => (v === null ? '—' : v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${v} ms`);
@@ -145,7 +150,7 @@ function Incidents({ o, className }: { o: Overview; className: string }) {
                 <span className="sr-only">{i.severity === 'critical' ? 'วิกฤต: ' : 'เตือน: '}</span>
                 {d.title}
               </b>
-              <small>{d.detail(i.count)}</small>
+              <small>{detailOf(i)}</small>
             </span>
             {d.href && (
               <a href={d.href} className="adm-link">
@@ -293,7 +298,7 @@ export function OverviewView({ overview: o, status, window }: { overview?: Overv
               <span key={i.code} className="lamp-row">
                 <i className={`lamp ${i.severity}`} aria-hidden="true" />
                 <span className="sr-only">{i.severity === 'critical' ? 'วิกฤต: ' : 'เตือน: '}</span>
-                {INCIDENTS[i.code].title} · {INCIDENTS[i.code].detail(i.count)}
+                {INCIDENTS[i.code].title} · {detailOf(i)}
               </span>
             ))
           )}
@@ -364,7 +369,7 @@ export function OverviewView({ overview: o, status, window }: { overview?: Overv
 
   if (theme === 'workbench') {
     const items = [
-      ...o.incidents.map((i) => ({ id: i.code, title: INCIDENTS[i.code].title, sub: INCIDENTS[i.code].detail(i.count), sev: i.severity as string })),
+      ...o.incidents.map((i) => ({ id: i.code, title: INCIDENTS[i.code].title, sub: detailOf(i), sev: i.severity as string })),
       { id: 'traffic', title: 'คำขอ API', sub: `${num(o.api.requests)} คำขอ · 5xx ${pct(o.api.errorRate)}`, sev: 'info' },
       { id: 'stations', title: 'สุขภาพสถานี', sub: k[3].sub, sev: 'info' },
       { id: 'queues', title: 'คิวงานเบื้องหลัง', sub: k[4].sub, sev: 'info' },
