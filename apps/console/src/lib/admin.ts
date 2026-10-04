@@ -156,6 +156,7 @@ export function rightsDaysLeft(s: AdminStation, now = Date.now()): number | null
 export const canSeeStations = (roles: StaffRole[]) => roles.includes('catalog_editor') || roles.includes('admin');
 export const canSeeLogs = (roles: StaffRole[]) => roles.includes('operator') || roles.includes('admin');
 export const canSeeAudit = (roles: StaffRole[]) => roles.includes('auditor') || roles.includes('admin');
+export const canSeeUsers = (roles: StaffRole[]) => roles.includes('support') || roles.includes('admin');
 
 export const LOG_RANGES = [
   { id: '15m', label: '15 นาทีล่าสุด', ms: 15 * 60_000 },
@@ -274,6 +275,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'account.delete_requested': 'ผู้ใช้ขอลบบัญชี',
   'account.deleted': 'ลบข้อมูลบัญชีเสร็จ',
   'job.retry': 'สั่งงานเบื้องหลังซ้ำ',
+  'user.lookup': 'เปิดดูข้อมูลผู้ใช้',
 };
 export const actionLabel = (a: string) => ACTION_LABELS[a] ?? a;
 /** Family used for colors and the action filter. */

@@ -9,6 +9,7 @@ test.beforeAll(async () => {
   stack.api.staff('grant', 'e2e-admin', 'admin', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-ops', 'operator', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-auditor', 'auditor', '--by', 'e2e', '--reason', 'test');
+  stack.api.staff('grant', 'e2e-support', 'support', '--by', 'e2e', '--reason', 'test');
 });
 
 test.afterAll(async () => {
@@ -412,4 +413,51 @@ test('operators retry a failed account deletion with a reason, in every theme', 
   await expect(editor.getByRole('link', { name: 'งานเบื้องหลัง' })).toHaveCount(0);
   await editor.goto(`${stack.base}/admin/jobs`);
   await expect(editor.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูงานเบื้องหลัง');
+});
+
+test('support looks up a customer by device id with a reason, in every theme', async ({ browser }) => {
+  // A customer whose tablet has not picked up the latest settings yet.
+  await stack.api.sql(
+    `WITH u AS (INSERT INTO users (id, oidc_subject) VALUES ('6f1d2c3b-0000-4000-8000-00000000c0de', 'e2e-support-case') RETURNING id),
+          p AS (INSERT INTO account_preferences (owner_id, schema_version, revision, value) SELECT id, 1, 3, '{}' FROM u)
+     INSERT INTO devices (user_id, id, platform, os_major, app_build, applied_settings_revision, last_seen_at)
+     SELECT u.id, d.id::uuid, d.platform, d.os, d.build, d.rev, now() - d.ago FROM u,
+       (VALUES ('11111111-2222-4333-8444-555555555555', 'ios', 18, '1.0.0+42', 3, interval '5 minutes'),
+               ('99999999-8888-4777-8666-555555555555', 'android', 14, '1.0.0+40', 1, interval '3 days')) d(id, platform, os, build, rev, ago)`,
+  );
+  const page = await signInAs(browser, 'e2e-support', '/admin/users');
+  await expect(page.getByRole('link', { name: 'บันทึกระบบ' })).toHaveCount(0);
+  await page.goto(`${stack.base}/admin`);
+  await expect(page).toHaveURL(`${stack.base}/admin/users`);
+
+  const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
+  const layouts: Record<string, string> = {
+    'control-room': '.t-control-room .cr-page .us-kpis + .ov-grid .us-table',
+    'broadcast-rack': '.t-broadcast-rack .ov-lamps + .us-rack li',
+    'daylight-bento': '.t-daylight-bento .us-bento .b-device',
+    workbench: '.t-workbench .split .us-it.sel',
+    minimal: '.t-minimal .fv-logstats + .fv-card .us-table',
+  };
+  for (const [theme, selector] of Object.entries(layouts)) {
+    await picker.selectOption(theme);
+    await page.getByLabel('รหัสผู้ใช้หรือรหัสเครื่อง').fill('99999999-8888-4777-8666-555555555555');
+    await page.getByLabel('เหตุผล (จะถูกบันทึกไว้ในประวัติ)').fill('ลูกค้าแจ้งว่าแท็บเล็ตไม่ได้ธีมใหม่');
+    await page.getByRole('button', { name: 'ค้นหา' }).click();
+    await expect(page.locator(selector).first()).toBeVisible();
+    if (theme !== 'workbench') await expect(page.getByText('ยังไม่ได้รับการตั้งค่าล่าสุด (ใช้ r1 จาก r3)').first()).toBeVisible();
+    await expect(page.locator('body')).not.toContainText('e2e-support-case');
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/users-${theme}.png`, fullPage: true });
+  }
+  await page.getByLabel('รหัสผู้ใช้หรือรหัสเครื่อง').fill('00000000-0000-4000-8000-000000000000');
+  await page.getByRole('button', { name: 'ค้นหา' }).click();
+  await expect(page.locator('.us-problem')).toContainText('ไม่พบบัญชี');
+
+  const logged = (await stack.api.sql(`SELECT target_id, changes->>'found' AS found FROM audit_events WHERE action = 'user.lookup' ORDER BY id`)) as { rows: { target_id: string; found: string }[] };
+  expect(logged.rows).toHaveLength(6);
+  expect(logged.rows.at(-1)).toEqual({ target_id: 'none', found: 'false' });
+
+  const ops = await signInAs(browser, 'e2e-ops', '/admin/overview');
+  await expect(ops.getByRole('link', { name: 'ผู้ใช้' })).toHaveCount(0);
+  await ops.goto(`${stack.base}/admin/users`);
+  await expect(ops.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูข้อมูลผู้ใช้');
 });

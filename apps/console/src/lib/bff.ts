@@ -223,6 +223,26 @@ export interface JobsPage {
 }
 const JOB_ID = /^[0-9a-f]{64}$/;
 
+/** POST /v1/admin/users/lookup (Doc 17 support lookup): minimal, no email, settings values or roles. */
+export interface UserSupportView {
+  matchedBy: 'user' | 'device';
+  user: { id: string; status: 'active' | 'deleting' | 'deleted' | 'disabled'; createdAt: string; deletedAt: string | null };
+  settings: { revision: number; updatedAt: string | null };
+  devices: {
+    id: string;
+    platform: 'ios' | 'android';
+    osMajor: number;
+    appBuild: string;
+    appliedSettingsRevision: number;
+    inSync: boolean;
+    createdAt: string;
+    lastSeenAt: string;
+    revokedAt: string | null;
+  }[];
+  diagnostics: { reportsLast7Days: number };
+  deletion: { status: 'pending' | 'failed' | 'completed'; requestedAt: string } | null;
+}
+
 export interface AuditPage {
   events: AuditEvent[];
   nextCursor: string | null;
@@ -468,6 +488,9 @@ export function createBff(deps: BffDeps) {
       timed(req, '/bff/admin/jobs/:id/retry', async (requestId) =>
         JOB_ID.test(id) ? adminProxy(req, requestId, `/v1/admin/jobs/${id}/retry`, true) : notFound(requestId),
       ),
+
+    /** POST /bff/admin/users/lookup with `{ query, reason }`; the API checks the role and records the lookup. */
+    userLookup: (req: Request) => timed(req, '/bff/admin/users/lookup', (requestId) => adminProxy(req, requestId, '/v1/admin/users/lookup', true)),
 
     /** Server-side audit search for /admin/audit. Null means the user must sign in again. */
     async loadAudit(
