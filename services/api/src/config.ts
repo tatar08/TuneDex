@@ -62,13 +62,18 @@ export interface AppConfig {
    * the API from its server (BFF) and needs no entry here.
    */
   corsAllowedOrigins: string[];
-  /** Scheduled stream checks of published stations (Doc 17). Off unless STATION_CHECK_ENABLED=true. */
   /** Doc 17 alerts: evaluated every minute; transitions go to the logs and, when set, to a webhook. */
   alerts: { enabled: boolean; webhookUrl: string | null };
+  /**
+   * Scheduled stream checks of published stations (Doc 17). Off unless STATION_CHECK_ENABLED=true.
+   * `runner: 'worker'` (STATION_CHECK_RUNNER=worker) moves every probe, scheduled and "check now", to the
+   * separate `npm run checker` process, so only that process needs outbound network access.
+   */
   stationCheck: {
     enabled: boolean;
     intervalMinutes: number;
     region: string;
+    runner: 'api' | 'worker';
   };
 }
 
@@ -268,5 +273,7 @@ function loadStationCheck(env: NodeJS.ProcessEnv): AppConfig['stationCheck'] {
   }
   const region = (env.STATION_CHECK_REGION ?? 'default').trim();
   if (!/^[a-z0-9-]{1,32}$/.test(region)) throw new Error('STATION_CHECK_REGION must be 1-32 lowercase letters, digits or dashes');
-  return { enabled: enabled === 'true', intervalMinutes, region };
+  const runner = (env.STATION_CHECK_RUNNER ?? 'api').trim();
+  if (runner !== 'api' && runner !== 'worker') throw new Error('STATION_CHECK_RUNNER must be api or worker');
+  return { enabled: enabled === 'true', intervalMinutes, region, runner };
 }

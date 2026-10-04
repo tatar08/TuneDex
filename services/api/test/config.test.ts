@@ -32,7 +32,7 @@ describe('loadConfig', () => {
   });
 
   it('keeps stream checks off by default', () => {
-    expect(loadConfig(base).stationCheck).toEqual({ enabled: false, intervalMinutes: 15, region: 'default' });
+    expect(loadConfig(base).stationCheck).toEqual({ enabled: false, intervalMinutes: 15, region: 'default', runner: 'api' });
   });
 
   it.each([
@@ -40,6 +40,7 @@ describe('loadConfig', () => {
     ['STATION_CHECK_INTERVAL_MIN', '1'],
     ['STATION_CHECK_INTERVAL_MIN', '7.5'],
     ['STATION_CHECK_REGION', 'Asia Southeast'],
+    ['STATION_CHECK_RUNNER', 'both'],
     ['RATE_LIMIT_READS_PER_MIN', '0'],
     ['RATE_LIMIT_WRITES_PER_MIN', 'many'],
     ['RATE_LIMIT_CATALOG_PER_MIN', '1.5'],

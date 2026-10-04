@@ -62,7 +62,7 @@ export function testConfig(databaseUrl: string): AppConfig {
     staffMfaAcr: null,
     corsAllowedOrigins: [],
     alerts: { enabled: false, webhookUrl: null },
-    stationCheck: { enabled: false, intervalMinutes: 15, region: 'test-region' },
+    stationCheck: { enabled: false, intervalMinutes: 15, region: 'test-region', runner: 'api' },
     configSigningKey: null,
     idpAdmin: {
       tokenUrl: 'https://idp.test/realms/tunedeck/protocol/openid-connect/token',

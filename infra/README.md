@@ -44,7 +44,7 @@ Do not reuse the local stack as is. In particular:
 - Run Keycloak with `start` (not `start-dev`), on https with its own PostgreSQL database, and set `KC_HOSTNAME` to the public https URL.
 - Import the realm with real values for the placeholders. Set the console's redirect to its public https URL.
 - Configure SMTP for email verification and password reset, and decide whether `verifyEmail` should be on.
-- API: `APP_ENV=staging` or `production`, `STAFF_MFA_ACR=mfa`, `CONFIG_SIGNING_KEY`, `KEYCLOAK_ADMIN_CLIENT_*`. Turn on `STATION_CHECK_ENABLED=true` once the network egress rules from Doc 17 are in place. The API refuses to start without the first three.
+- API: `APP_ENV=staging` or `production`, `STAFF_MFA_ACR=mfa`, `CONFIG_SIGNING_KEY`, `KEYCLOAK_ADMIN_CLIENT_*`. Turn on `STATION_CHECK_ENABLED=true` once the network egress rules from Doc 17 are in place: run `npm run checker` (same image, same `DATABASE_URL` and `STATION_CHECK_*` keys) as its own service with outbound HTTPS on 443, set `STATION_CHECK_RUNNER=worker` on both, and give the API no outbound access to stream hosts. The API refuses to start without the first three.
 - Console: an https `CONSOLE_BASE_URL`, `SESSION_DATABASE_URL`, `OIDC_MFA_ACR=mfa`.
 - The API and console must reach Keycloak at the same issuer URL the browsers use.
 - Alerts: the API covers traffic, latency, the background queues (oldest due job over 5 minutes per queue, any dead letter) and late deletions (set `ALERT_WEBHOOK_URL` for chat messages). The hosting platform has to cover what the API cannot see: database connection pool above 80% for 10 minutes, disk above 80%, and no successful backup for 24 hours (Doc 17).

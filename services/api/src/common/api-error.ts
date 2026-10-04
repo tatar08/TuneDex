@@ -17,6 +17,7 @@ export type ErrorCode =
   | 'ROLE_REQUIRED'
   | 'PUBLISH_BLOCKED'
   | 'CHECK_TOO_SOON'
+  | 'CHECKER_UNAVAILABLE'
   | 'RIGHTS_ALREADY_REVOKED'
   | 'API_RATE_LIMITED'
   | 'ACCOUNT_DELETING'
@@ -50,6 +51,7 @@ export const MESSAGE_KEYS: Record<ErrorCode, string> = {
   ROLE_REQUIRED: 'errors.auth.roleRequired',
   PUBLISH_BLOCKED: 'errors.stations.publishBlocked',
   CHECK_TOO_SOON: 'errors.stations.checkTooSoon',
+  CHECKER_UNAVAILABLE: 'errors.stations.checkerUnavailable',
   RIGHTS_ALREADY_REVOKED: 'errors.stations.rightsAlreadyRevoked',
   API_RATE_LIMITED: 'errors.request.rateLimited',
   ACCOUNT_DELETING: 'errors.account.deleting',

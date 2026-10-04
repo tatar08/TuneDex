@@ -15,7 +15,8 @@
     "test": "jest --runInBand",
     "staff": "node dist/staff/staff-cli.js",
     "config-key": "node dist/app-config/config-key-cli.js",
-    "restore-reconcile": "node dist/account/restore-reconcile-cli.js"
+    "restore-reconcile": "node dist/account/restore-reconcile-cli.js",
+    "checker": "node dist/checker.js"
   },
   "dependencies": {
     "@nestjs/common": "11.2.7",
