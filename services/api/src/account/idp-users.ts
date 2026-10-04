@@ -1,0 +1,66 @@
+import { Inject, Injectable } from '@nestjs/common';
+import { APP_CONFIG, AppConfig } from '../config';
+
+/** Tests only: stands in for the network. Production uses the global fetch. */
+export const IDP_FETCH = Symbol('IDP_FETCH');
+export type IdpFetch = typeof fetch;
+
+export type IdpDeleteResult = 'deleted' | 'already_gone' | 'not_configured';
+
+/** A failed call to the identity provider. Carries the HTTP status only, never a body or token. */
+export class IdpError extends Error {
+  override name = 'IdpError';
+  constructor(readonly step: 'token' | 'delete', readonly status: number) {
+    super(`identity provider ${step} failed (${status})`);
+  }
+}
+
+/**
+ * Deletes the sign-in identity at Keycloak when an account is deleted (Tar's decision A, 2026-10-04).
+ * Uses a confidential client's service account (client credentials). Keycloak's user id is the token `sub`.
+ * A user that is already gone counts as done, so a purge that failed later can be retried safely.
+ */
+@Injectable()
+export class IdpUsersService {
+  private token: { value: string; expiresAt: number } | null = null;
+
+  constructor(
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(IDP_FETCH) private readonly http: IdpFetch,
+  ) {}
+
+  async deleteUser(subject: string): Promise<IdpDeleteResult> {
+    const admin = this.config.idpAdmin;
+    if (!admin) return 'not_configured';
+    const res = await this.http(`${admin.adminBase}/users/${encodeURIComponent(subject)}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${await this.accessToken()}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.status === 401) this.token = null; // revoked or rotated: fetch a new one on the next attempt
+    if (res.status === 404) return 'already_gone';
+    if (!res.ok) throw new IdpError('delete', res.status);
+    return 'deleted';
+  }
+
+  private async accessToken(): Promise<string> {
+    if (this.token && this.token.expiresAt > Date.now()) return this.token.value;
+    const admin = this.config.idpAdmin!;
+    const res = await this.http(admin.tokenUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${Buffer.from(`${encodeURIComponent(admin.clientId)}:${encodeURIComponent(admin.clientSecret)}`).toString('base64')}`,
+      },
+      body: new URLSearchParams({ grant_type: 'client_credentials' }).toString(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new IdpError('token', res.status);
+    const body = (await res.json()) as { access_token?: unknown; expires_in?: unknown };
+    if (typeof body.access_token !== 'string') throw new IdpError('token', res.status);
+    const ttl = typeof body.expires_in === 'number' ? body.expires_in : 60;
+    // Renew 30 s early so a token never expires between the check and the call.
+    this.token = { value: body.access_token, expiresAt: Date.now() + Math.max(ttl - 30, 0) * 1000 };
+    return this.token.value;
+  }
+}

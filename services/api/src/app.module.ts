@@ -5,6 +5,7 @@ import { json } from 'express';
 import type { JWTVerifyGetKey } from 'jose';
 import type { Pool } from 'pg';
 import { AccountDeletionStatusController, AccountService, MyAccountController } from './account/account';
+import { IDP_FETCH, IdpFetch, IdpUsersService } from './account/idp-users';
 import { AdminJobsController, JobsService } from './jobs/jobs';
 import { AdminUsersController, AdminUsersService } from './users/admin-users';
 import { AdminOverviewController, OverviewService } from './overview/overview';
@@ -38,6 +39,8 @@ export interface AppDeps {
   logWriter?: LogWriter;
   /** Tests only: fake DNS/HTTPS for the stream checker. Production uses the real ones. */
   probeDeps?: ProbeDeps;
+  /** Tests only: fake Keycloak admin API. Production uses the global fetch. */
+  idpFetch?: IdpFetch;
 }
 
 @Module({})
@@ -62,6 +65,8 @@ export class AppModule {
         DevicesService,
         DiagnosticsService,
         AccountService,
+        IdpUsersService,
+        { provide: IDP_FETCH, useValue: deps.idpFetch ?? ((input: Parameters<IdpFetch>[0], init?: Parameters<IdpFetch>[1]) => fetch(input, init)) },
         OverviewService,
         JobsService,
         AdminUsersService,

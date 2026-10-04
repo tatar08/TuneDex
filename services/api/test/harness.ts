@@ -56,7 +56,42 @@ export function testConfig(databaseUrl: string): AppConfig {
     oidc: { issuer: ISSUER, audience: AUDIENCE, jwksUri: 'https://idp.test/unused', algorithms: ['RS256'] },
     rateLimit: { enabled: false, readsPerMinute: 120, writesPerMinute: 30, catalogPerMinutePerIp: 60, trustProxyHops: 0 },
     stationCheck: { enabled: false, intervalMinutes: 15, region: 'test-region' },
+    idpAdmin: {
+      tokenUrl: 'https://idp.test/realms/tunedeck/protocol/openid-connect/token',
+      adminBase: 'https://idp.test/admin/realms/tunedeck',
+      clientId: 'tunedeck-api-admin',
+      clientSecret: 'test-only-secret',
+    },
   };
+}
+
+/**
+ * Test-only Keycloak admin API: issues client-credentials tokens and deletes users by id. Every user exists
+ * until deleted; `failDeletes` makes the delete call answer 503.
+ */
+export function createFakeIdp() {
+  const deleted: string[] = [];
+  const state = { failDeletes: false, tokenRequests: 0 };
+  const fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const url = String(input);
+    if (url === 'https://idp.test/realms/tunedeck/protocol/openid-connect/token') {
+      const ok = init?.method === 'POST' && (init.headers as Record<string, string>).Authorization === `Basic ${Buffer.from('tunedeck-api-admin:test-only-secret').toString('base64')}`;
+      if (!ok) return new Response('{}', { status: 401 });
+      state.tokenRequests++;
+      return Response.json({ access_token: 'admin-token', expires_in: 300 });
+    }
+    const m = /^https:\/\/idp\.test\/admin\/realms\/tunedeck\/users\/([^/]+)$/.exec(url);
+    if (m && init?.method === 'DELETE') {
+      if ((init.headers as Record<string, string>).Authorization !== 'Bearer admin-token') return new Response(null, { status: 401 });
+      if (state.failDeletes) return new Response(null, { status: 503 });
+      const id = decodeURIComponent(m[1]);
+      if (deleted.includes(id)) return new Response(null, { status: 404 });
+      deleted.push(id);
+      return new Response(null, { status: 204 });
+    }
+    return new Response(null, { status: 404 });
+  };
+  return { fetch: fetch as typeof globalThis.fetch, deleted, state };
 }
 
 const ADMIN_URL = process.env.TEST_DATABASE_URL ?? 'postgres://postgres@127.0.0.1:54329/postgres';
@@ -87,8 +122,9 @@ export async function createTestDatabase(): Promise<{ url: string; drop: () => P
 export async function createTestApp(databaseUrl: string, keyResolver: JWTVerifyGetKey, extra: Pick<AppDeps, 'probeDeps'> & { config?: Partial<AppConfig> } = {}) {
   const pool = createPool(databaseUrl);
   const logs: string[] = [];
+  const idp = createFakeIdp();
   const moduleRef = await Test.createTestingModule({
-    imports: [AppModule.forRoot({ config: { ...testConfig(databaseUrl), ...extra.config }, pool, keyResolver, logWriter: (l) => logs.push(l), probeDeps: extra.probeDeps })],
+    imports: [AppModule.forRoot({ config: { ...testConfig(databaseUrl), ...extra.config }, pool, keyResolver, logWriter: (l) => logs.push(l), probeDeps: extra.probeDeps, idpFetch: idp.fetch })],
   }).compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false, bodyParser: false });
   configureApp(app);
@@ -96,6 +132,7 @@ export async function createTestApp(databaseUrl: string, keyResolver: JWTVerifyG
   return {
     app,
     pool,
+    idp,
     logs: captureFrom(logs),
     close: async () => {
       await app.close();

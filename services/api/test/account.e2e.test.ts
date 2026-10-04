@@ -117,6 +117,10 @@ describe('account export and deletion', () => {
       { actor: `user:${user.id}`, action: 'account.delete_requested' },
       { actor: 'system:account-deletion', action: 'account.deleted' },
     ]);
+    // Tar's decision A: the Keycloak user goes too, by its id (the token subject).
+    expect(t.idp.deleted).toContain('acct-delete');
+    const { rows: [deletedEvent] } = await t.pool.query(`SELECT changes FROM audit_events WHERE action = 'account.deleted' AND target_id = $1`, [user.id]);
+    expect(deletedEvent.changes).toEqual({ idpUser: 'deleted' });
 
     // A token from a sign-in before the request (a phone still holding one) cannot start a new account...
     const old = await http().get('/v1/me/devices').set(fresh);
@@ -148,6 +152,40 @@ describe('account export and deletion', () => {
     }
     expect(await service.processQueue()).toBe(1);
     expect((await http().get(`/v1/account-deletions/${res.body.ticket}`).expect(200)).body.status).toBe('completed');
+  });
+
+  it('only completes once the Keycloak user is deleted, and keeps the account intact until then', async () => {
+    await seed('acct-idp-down');
+    t.idp.state.failDeletes = true;
+    let ticket = '';
+    try {
+      ticket = (await http().delete('/v1/me/account').set(await bearer('acct-idp-down', now())).expect(202)).body.ticket;
+      t.logs.mark();
+      expect(await t.app.get(AccountService).processQueue()).toBe(0);
+      expect((await http().get(`/v1/account-deletions/${ticket}`).expect(200)).body.status).toBe('failed');
+      // Nothing local was removed: the next attempt starts over with the same identity.
+      const { rows: [u] } = await t.pool.query(`SELECT id, status FROM users WHERE oidc_subject = 'acct-idp-down'`);
+      expect(u.status).toBe('deleting');
+      expect((await t.pool.query('SELECT 1 FROM account_preferences WHERE owner_id = $1', [u.id])).rows).toHaveLength(1);
+      expect(t.logs.lines()).toContainEqual(expect.objectContaining({ eventCode: 'ACCOUNT_PURGE_FAILED', errorCode: 'IDP_DELETE_FAILED', status: 503 }));
+      expect(t.logs.raw()).not.toContain('admin-token');
+      expect(t.logs.raw()).not.toContain('test-only-secret');
+    } finally {
+      t.idp.state.failDeletes = false;
+    }
+    expect(await t.app.get(AccountService).processQueue()).toBe(1);
+    expect((await http().get(`/v1/account-deletions/${ticket}`).expect(200)).body.status).toBe('completed');
+    expect(t.idp.deleted).toContain('acct-idp-down');
+  });
+
+  it('treats a Keycloak user that is already gone as deleted, so a retry after a local failure completes', async () => {
+    await seed('acct-idp-gone');
+    t.idp.deleted.push('acct-idp-gone'); // removed at Keycloak by an earlier attempt or by hand
+    const ticket = (await http().delete('/v1/me/account').set(await bearer('acct-idp-gone', now())).expect(202)).body.ticket;
+    await t.app.get(AccountService).processQueue();
+    expect((await http().get(`/v1/account-deletions/${ticket}`).expect(200)).body.status).toBe('completed');
+    const { rows: [e] } = await t.pool.query(`SELECT changes FROM audit_events WHERE action = 'account.deleted' ORDER BY id DESC LIMIT 1`);
+    expect(e.changes).toEqual({ idpUser: 'already_gone' });
   });
 
   it('answers 404 for an unknown or malformed ticket', async () => {

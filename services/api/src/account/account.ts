@@ -23,6 +23,7 @@ import { ApiError } from '../common/api-error';
 import { StructuredLogger } from '../common/logger';
 import { Database, PG_POOL } from '../db/database';
 import { DevicesService } from '../devices/devices.service';
+import { IdpError, IdpUsersService } from './idp-users';
 import { SettingsService } from '../settings/settings.service';
 import { subjectHash } from '../users/users.service';
 
@@ -53,6 +54,7 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
     private readonly settings: SettingsService,
     private readonly devices: DevicesService,
     private readonly logger: StructuredLogger,
+    private readonly idp: IdpUsersService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -213,7 +215,11 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
       await this.db
         .query(`UPDATE account_deletions SET status = 'failed', attempts = attempts + 1, last_attempt_at = now() WHERE ticket_hash = $1`, [ticketHash])
         .catch(() => undefined);
-      this.logger.log('ERROR', { eventCode: 'ACCOUNT_PURGE_FAILED', errorName: (err as Error)?.name ?? 'Error' });
+      this.logger.log('ERROR', {
+        eventCode: 'ACCOUNT_PURGE_FAILED',
+        errorName: (err as Error)?.name ?? 'Error',
+        ...(err instanceof IdpError ? { errorCode: `IDP_${err.step.toUpperCase()}_FAILED`, status: err.status } : {}),
+      });
       return false;
     }
   }
@@ -246,11 +252,16 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
   }
 
   /**
-   * Removes the account's data in one transaction and leaves a tombstone: the users row keeps only its id,
-   * creation time and status, so station history and the audit trail still resolve. The OIDC subject is
-   * replaced, so signing in again with the same identity starts a new, empty account.
+   * Deletes the Keycloak user first, then removes the account's data in one transaction and leaves a tombstone:
+   * the users row keeps only its id, creation time and status, so station history and the audit trail still
+   * resolve. The request only counts as completed once both are done. If Keycloak fails nothing local changes
+   * and the next attempt starts over; a Keycloak user already gone counts as deleted, so retries are safe.
    */
   private async purge(ticketHash: string, userId: string): Promise<void> {
+    const [user] = await this.db.query<{ oidc_subject: string; status: string }>('SELECT oidc_subject, status FROM users WHERE id = $1', [userId]);
+    // While the account is 'deleting' the guard refuses this subject, so no new account can claim it meanwhile.
+    const idpUser = user?.status === 'deleting' && !user.oidc_subject.startsWith('deleted:') ? await this.idp.deleteUser(user.oidc_subject) : 'already_gone';
+    if (idpUser === 'not_configured') this.logger.log('WARN', { eventCode: 'IDP_USER_KEPT' });
     await this.db.transaction(async (query) => {
       // diagnostic_events has no foreign key to devices; diagnostic_reports cascades to it.
       await query('DELETE FROM diagnostic_reports WHERE user_id = $1', [userId]);
@@ -266,7 +277,7 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
         `UPDATE account_deletions SET status = 'completed', attempts = attempts + 1, last_attempt_at = now(), completed_at = now() WHERE ticket_hash = $1`,
         [ticketHash],
       );
-      await writeAudit(query, { actor: 'system:account-deletion', action: 'account.deleted', targetType: 'account', targetId: userId });
+      await writeAudit(query, { actor: 'system:account-deletion', action: 'account.deleted', targetType: 'account', targetId: userId, changes: { idpUser } });
     });
     this.logger.log('INFO', { eventCode: 'ACCOUNT_PURGED' });
   }
