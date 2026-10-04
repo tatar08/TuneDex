@@ -161,6 +161,23 @@ const STATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 const DELETION_TICKET = /^[A-Za-z0-9_-]{43}$/;
 const EXPORT_LINK = /^\/v1\/export-downloads\/[A-Za-z0-9_-]{43}$/;
 
+export interface SupportGrant {
+  id: string;
+  grantedAt: string;
+  expiresAt: string;
+}
+export interface SupportReports {
+  access: SupportGrant;
+  retentionDays: number;
+  reports: Array<{
+    id: string;
+    receivedAt: string;
+    platform: string | null;
+    eventCount: number;
+    items: Array<{ eventName: string; monotonicMs: number; durationMs: number | null; resultCode: string | null; networkClass: string; appBuild: string; osMajor: number; deviceClass: string }>;
+  }>;
+}
+
 export type ExportStatus = 'pending' | 'ready' | 'failed';
 export interface ExportJob {
   id: string;
@@ -316,7 +333,8 @@ export interface UserSupportView {
     lastSeenAt: string;
     revokedAt: string | null;
   }[];
-  diagnostics: { reportsLast7Days: number };
+  /** `access`: this staff member's running access to the reports, from the customer's code. */
+  diagnostics: { reportsLast7Days: number; access: { id: string; expiresAt: string } | null };
   deletion: { status: 'pending' | 'failed' | 'completed'; requestedAt: string } | null;
 }
 
@@ -448,7 +466,8 @@ export function createBff(deps: BffDeps) {
     const retryAfter = upstream.headers.get('retry-after');
     if (retryAfter && /^\d{1,3}$/.test(retryAfter)) headers['retry-after'] = retryAfter;
     const body = await upstream.text();
-    return new Response(body, {
+    // A 204 or 304 must not carry a body, even an empty string.
+    return new Response(upstream.status === 204 || upstream.status === 304 ? null : body, {
       status: upstream.status,
       headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-request-id': requestId, ...headers },
     });
@@ -584,6 +603,28 @@ export function createBff(deps: BffDeps) {
 
     /** POST /bff/admin/users/lookup with `{ query, reason }`; the API checks the role and records the lookup. */
     userLookup: (req: Request) => timed(req, '/bff/admin/users/lookup', (requestId) => adminProxy(req, requestId, '/v1/admin/users/lookup', true)),
+
+    /** POST /bff/admin/users/{id}/diagnostics/access `{ code, reason }`: support enters the customer's code. */
+    supportRedeem: (req: Request, userId: string) =>
+      timed(req, '/bff/admin/users/:id/diagnostics/access', (requestId) =>
+        DEVICE_ID.test(userId) ? adminProxy(req, requestId, `/v1/admin/users/${userId}/diagnostics/access`, true) : Promise.resolve(notFound(requestId)),
+      ),
+
+    /** GET /bff/admin/users/{id}/diagnostics: the customer's reports, for the support member they gave access to. */
+    supportReports: (req: Request, userId: string) =>
+      timed(req, '/bff/admin/users/:id/diagnostics', (requestId) =>
+        DEVICE_ID.test(userId) ? adminProxy(req, requestId, `/v1/admin/users/${userId}/diagnostics`, false) : Promise.resolve(notFound(requestId)),
+      ),
+
+    /** GET /bff/support-access: the accesses this customer has given support. */
+    mySupportAccess: (req: Request) => timed(req, '/bff/support-access', (requestId) => adminProxy(req, requestId, '/v1/me/support-access', false)),
+
+    /** POST /bff/support-access/codes: a one-time code to read out to support. */
+    supportCode: (req: Request) => timed(req, '/bff/support-access/codes', (requestId) => adminProxy(req, requestId, '/v1/me/support-access/codes', true)),
+
+    /** DELETE /bff/support-access/{id}: the customer withdraws an access. */
+    revokeSupportAccess: (req: Request, id: string) =>
+      timed(req, '/bff/support-access/:id', (requestId) => (DEVICE_ID.test(id) ? adminProxy(req, requestId, `/v1/me/support-access/${id}`, true) : Promise.resolve(notFound(requestId)))),
 
     /** Server-side audit search for /admin/audit. Null means the user must sign in again. */
     async loadAudit(

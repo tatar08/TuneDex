@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { DiagnosticReport, DiagnosticsView, ExportJob } from '@/lib/bff';
+import type { DiagnosticReport, DiagnosticsView, ExportJob, SupportGrant } from '@/lib/bff';
 import { Lang, strings } from '@/lib/i18n';
 import { AppNav } from '../AppNav';
 
@@ -211,6 +211,8 @@ export function PrivacyView({
         )}
       </section>
 
+      <SupportAccess lang={lang} csrfToken={csrfToken} fmt={fmt} onAnnounce={setAnnounce} />
+
       <section className="device" aria-labelledby="delete-title">
         <h2 id="delete-title">{t.deleteTitle}</h2>
         <p className="status">{t.deleteText}</p>
@@ -255,5 +257,98 @@ export function PrivacyView({
         {announce}
       </p>
     </main>
+  );
+}
+
+/** Doc 17: the customer lets one support member see their diagnostic reports by reading out a one-time code. */
+function SupportAccess({ lang, csrfToken, fmt, onAnnounce }: { lang: Lang; csrfToken: string; fmt: Intl.DateTimeFormat; onAnnounce: (s: string) => void }) {
+  const t = strings(lang);
+  const [grants, setGrants] = useState<SupportGrant[] | null>(null);
+  const [limits, setLimits] = useState({ codeMinutes: 60, accessDays: 7 });
+  const [code, setCode] = useState<{ code: string; expiresAt: string } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [problem, setProblem] = useState('');
+  const headers = { 'content-type': 'application/json', 'x-csrf-token': csrfToken };
+
+  useEffect(() => {
+    fetch('/bff/support-access')
+      .then(async (res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        const body = (await res.json()) as { grants: SupportGrant[]; codeMinutes: number; accessDays: number };
+        setGrants(body.grants);
+        setLimits({ codeMinutes: body.codeMinutes, accessDays: body.accessDays });
+      })
+      .catch(() => setGrants([]));
+  }, []);
+
+  async function makeCode() {
+    setBusy('code');
+    setProblem('');
+    try {
+      const res = await fetch('/bff/support-access/codes', { method: 'POST', headers, body: '{}' });
+      if (res.status === 201) setCode((await res.json()) as { code: string; expiresAt: string });
+      else setProblem(res.status === 401 ? t.expired : res.status === 429 ? t.rateLimited : t.shareUnavailable);
+    } catch {
+      setProblem(t.shareUnavailable);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function revoke(id: string) {
+    setBusy(id);
+    setProblem('');
+    try {
+      const res = await fetch(`/bff/support-access/${id}`, { method: 'DELETE', headers });
+      if (res.status === 204 || res.status === 404) {
+        setGrants((g) => (g ?? []).filter((x) => x.id !== id));
+        onAnnounce(t.shareRevoked);
+      } else setProblem(res.status === 401 ? t.expired : res.status === 429 ? t.rateLimited : t.shareUnavailable);
+    } catch {
+      setProblem(t.shareUnavailable);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="device" aria-labelledby="support-title">
+      <h2 id="support-title">{t.shareTitle}</h2>
+      <p className="status">{t.shareText(limits.codeMinutes, limits.accessDays)}</p>
+      {problem && (
+        <div role="alert" className="notice error">
+          <p>{problem}</p>
+        </div>
+      )}
+      {code && (
+        <p className="support-code" data-testid="support-code">
+          <code>{code.code}</code> <span className="status">{t.shareCode(fmt.format(new Date(code.expiresAt)))}</span>
+        </p>
+      )}
+      <p>
+        <button type="button" className="btn secondary" disabled={busy !== null} onClick={() => void makeCode()}>
+          {busy === 'code' ? t.shareMaking : t.shareGo}
+        </button>
+      </p>
+      {grants !== null && (
+        <>
+          <h3>{t.shareGrants}</h3>
+          {grants.length === 0 ? (
+            <p className="status">{t.shareNone}</p>
+          ) : (
+            <ul className="devices">
+              {grants.map((g) => (
+                <li key={g.id} data-testid="support-grant">
+                  <span className="device-name">{t.shareGrant(fmt.format(new Date(g.grantedAt)), fmt.format(new Date(g.expiresAt)))}</span>
+                  <button type="button" className="btn secondary" disabled={busy !== null} onClick={() => void revoke(g.id)}>
+                    {t.shareRevoke}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </section>
   );
 }

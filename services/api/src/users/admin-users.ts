@@ -26,7 +26,8 @@ export interface UserSupportView {
     lastSeenAt: string;
     revokedAt: string | null;
   }[];
-  diagnostics: { reportsLast7Days: number };
+  /** `access`: this staff member's running access to the reports, granted by the customer's code (null if none). */
+  diagnostics: { reportsLast7Days: number; access: { id: string; expiresAt: string } | null };
   deletion: { status: 'pending' | 'failed' | 'completed'; requestedAt: string } | null;
 }
 
@@ -76,7 +77,7 @@ export class AdminUsersService {
     });
     if (!userId) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
 
-    const [[u], [prefs], devices, [diag], [deletion]] = await Promise.all([
+    const [[u], [prefs], devices, [diag], [deletion], [access]] = await Promise.all([
       this.db.query<{ id: string; email: string | null; email_verified: boolean; status: UserSupportView['user']['status']; created_at: Date; deleted_at: Date | null }>(
         'SELECT id, email, email_verified, status, created_at, deleted_at FROM users WHERE id = $1',
         [userId],
@@ -91,6 +92,11 @@ export class AdminUsersService {
       this.db.query<{ status: 'pending' | 'failed' | 'completed'; requested_at: Date }>(
         'SELECT status, requested_at FROM account_deletions WHERE user_id = $1 ORDER BY requested_at DESC LIMIT 1',
         [userId],
+      ),
+      this.db.query<{ id: string; expires_at: Date }>(
+        `SELECT id, expires_at FROM support_access_grants
+          WHERE user_id = $1 AND staff_user_id = $2 AND revoked_at IS NULL AND expires_at > now() ORDER BY expires_at DESC LIMIT 1`,
+        [userId, actor.userId],
       ),
     ]);
     const revision = Number(prefs?.revision ?? 0);
@@ -109,7 +115,7 @@ export class AdminUsersService {
         lastSeenAt: d.last_seen_at.toISOString(),
         revokedAt: d.revoked_at?.toISOString() ?? null,
       })),
-      diagnostics: { reportsLast7Days: Number(diag.n) },
+      diagnostics: { reportsLast7Days: Number(diag.n), access: access ? { id: access.id, expiresAt: access.expires_at.toISOString() } : null },
       deletion: deletion ? { status: deletion.status, requestedAt: deletion.requested_at.toISOString() } : null,
     };
   }

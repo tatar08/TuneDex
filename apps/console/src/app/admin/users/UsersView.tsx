@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { canSeeUsers, formatLogTime, RATE_LIMITED } from '@/lib/admin';
-import type { UserSupportView } from '@/lib/bff';
+import type { SupportReports, UserSupportView } from '@/lib/bff';
 import { useAdmin } from '../AdminShell';
 
 /**
@@ -177,6 +177,158 @@ function DeviceTable({ u }: { u: User }) {
   );
 }
 
+const DIAG_PROBLEMS: Record<string, string> = {
+  code: 'รหัสต้องมี 8 ตัว เช่น ABCD-EFGH',
+  reason: 'กรอกเหตุผล 10–500 ตัวอักษร',
+  notFound: 'รหัสนี้ใช้ไม่ได้ (ผิด ใช้ไปแล้ว หมดอายุ หรือเป็นของบัญชีอื่น) ให้ลูกค้าสร้างรหัสใหม่ การลองครั้งนี้ถูกบันทึกแล้ว',
+  noAccess: 'สิทธิ์ดูรายงานหมดแล้ว หรือลูกค้ายกเลิกแล้ว ขอรหัสใหม่จากลูกค้า',
+  expired: PROBLEMS.expired,
+  rate: RATE_LIMITED,
+  down: 'ทำรายการไม่ได้ในขณะนี้ ลองใหม่อีกครั้ง',
+};
+
+/**
+ * Doc 17 "support: redacted case diagnostics that were granted". The customer makes a one-time code on /app/privacy
+ * (or in the app) and reads it out; entering it here with a reason lets this support member, and only them, read
+ * the customer's reports for 7 days. Each read is recorded. Shared by every theme; each places it in its own layout.
+ */
+function SupportDiagnostics({ u }: { u: User }) {
+  const { csrfToken } = useAdmin();
+  const [access, setAccess] = useState(u.diagnostics.access);
+  const [data, setData] = useState<SupportReports | null>(null);
+  const [code, setCode] = useState('');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState('');
+  const problemOf = (status: number, field?: string) =>
+    DIAG_PROBLEMS[
+      status === 400 ? (field === 'code' ? 'code' : 'reason') : status === 404 ? 'notFound' : status === 403 ? 'noAccess' : status === 401 ? 'expired' : status === 429 ? 'rate' : 'down'
+    ];
+
+  async function load() {
+    setBusy(true);
+    setProblem('');
+    try {
+      const res = await fetch(`/bff/admin/users/${u.user.id}/diagnostics`);
+      if (res.ok) setData((await res.json()) as SupportReports);
+      else {
+        if (res.status === 403) setAccess(null);
+        setProblem(problemOf(res.status));
+      }
+    } catch {
+      setProblem(DIAG_PROBLEMS.down);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function redeem() {
+    setBusy(true);
+    setProblem('');
+    try {
+      const res = await fetch(`/bff/admin/users/${u.user.id}/diagnostics/access`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+        body: JSON.stringify({ code, reason }),
+      });
+      if (res.status === 201) {
+        const grant = (await res.json()) as { id: string; expiresAt: string };
+        setAccess({ id: grant.id, expiresAt: grant.expiresAt });
+        setCode('');
+        setBusy(false);
+        await load();
+        return;
+      }
+      const body = (await res.json().catch(() => ({}))) as { details?: { field?: string } };
+      setProblem(problemOf(res.status, body.details?.field));
+    } catch {
+      setProblem(DIAG_PROBLEMS.down);
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div className="us-diag">
+      {problem && (
+        <p role="alert" className="au-export-err us-problem">
+          {problem}
+        </p>
+      )}
+      {!access ? (
+        <form
+          className="us-form"
+          aria-label="ขอดูรายงานวินิจฉัย"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void redeem();
+          }}
+        >
+          <p className="dim">ให้ลูกค้ากด “สร้างรหัสให้ทีม support” ในหน้าความเป็นส่วนตัว แล้วอ่านรหัสให้ฟัง รหัสใช้ได้ครั้งเดียวภายใน 1 ชั่วโมง</p>
+          <label className="fld">
+            <span>รหัสจากลูกค้า</span>
+            <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="ABCD-EFGH" autoComplete="off" spellCheck={false} maxLength={12} required />
+          </label>
+          <label className="fld">
+            <span>เหตุผลที่ขอดูรายงาน (จะถูกบันทึกไว้ในประวัติ)</span>
+            <input value={reason} onChange={(e) => setReason(e.target.value)} minLength={10} maxLength={500} placeholder="เช่น ลูกค้าแจ้งว่าเล่นวิทยุไม่ได้ เคส #1042" required />
+          </label>
+          <button type="submit" className="btn" disabled={busy}>
+            {busy ? 'กำลังตรวจรหัส…' : 'ขอดูรายงาน'}
+          </button>
+        </form>
+      ) : !data ? (
+        <p>
+          <span className="dim">ลูกค้าให้สิทธิ์คุณดูรายงานได้ถึง {formatLogTime(access.expiresAt)} · การเปิดดูถูกบันทึก </span>
+          <button type="button" className="btn" disabled={busy} onClick={() => void load()}>
+            {busy ? 'กำลังโหลด…' : 'เปิดดูรายงาน'}
+          </button>
+        </p>
+      ) : (
+        <>
+          <p className="dim">
+            ดูได้ถึง {formatLogTime(data.access.expiresAt)} · รายงานถูกลบเองเมื่อครบ {data.retentionDays} วัน · มีแค่รหัสผลลัพธ์ ไม่มีชื่อช่อง ลิงก์ หรือตำแหน่ง
+          </p>
+          {data.reports.length === 0 ? (
+            <p className="dim">ไม่มีรายงานใน {data.retentionDays} วันที่ผ่านมา</p>
+          ) : (
+            data.reports.map((r) => (
+              <div key={r.id} className="us-scroll" data-testid="support-report">
+                <table className="us-table">
+                  <caption>
+                    {formatLogTime(r.receivedAt)} · {r.platform === 'ios' ? 'iPhone' : r.platform === 'android' ? 'Android' : 'เครื่องที่ออกจากระบบแล้ว'} · {r.eventCount} เหตุการณ์
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">เวลา (วินาที)</th>
+                      <th scope="col">เหตุการณ์</th>
+                      <th scope="col">ผลลัพธ์</th>
+                      <th scope="col">ใช้เวลา</th>
+                      <th scope="col">เครือข่าย</th>
+                      <th scope="col">แอป</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {r.items.map((e, i) => (
+                      <tr key={i}>
+                        <td className="mo">{(e.monotonicMs / 1000).toFixed(1)}</td>
+                        <td className="mo">{e.eventName}</td>
+                        <td className="mo">{e.resultCode ?? '–'}</td>
+                        <td className="mo">{e.durationMs === null ? '–' : `${e.durationMs} ms`}</td>
+                        <td>{e.networkClass}</td>
+                        <td className="mo">{e.appBuild}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 const StatusBadge = ({ u, className = 'us-tone' }: { u: User; className?: string }) => (
   <span className={`${className} ${STATUS[u.user.status].tone}`}>{STATUS[u.user.status].label}</span>
 );
@@ -237,6 +389,10 @@ export function UsersView() {
                 <Facts u={u} />
               </div>
             </div>
+            <div className="pn">
+              <h3>Diagnostics</h3>
+              <SupportDiagnostics key={u.user.id} u={u} />
+            </div>
           </>
         ) : (
           <Empty />
@@ -282,6 +438,12 @@ export function UsersView() {
             </ul>
             <div className="adm-panel">
               <Facts u={u} />
+            </div>
+            <div className="adm-panel">
+              <div className="ttl">
+                <h3>รายงานวินิจฉัย</h3>
+              </div>
+              <SupportDiagnostics key={u.user.id} u={u} />
             </div>
           </>
         ) : (
@@ -333,6 +495,10 @@ export function UsersView() {
                 <h4>บัญชี</h4>
                 <Facts u={u} />
               </section>
+              <section className="b-facts">
+                <h4>รายงานวินิจฉัย</h4>
+                <SupportDiagnostics key={u.user.id} u={u} />
+              </section>
             </>
           ) : (
             <section className="b-facts">
@@ -349,6 +515,12 @@ export function UsersView() {
     const items = u
       ? [
           { id: 'account', title: 'บัญชี', sub: STATUS[u.user.status].label, tone: STATUS[u.user.status].tone as string },
+          {
+            id: 'diagnostics',
+            title: 'รายงานวินิจฉัย',
+            sub: u.diagnostics.access ? `ดูได้ถึง ${formatLogTime(u.diagnostics.access.expiresAt)}` : `${u.diagnostics.reportsLast7Days} ฉบับ · ต้องมีรหัสจากลูกค้า`,
+            tone: (u.diagnostics.access ? 'ok' : 'mute') as string,
+          },
           ...u.devices.map((d) => {
             const s = deviceState(d, u.settings.revision);
             return { id: d.id, title: `${osLabel(d)} ${short(d.id)}`, sub: s.label, tone: s.tone as string };
@@ -380,6 +552,12 @@ export function UsersView() {
           <div className="lg-detail">
             {!u || !cur ? (
               <Empty />
+            ) : cur.id === 'diagnostics' ? (
+              <>
+                <p className="crumb">ผู้ใช้ / รายงานวินิจฉัย</p>
+                <h2>รายงานวินิจฉัย</h2>
+                <SupportDiagnostics key={u.user.id} u={u} />
+              </>
             ) : device ? (
               <>
                 <p className="crumb">ผู้ใช้ / เครื่อง</p>
@@ -477,6 +655,15 @@ export function UsersView() {
               </div>
             </div>
             <Facts u={u} />
+          </section>
+          <section className="fv-card" aria-labelledby="fv-us-diag">
+            <div className="fv-card-head">
+              <div>
+                <h2 id="fv-us-diag">รายงานวินิจฉัย</h2>
+                <small>ดูได้เมื่อลูกค้าให้รหัส</small>
+              </div>
+            </div>
+            <SupportDiagnostics key={u.user.id} u={u} />
           </section>
         </>
       ) : (

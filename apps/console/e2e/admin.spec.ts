@@ -477,6 +477,63 @@ test('support looks up a customer by email or device id with a reason, in every 
   await expect(ops.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูข้อมูลผู้ใช้');
 });
 
+test('a customer reads a one-time code to support, who then sees their diagnostic reports in every theme until it is withdrawn', async ({ browser }) => {
+  const customer = await signInAs(browser, 'e2e-diag-nok', '/app/privacy');
+  const { rows: [u] } = (await stack.api.sql(`SELECT id FROM users WHERE oidc_subject = 'e2e-diag-nok'`)) as { rows: { id: string }[] };
+  // Test constants only, so inlining them into the SQL is safe here.
+  await stack.api.sql(
+    `WITH d AS (INSERT INTO devices (user_id, id, platform, os_major, app_build) VALUES ('${u.id}', 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', 'ios', 18, '1.0.0+42') RETURNING user_id, id),
+          r AS (INSERT INTO diagnostic_reports (user_id, device_id, batch_id, consented, event_count) SELECT user_id, id, gen_random_uuid(), true, 1 FROM d RETURNING id, user_id)
+     INSERT INTO diagnostic_events (report_id, user_id, event_id, event_name, schema_version, monotonic_ms, session_random_id, duration_ms, result_code, network_class, app_build, os_major, device_class)
+     SELECT id, user_id, gen_random_uuid(), 'playback_error', 1, 1500, 'sess-e2e', NULL, 'stream_timeout', 'cellular', '1.0.0+42', 18, 'phone' FROM r`,
+  );
+  await customer.getByRole('button', { name: 'สร้างรหัสให้ทีม support' }).click();
+  const code = (await customer.getByTestId('support-code').locator('code').textContent())!;
+  expect(code).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+
+  const page = await signInAs(browser, 'e2e-support', '/admin/users');
+  const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
+  const lookup = async () => {
+    await page.getByLabel('อีเมล รหัสผู้ใช้ หรือรหัสเครื่อง').fill(u.id);
+    await page.getByLabel('เหตุผล (จะถูกบันทึกไว้ในประวัติ)').fill('ลูกค้าแจ้งว่าเล่นวิทยุไม่ได้ เคส #77');
+    await page.getByRole('button', { name: 'ค้นหา' }).click();
+  };
+  await picker.selectOption('minimal');
+  await lookup();
+  await page.getByLabel('รหัสจากลูกค้า').fill(code.toLowerCase());
+  await page.getByLabel('เหตุผลที่ขอดูรายงาน (จะถูกบันทึกไว้ในประวัติ)').fill('ลูกค้าแจ้งว่าเล่นวิทยุไม่ได้ เคส #77');
+  await page.getByRole('button', { name: 'ขอดูรายงาน' }).click();
+  await expect(page.getByTestId('support-report')).toContainText('stream_timeout');
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/users-diagnostics-minimal.png`, fullPage: true });
+
+  for (const theme of ['control-room', 'broadcast-rack', 'daylight-bento', 'workbench']) {
+    await picker.selectOption(theme);
+    await lookup();
+    if (theme === 'workbench') await page.getByRole('button', { name: 'รายงานวินิจฉัย' }).click();
+    await page.getByRole('button', { name: 'เปิดดูรายงาน' }).click();
+    await expect(page.getByTestId('support-report')).toContainText('stream_timeout');
+    await expect(page.locator('body')).not.toContainText('sess-e2e');
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/users-diagnostics-${theme}.png`, fullPage: true });
+  }
+
+  // The customer sees who has access and withdraws it; support is back to asking for a code.
+  await customer.reload();
+  await expect(customer.getByTestId('support-grant')).toHaveCount(1);
+  await customer.getByRole('button', { name: 'ยกเลิกสิทธิ์' }).click();
+  await expect(customer.getByText('ยังไม่มีเจ้าหน้าที่คนไหนดูรายงานได้')).toBeVisible();
+  await picker.selectOption('minimal');
+  await lookup();
+  await expect(page.getByLabel('รหัสจากลูกค้า')).toBeVisible();
+
+  const logged = (await stack.api.sql(`SELECT action FROM audit_events WHERE action LIKE 'support.%' ORDER BY id`)) as { rows: { action: string }[] };
+  expect(logged.rows.map((r) => r.action)).toEqual([
+    'support.code_created',
+    'support.access_granted',
+    ...Array(5).fill('support.diagnostics_read'),
+    'support.access_revoked',
+  ]);
+});
+
 test('an admin drafts the app config, a second admin publishes it signed, in every theme', async ({ browser }) => {
   const author = await signInAs(browser, 'e2e-admin', '/admin/config');
   await expect(author.getByText('ยังไม่เคยเผยแพร่ แอปใช้ค่าเริ่มต้นของแอปเอง').first()).toBeVisible();

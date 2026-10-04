@@ -25,6 +25,7 @@ export type ErrorCode =
   | 'MFA_REQUIRED'
   | 'IDEMPOTENCY_KEY_REUSED'
   | 'IDEMPOTENCY_IN_PROGRESS'
+  | 'SUPPORT_ACCESS_REQUIRED'
   | 'INTERNAL';
 
 export const MESSAGE_KEYS: Record<ErrorCode, string> = {
@@ -52,6 +53,7 @@ export const MESSAGE_KEYS: Record<ErrorCode, string> = {
   MFA_REQUIRED: 'errors.auth.mfaRequired',
   IDEMPOTENCY_KEY_REUSED: 'errors.request.idempotencyKeyReused',
   IDEMPOTENCY_IN_PROGRESS: 'errors.request.inProgress',
+  SUPPORT_ACCESS_REQUIRED: 'errors.support.accessRequired',
   INTERNAL: 'errors.service.internal',
 };
 
