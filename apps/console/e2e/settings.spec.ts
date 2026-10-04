@@ -191,7 +191,41 @@ test('signing a phone out from the web asks for a fresh sign-in first', async ({
   await expect(page.getByRole('button', { name: 'ยืนยัน ออกจากระบบ' })).toHaveCount(0);
 });
 
-test('download my data, then delete the account after a fresh sign-in', async ({ browser }) => {
+test('prepare my data after a fresh sign-in, then download it', async ({ browser }) => {
+  const phone = await idp.accessTokenFor('e2e-gail');
+  const device = crypto.randomUUID();
+  const checkIn = await fetch(`${api.url}/v1/me/devices/${device}`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${phone}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ platform: 'ios', osMajor: 18, appBuild: '1.0.0+42', appliedSettingsRevision: 0 }),
+  });
+  expect(checkIn.status).toBe(200);
+
+  idp.setUser('e2e-gail');
+  const first = await (await browser.newContext()).newPage();
+  await first.goto(`${base}/auth/login`);
+  await first.close();
+  idp.ageSignIn(600);
+  const context = await browser.newContext({ acceptDownloads: true });
+  const page = await context.newPage();
+  await page.goto(`${base}/auth/login?returnTo=/app/privacy`);
+
+  await page.getByRole('button', { name: 'เตรียมไฟล์ข้อมูลของฉัน' }).click();
+  const alert = page.getByRole('alert').filter({ hasText: 'ยืนยันตัวตน' });
+  await expect(alert).toContainText('ก่อนส่งออกข้อมูล');
+  await alert.getByRole('link', { name: 'ยืนยันตัวตน' }).click();
+  // Back on the page, the file is prepared without another click.
+  await expect(page).toHaveURL(`${base}/app/privacy`);
+  await expect(page.getByTestId('export-ready')).toContainText('ไฟล์พร้อมแล้ว');
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/export-ready.png`, fullPage: true });
+
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: 'ดาวน์โหลดไฟล์' }).click()]);
+  expect(download.suggestedFilename()).toMatch(/^tunedeck-export-\d{4}-\d{2}-\d{2}\.json$/);
+  const exported = JSON.parse(await (await import('node:fs/promises')).readFile((await download.path())!, 'utf8'));
+  expect(exported.devices.map((d: { id: string }) => d.id)).toEqual([device]);
+});
+
+test('delete the account after a fresh sign-in', async ({ browser }) => {
   const phone = await idp.accessTokenFor('e2e-fern');
   const device = crypto.randomUUID();
   const checkIn = () =>
@@ -211,11 +245,6 @@ test('download my data, then delete the account after a fresh sign-in', async ({
   const page = await context.newPage();
   await page.goto(`${base}/auth/login?returnTo=/app/privacy`);
   await expect(page.getByRole('heading', { name: 'ความเป็นส่วนตัว' })).toBeVisible();
-
-  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: 'ดาวน์โหลดข้อมูลของฉัน' }).click()]);
-  expect(download.suggestedFilename()).toMatch(/^tunedeck-export-\d{4}-\d{2}-\d{2}\.json$/);
-  const exported = JSON.parse(await (await import('node:fs/promises')).readFile((await download.path())!, 'utf8'));
-  expect(exported.devices.map((d: { id: string }) => d.id)).toEqual([device]);
 
   await page.getByRole('button', { name: 'ลบบัญชีนี้' }).click();
   const yes = page.getByRole('button', { name: 'ยืนยัน ลบบัญชี' });

@@ -5,6 +5,7 @@ import { json } from 'express';
 import { createRemoteJWKSet, type JWTVerifyGetKey } from 'jose';
 import type { Pool } from 'pg';
 import { AccountDeletionStatusController, AccountService, MyAccountController } from './account/account';
+import { AccountExportsService, ExportDownloadController, MyExportsController } from './account/exports';
 import { IDP_FETCH, IdpFetch, IdpUsersService } from './account/idp-users';
 import { AdminConfigController, AppConfigService, CONFIG_SIGNER, createConfigSigner, PublicConfigController } from './app-config/app-config';
 import { AdminJobsController, JobsService } from './jobs/jobs';
@@ -60,7 +61,7 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, AdminOverviewController, AdminJobsController, AdminUsersController, AdminConfigController, PublicConfigController, SyncController, FavoritesController, BillingController],
+      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, MyExportsController, ExportDownloadController, AdminOverviewController, AdminJobsController, AdminUsersController, AdminConfigController, PublicConfigController, SyncController, FavoritesController, BillingController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },
@@ -86,6 +87,7 @@ export class AppModule {
         { provide: GOOGLE_PUSH_KEYS, useValue: deps.googlePushKeys ?? createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs')) },
         { provide: CONFIG_SIGNER, useValue: createConfigSigner(deps.config.configSigningKey) },
         { provide: IDP_FETCH, useValue: deps.idpFetch ?? ((input: Parameters<IdpFetch>[0], init?: Parameters<IdpFetch>[1]) => fetch(input, init)) },
+        AccountExportsService,
         OverviewService,
         AlertService,
         { provide: ALERT_FETCH, useValue: deps.alertFetch ?? ((url: string, init: Parameters<AlertFetch>[1]) => fetch(url, init)) },

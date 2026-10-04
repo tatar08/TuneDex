@@ -562,12 +562,40 @@ describe('account export and deletion', () => {
   const del = (cookie: string, csrf?: string) =>
     bff.deleteAccount(new Request(`${BASE}/bff/account`, { method: 'DELETE', headers: { cookie, origin: BASE, ...(csrf ? { 'x-csrf-token': csrf } : {}) } }));
 
-  it('downloads the export as an attachment', async () => {
+  it('prepares the export after a fresh sign-in, and downloads it through the BFF without exposing the API link', async () => {
+    const start = (cookie: string, csrf?: string) =>
+      bff.startExport(new Request(`${BASE}/bff/account/exports`, { method: 'POST', headers: { cookie, origin: BASE, ...(csrf ? { 'x-csrf-token': csrf } : {}) } }));
+    await signIn('acct-web-export-stale');
+    idp.ageSignIn(600);
+    const stale = await signIn('acct-web-export-stale');
+    expect((await start(stale)).status).toBe(403);
+    const refused = await start(stale, await csrfFor(stale));
+    expect(refused.status).toBe(401);
+    expect((await refused.json()).code).toBe('REAUTH_REQUIRED');
+    expect(await bff.sessionFromCookie(stale)).not.toBeNull();
+
     const cookie = await signIn('acct-web-export');
-    const res = await bff.exportAccount(new Request(`${BASE}/bff/account/export`, { headers: { cookie } }));
-    expect(res.status).toBe(200);
-    expect(res.headers.get('content-disposition')).toMatch(/^attachment; filename="tunedeck-export-[\d-]+\.json"$/);
-    expect((await res.json()).format).toBe('tunedeck-account-export');
+    const res = await start(cookie, await csrfFor(cookie));
+    expect(res.status).toBe(202);
+    const job = await res.json();
+    expect(job).toMatchObject({ status: 'pending' });
+
+    let status = job;
+    for (let i = 0; i < 50 && status.status === 'pending'; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      status = await (await bff.exportStatus(new Request(`${BASE}/bff/account/exports/${job.id}`, { headers: { cookie } }), job.id)).json();
+    }
+    expect(status).toEqual({ id: job.id, status: 'ready', requestedAt: expect.any(String), readyAt: expect.any(String), expiresAt: expect.any(String) });
+
+    const file = await bff.exportFile(new Request(`${BASE}/bff/account/exports/${job.id}/file`, { headers: { cookie } }), job.id);
+    expect(file.status).toBe(200);
+    expect(file.headers.get('content-disposition')).toMatch(/^attachment; filename="tunedeck-export-[\d-]+\.json"$/);
+    expect((await file.json()).format).toBe('tunedeck-account-export');
+
+    // Someone else's export, and malformed ids, are not found.
+    const other = await signIn('acct-web-export-other');
+    expect((await bff.exportFile(new Request(`${BASE}/bff/account/exports/${job.id}/file`, { headers: { cookie: other } }), job.id)).status).toBe(404);
+    expect((await bff.exportStatus(new Request(`${BASE}/bff/account/exports/x`, { headers: { cookie } }), 'x')).status).toBe(404);
   });
 
   it('needs CSRF and a fresh sign-in, then ends the web session and hands back a ticket', async () => {

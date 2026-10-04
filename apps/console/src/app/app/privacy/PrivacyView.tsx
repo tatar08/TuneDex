@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { DiagnosticReport, DiagnosticsView } from '@/lib/bff';
+import type { DiagnosticReport, DiagnosticsView, ExportJob } from '@/lib/bff';
 import { Lang, strings } from '@/lib/i18n';
 import { AppNav } from '../AppNav';
 
@@ -13,6 +13,7 @@ export function PrivacyView({
   csrfToken,
   view,
   pendingDelete = false,
+  pendingExport = false,
   reauthFailed = false,
 }: {
   lang: Lang;
@@ -20,6 +21,8 @@ export function PrivacyView({
   view: DiagnosticsView | null;
   /** The user chose "delete this account" before being sent to re-authenticate. */
   pendingDelete?: boolean;
+  /** The user chose "prepare my data" before being sent to re-authenticate. */
+  pendingExport?: boolean;
   reauthFailed?: boolean;
 }) {
   const t = strings(lang);
@@ -33,13 +36,64 @@ export function PrivacyView({
   const [deleteProblem, setDeleteProblem] = useState<'reauth' | 'reauthFailed' | 'expired' | 'rateLimited' | 'unavailable' | null>(
     reauthFailed ? 'reauthFailed' : null,
   );
+  const [exportJob, setExportJob] = useState<ExportJob | null>(null);
+  const [exportProblem, setExportProblem] = useState<'reauth' | 'failed' | 'gone' | 'expired' | 'rateLimited' | 'unavailable' | null>(null);
+  const [exportStarting, setExportStarting] = useState(false);
   const checkRef = useRef<HTMLInputElement>(null);
   const fmt = when(lang);
 
   useEffect(() => {
     // Drop ?delete= and ?reauth= so a reload does not reopen the confirmation.
-    if (pendingDelete || reauthFailed) window.history.replaceState(null, '', '/app/privacy');
-  }, [pendingDelete, reauthFailed]);
+    if (pendingDelete || pendingExport || reauthFailed) window.history.replaceState(null, '', '/app/privacy');
+  }, [pendingDelete, pendingExport, reauthFailed]);
+  useEffect(() => {
+    if (pendingExport) void startExport();
+    // Once, on arrival back from re-authentication.
+  }, []);
+  useEffect(() => {
+    // Poll while the file is being built; it usually takes a few seconds.
+    if (exportJob?.status !== 'pending') return;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/bff/account/exports/${exportJob.id}`);
+        if (res.ok) {
+          const job = (await res.json()) as ExportJob;
+          setExportJob(job);
+          if (job.status === 'failed') setExportProblem('failed');
+          if (job.status === 'ready') setAnnounce(t.exportReady(fmt.format(new Date(job.expiresAt))));
+        } else if (res.status === 404) {
+          setExportJob(null);
+          setExportProblem('gone');
+        } else if (res.status === 401) {
+          setExportJob(null);
+          setExportProblem('expired');
+        } else setExportJob({ ...exportJob }); // try again after the next wait
+      } catch {
+        setExportJob({ ...exportJob });
+      }
+    }, 2_000);
+    return () => clearTimeout(timer);
+  }, [exportJob, fmt, t]);
+
+  async function startExport() {
+    setExportStarting(true);
+    setExportProblem(null);
+    try {
+      const res = await fetch('/bff/account/exports', { method: 'POST', headers: { 'x-csrf-token': csrfToken } });
+      if (res.status === 202) {
+        setExportJob((await res.json()) as ExportJob);
+        return;
+      }
+      const body = (await res.json().catch(() => ({}))) as { code?: string };
+      if (res.status === 401 && body.code === 'REAUTH_REQUIRED') setExportProblem('reauth');
+      else if (res.status === 401) setExportProblem('expired');
+      else setExportProblem(res.status === 429 ? 'rateLimited' : 'unavailable');
+    } catch {
+      setExportProblem('unavailable');
+    } finally {
+      setExportStarting(false);
+    }
+  }
   useEffect(() => {
     if (confirmingDelete) checkRef.current?.focus();
   }, [confirmingDelete]);
@@ -118,11 +172,43 @@ export function PrivacyView({
       <section className="device" aria-labelledby="export-title">
         <h2 id="export-title">{t.exportTitle}</h2>
         <p className="status">{t.exportText}</p>
-        <p>
-          <a className="btn secondary" href="/bff/account/export" download>
-            {t.exportGo}
-          </a>
-        </p>
+        {exportProblem && (
+          <div role="alert" className="notice error">
+            {exportProblem === 'reauth' && <p>{t.exportReauth}</p>}
+            {exportProblem === 'failed' && <p>{t.exportFailed}</p>}
+            {exportProblem === 'gone' && <p>{t.exportGone}</p>}
+            {exportProblem === 'expired' && <p>{t.expired}</p>}
+            {exportProblem === 'rateLimited' && <p>{t.rateLimited}</p>}
+            {exportProblem === 'unavailable' && <p>{t.exportUnavailable}</p>}
+            {exportProblem === 'reauth' && (
+              <a className="btn" href={`/auth/login?reauth=1&returnTo=${encodeURIComponent('/app/privacy?export=1')}`}>
+                {t.reauthGo}
+              </a>
+            )}
+          </div>
+        )}
+        {exportJob?.status === 'ready' ? (
+          <>
+            <p className="status" data-testid="export-ready">{t.exportReady(fmt.format(new Date(exportJob.expiresAt)))}</p>
+            <p>
+              <a className="btn" href={`/bff/account/exports/${exportJob.id}/file`} download>
+                {t.exportDownload}
+              </a>
+            </p>
+          </>
+        ) : exportJob?.status === 'pending' || exportStarting ? (
+          <p className="status" aria-live="polite">
+            {t.exportPreparing}
+          </p>
+        ) : (
+          exportProblem !== 'reauth' && (
+            <p>
+              <button type="button" className="btn secondary" onClick={() => void startExport()}>
+                {t.exportGo}
+              </button>
+            </p>
+          )
+        )}
       </section>
 
       <section className="device" aria-labelledby="delete-title">

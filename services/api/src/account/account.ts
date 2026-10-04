@@ -290,6 +290,7 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
       await query('DELETE FROM account_preferences WHERE owner_id = $1', [userId]);
       await query('DELETE FROM staff_roles WHERE user_id = $1', [userId]);
       await query('DELETE FROM idempotency_keys WHERE user_id = $1', [userId]);
+      await query('DELETE FROM account_exports WHERE user_id = $1', [userId]);
       await query(
         `UPDATE users SET status = 'deleted', oidc_subject = 'deleted:' || id::text, locale = NULL, email = NULL, email_verified = false, deleted_at = now() WHERE id = $1`,
         [userId],

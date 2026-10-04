@@ -159,6 +159,18 @@ export interface HealthCheck {
 const STATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** Deletion tickets: 32 random bytes, base64url. */
 const DELETION_TICKET = /^[A-Za-z0-9_-]{43}$/;
+const EXPORT_LINK = /^\/v1\/export-downloads\/[A-Za-z0-9_-]{43}$/;
+
+export type ExportStatus = 'pending' | 'ready' | 'failed';
+export interface ExportJob {
+  id: string;
+  status: ExportStatus;
+  requestedAt: string;
+  readyAt: string | null;
+  expiresAt: string;
+}
+/** The API's export job without its download link: the browser downloads through the BFF instead. */
+const exportView = (v: ExportJob): ExportJob => ({ id: v.id, status: v.status, requestedAt: v.requestedAt, readyAt: v.readyAt, expiresAt: v.expiresAt });
 /** Device ids are UUIDs the phone app generates (any case; the API lower-cases them). */
 const DEVICE_ID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const STATION_ACTIONS = ['publish', 'disable', 'enable', 'check'] as const;
@@ -853,16 +865,52 @@ export function createBff(deps: BffDeps) {
         return passthrough(upstream, requestId);
       }),
 
-    /** GET /bff/account/export: the account's own data as a JSON download (Doc 17). */
-    exportAccount: (req: Request) =>
-      timed(req, '/bff/account/export', async (requestId) => {
+    /**
+     * POST /bff/account/exports: starts building the account's data export (Doc 17). Needs a recent sign-in,
+     * like deletion; the page polls GET /bff/account/exports/{id} and then downloads through /file.
+     */
+    startExport: (req: Request) =>
+      timed(req, '/bff/account/exports', async (requestId) => {
         const ctx = await sessionFromCookie(req.headers.get('cookie'));
         if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
-        const upstream = await callApi(ctx, '/v1/me/export', { method: 'GET' }, requestId);
+        if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
+        const upstream = await callApi(ctx, '/v1/me/exports', { method: 'POST' }, requestId);
+        if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        if (upstream.status !== 202) return passthrough(upstream, requestId);
+        return json(202, exportView(await upstream.json()), requestId);
+      }),
+
+    /** GET /bff/account/exports/{id}: progress. The API's download link stays on the server. */
+    exportStatus: (req: Request, id: string) =>
+      timed(req, '/bff/account/exports/:id', async (requestId) => {
+        if (!DEVICE_ID.test(id)) return notFound(requestId);
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        const upstream = await callApi(ctx, `/v1/me/exports/${id}`, { method: 'GET' }, requestId);
         if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
         if (!upstream.ok) return passthrough(upstream, requestId);
-        const disposition = upstream.headers.get('content-disposition') ?? '';
-        return new Response(await upstream.text(), {
+        return json(200, exportView(await upstream.json()), requestId);
+      }),
+
+    /** GET /bff/account/exports/{id}/file: fetches a fresh 15-minute link from the API and streams the file through. */
+    exportFile: (req: Request, id: string) =>
+      timed(req, '/bff/account/exports/:id/file', async (requestId) => {
+        if (!DEVICE_ID.test(id)) return notFound(requestId);
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        const upstream = await callApi(ctx, `/v1/me/exports/${id}`, { method: 'GET' }, requestId);
+        if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        if (!upstream.ok) return passthrough(upstream, requestId);
+        const path = ((await upstream.json()) as { download?: { path?: unknown } }).download?.path;
+        if (typeof path !== 'string' || !EXPORT_LINK.test(path)) return notFound(requestId);
+        const file = await fetchImpl(`${config.apiBaseUrl}${path}`, {
+          headers: { accept: 'application/json', 'x-request-id': requestId },
+          signal: AbortSignal.timeout(30_000),
+          redirect: 'error',
+        });
+        if (!file.ok) return passthrough(file, requestId);
+        const disposition = file.headers.get('content-disposition') ?? '';
+        return new Response(file.body, {
           status: 200,
           headers: {
             'content-type': 'application/json',
