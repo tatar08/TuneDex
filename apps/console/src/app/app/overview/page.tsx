@@ -15,19 +15,21 @@ export default async function OverviewPage() {
   const ctx = await bff.sessionFromCookie(jar.getAll().map((c) => `${c.name}=${c.value}`).join('; '));
   if (!ctx) redirect(hadCookie ? '/login?expired=1' : '/login?returnTo=/app/overview');
 
-  const [ready, settings, devices, favorites] = await Promise.all([
+  const [ready, settings, devices, favorites, entitlements] = await Promise.all([
     bff.serviceReady(),
     bff.loadSettings(ctx).catch(() => ({ status: 503 }) as const),
     bff.loadDevices(ctx).catch(() => ({ status: 503 }) as const),
     bff.loadFavorites(ctx).catch(() => ({ status: 503 }) as const),
+    bff.loadEntitlements(ctx).catch(() => ({ status: 503 }) as const),
   ]);
-  if (settings === null || devices === null || favorites === null) redirect('/login?expired=1');
+  if (settings === null || devices === null || favorites === null || entitlements === null) redirect('/login?expired=1');
   const lang: Lang = 'view' in settings && settings.view?.settings.language === 'en' ? 'en' : 'th';
   const t = strings(lang);
   // Times read in Thailand time whatever the server's zone, like the other account pages.
   const fmt = new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'th-TH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Bangkok' });
   const list = 'view' in devices && devices.view ? devices.view.devices.filter((d) => !d.revokedAt) : null;
   const favs = 'favorites' in favorites ? favorites.favorites : undefined;
+  const pro = 'pro' in entitlements ? entitlements.pro : undefined;
   const rev = 'view' in settings && settings.view ? settings.view.revision : null;
 
   return (
@@ -50,6 +52,23 @@ export default async function OverviewPage() {
         <p className="status">
           {favs ? t.overviewFavorites(favs.length) : `${t.radioFavorites}: ${t.overviewUnknown}`} · {rev === null ? `${t.navSettings}: ${t.overviewUnknown}` : t.overviewSettings(rev)}
         </p>
+      </section>
+
+      <section className="device" aria-labelledby="pro-title">
+        <h2 id="pro-title">{t.proTitle}</h2>
+        {pro ? (
+          <ul className="devices">
+            {(['apple', 'google'] as const).map((store) => (
+              <li key={store} data-testid="pro-store">
+                <span className="device-name">{t.proStore(store)}</span>
+                <span className="status">{t[`pro.${pro[store]}`]}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="status">{t.overviewUnknown}</p>
+        )}
+        <p className="status">{t.proNote}</p>
       </section>
 
       <section className="device" aria-labelledby="ov-devices">

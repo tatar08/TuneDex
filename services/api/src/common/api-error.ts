@@ -20,6 +20,8 @@ export type ErrorCode =
   | 'JOB_RETRY_TOO_SOON'
   | 'JOB_BUSY'
   | 'SYNC_RESET_REQUIRED'
+  | 'PURCHASE_INVALID'
+  | 'PURCHASE_CONFLICT'
   | 'INTERNAL';
 
 export const MESSAGE_KEYS: Record<ErrorCode, string> = {
@@ -42,6 +44,8 @@ export const MESSAGE_KEYS: Record<ErrorCode, string> = {
   JOB_RETRY_TOO_SOON: 'errors.jobs.retryTooSoon',
   JOB_BUSY: 'errors.jobs.busy',
   SYNC_RESET_REQUIRED: 'errors.sync.resetRequired',
+  PURCHASE_INVALID: 'errors.billing.invalid',
+  PURCHASE_CONFLICT: 'errors.billing.ownedByAnotherAccount',
   INTERNAL: 'errors.service.internal',
 };
 

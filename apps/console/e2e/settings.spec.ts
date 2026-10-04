@@ -262,6 +262,8 @@ test('the overview shows each phone’s last sync, and favorites picked on the w
   await expect(page.getByTestId('service')).toContainText('ระบบทำงานปกติ');
   await expect(page.getByTestId('overview-device')).toContainText('ยังไม่เคยซิงก์');
   await expect(page.getByText('สถานีโปรด 0 สถานี')).toBeVisible();
+  // No checkout on the web: Pro shows per store, bought in the phone app.
+  await expect(page.getByTestId('pro-store')).toHaveText(['App Store (iPhone)ยังไม่ได้ซื้อ', 'Google Play (Android)ยังไม่ได้ซื้อ']);
 
   await page.getByRole('link', { name: 'วิทยุ' }).click();
   await expect(page).toHaveURL(`${base}/app/radio`);

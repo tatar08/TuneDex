@@ -31,6 +31,21 @@ export interface AppConfig {
    */
   configSigningKey: string | null;
   /**
+   * Store purchase verification (Doc 11, ADR-12). Each store is off until its keys are set; with a store off,
+   * verification and its notifications answer 503 and nothing is granted.
+   */
+  billing: {
+    apple: { bundleId: string; rootCaPem: string; productIds: string[]; environments: Array<'Production' | 'Sandbox'> } | null;
+    google: {
+      packageName: string;
+      productIds: string[];
+      serviceAccount: { clientEmail: string; privateKeyPem: string };
+      /** Pub/Sub push: the audience and the service account Google signs push requests as. */
+      pushAudience: string;
+      pushServiceAccount: string;
+    } | null;
+  };
+  /**
    * Daily removal of audit records older than 180 days (Doc 17 proposed retention). Off unless
    * AUDIT_RETENTION_ENABLED=true, because the retention period needs the owner's confirmation first.
    */
@@ -86,6 +101,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     rateLimit: loadRateLimit(env),
     idpAdmin: loadIdpAdmin(env, appEnv, required(env, 'OIDC_ISSUER')),
     configSigningKey: loadConfigSigningKey(env, appEnv),
+    billing: { apple: loadApple(env), google: loadGoogle(env) },
     auditRetentionEnabled: flag(env, 'AUDIT_RETENTION_ENABLED'),
     stationCheck: loadStationCheck(env),
   };
@@ -122,6 +138,45 @@ function loadConfigSigningKey(env: NodeJS.ProcessEnv, appEnv: AppEnv): string | 
   const pem = raw.replace(/\\n/g, '\n');
   if (!/^-----BEGIN PRIVATE KEY-----\n[\s\S]+\n-----END PRIVATE KEY-----$/.test(pem)) throw new Error('CONFIG_SIGNING_KEY must be a PKCS#8 PEM private key');
   return pem;
+}
+
+const pemOf = (raw: string) => raw.replace(/\\n/g, '\n');
+const listOf = (raw: string | undefined) => (raw ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+const PRODUCT_ID = /^[A-Za-z0-9._]{1,100}$/;
+
+/** Apple: off unless APPLE_BUNDLE_ID is set; then the root certificate and product ids are required. */
+function loadApple(env: NodeJS.ProcessEnv): AppConfig['billing']['apple'] {
+  const bundleId = env.APPLE_BUNDLE_ID?.trim() ?? '';
+  if (!bundleId) return null;
+  const rootCaPem = pemOf(required(env, 'APPLE_ROOT_CA_PEM'));
+  if (!/^-----BEGIN CERTIFICATE-----\n[\s\S]+\n-----END CERTIFICATE-----$/.test(rootCaPem)) throw new Error('APPLE_ROOT_CA_PEM must be a PEM certificate (Apple Root CA - G3)');
+  const productIds = listOf(env.APPLE_PRO_PRODUCT_IDS);
+  if (productIds.length === 0 || productIds.some((p) => !PRODUCT_ID.test(p))) throw new Error('APPLE_PRO_PRODUCT_IDS must list the Pro product ids');
+  const environments = listOf(env.APPLE_ENVIRONMENTS ?? 'Production');
+  if (environments.length === 0 || environments.some((e) => e !== 'Production' && e !== 'Sandbox')) throw new Error('APPLE_ENVIRONMENTS must be Production and/or Sandbox');
+  return { bundleId, rootCaPem, productIds, environments: environments as Array<'Production' | 'Sandbox'> };
+}
+
+/** Google: off unless GOOGLE_PLAY_PACKAGE_NAME is set; then the service account and Pub/Sub push settings are required. */
+function loadGoogle(env: NodeJS.ProcessEnv): AppConfig['billing']['google'] {
+  const packageName = env.GOOGLE_PLAY_PACKAGE_NAME?.trim() ?? '';
+  if (!packageName) return null;
+  const productIds = listOf(env.GOOGLE_PLAY_PRO_PRODUCT_IDS);
+  if (productIds.length === 0 || productIds.some((p) => !PRODUCT_ID.test(p))) throw new Error('GOOGLE_PLAY_PRO_PRODUCT_IDS must list the Pro product ids');
+  let account: { client_email?: unknown; private_key?: unknown };
+  try {
+    account = JSON.parse(required(env, 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON'));
+  } catch {
+    throw new Error('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON must be the service account key JSON');
+  }
+  if (typeof account.client_email !== 'string' || typeof account.private_key !== 'string') throw new Error('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON must hold client_email and private_key');
+  return {
+    packageName,
+    productIds,
+    serviceAccount: { clientEmail: account.client_email, privateKeyPem: pemOf(account.private_key) },
+    pushAudience: required(env, 'GOOGLE_PUBSUB_PUSH_AUDIENCE'),
+    pushServiceAccount: required(env, 'GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT'),
+  };
 }
 
 function flag(env: NodeJS.ProcessEnv, key: string): boolean {

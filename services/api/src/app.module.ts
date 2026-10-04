@@ -2,7 +2,7 @@ import { DynamicModule, INestApplication, Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { json } from 'express';
-import type { JWTVerifyGetKey } from 'jose';
+import { createRemoteJWKSet, type JWTVerifyGetKey } from 'jose';
 import type { Pool } from 'pg';
 import { AccountDeletionStatusController, AccountService, MyAccountController } from './account/account';
 import { IDP_FETCH, IdpFetch, IdpUsersService } from './account/idp-users';
@@ -32,6 +32,8 @@ import { PROBE_DEPS, StationHealthService } from './stations/station-health';
 import { StationsService } from './stations/stations.service';
 import { FavoritesController, PUSH_MAX_BYTES, SyncController, SyncService } from './sync/sync';
 import { AuditRetentionService } from './audit/audit-retention';
+import { BillingController, BillingService, GOOGLE_FETCH, GOOGLE_PUSH_KEYS, WEBHOOK_MAX_BYTES } from './billing/billing';
+import type { GoogleFetch } from './billing/google';
 import type { ProbeDeps } from './stations/stream-probe';
 import { UsersService } from './users/users.service';
 
@@ -44,6 +46,9 @@ export interface AppDeps {
   probeDeps?: ProbeDeps;
   /** Tests only: fake Keycloak admin API. Production uses the global fetch. */
   idpFetch?: IdpFetch;
+  /** Tests only: fake Google Play API and Pub/Sub token keys. */
+  googleFetch?: GoogleFetch;
+  googlePushKeys?: JWTVerifyGetKey;
 }
 
 @Module({})
@@ -51,7 +56,7 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, AdminOverviewController, AdminJobsController, AdminUsersController, AdminConfigController, PublicConfigController, SyncController, FavoritesController],
+      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, AdminOverviewController, AdminJobsController, AdminUsersController, AdminConfigController, PublicConfigController, SyncController, FavoritesController, BillingController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },
@@ -72,6 +77,9 @@ export class AppModule {
         AppConfigService,
         SyncService,
         AuditRetentionService,
+        BillingService,
+        { provide: GOOGLE_FETCH, useValue: deps.googleFetch ?? ((input: string, init?: Parameters<GoogleFetch>[1]) => fetch(input, init)) },
+        { provide: GOOGLE_PUSH_KEYS, useValue: deps.googlePushKeys ?? createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs')) },
         { provide: CONFIG_SIGNER, useValue: createConfigSigner(deps.config.configSigningKey) },
         { provide: IDP_FETCH, useValue: deps.idpFetch ?? ((input: Parameters<IdpFetch>[0], init?: Parameters<IdpFetch>[1]) => fetch(input, init)) },
         OverviewService,
@@ -100,6 +108,8 @@ export function configureApp(app: NestExpressApplication): INestApplication {
   app.use('/v1/diagnostics/batches', json({ limit: DIAGNOSTIC_LIMITS.batchBytes }));
   // A full sync push (100 changes) is about 25 KiB.
   app.use('/v1/sync/push', json({ limit: PUSH_MAX_BYTES }));
+  // Store payloads carry certificate chains.
+  app.use(['/v1/billing/verify', '/v1/webhooks'], json({ limit: WEBHOOK_MAX_BYTES }));
   app.useBodyParser('json', { limit: '16kb' });
   app.useGlobalFilters(new ErrorEnvelopeFilter(logger));
   return app;

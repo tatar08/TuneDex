@@ -75,4 +75,24 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, ...idp, APP_ENV: 'staging' })).toThrow('CONFIG_SIGNING_KEY');
     expect(loadConfig({ ...base, ...idp, APP_ENV: 'staging', CONFIG_SIGNING_KEY: pem }).configSigningKey).toBe(pem);
   });
+
+  it('keeps billing off per store until it is configured, then requires everything that store needs', () => {
+    expect(loadConfig(base).billing).toEqual({ apple: null, google: null });
+    const cert = '-----BEGIN CERTIFICATE-----\\nMIIB\\n-----END CERTIFICATE-----';
+    expect(() => loadConfig({ ...base, APPLE_BUNDLE_ID: 'app.tunedeck' })).toThrow('APPLE_ROOT_CA_PEM');
+    expect(() => loadConfig({ ...base, APPLE_BUNDLE_ID: 'app.tunedeck', APPLE_ROOT_CA_PEM: cert })).toThrow('APPLE_PRO_PRODUCT_IDS');
+    const apple = loadConfig({ ...base, APPLE_BUNDLE_ID: 'app.tunedeck', APPLE_ROOT_CA_PEM: cert, APPLE_PRO_PRODUCT_IDS: 'tunedeck.pro' }).billing.apple;
+    expect(apple).toMatchObject({ productIds: ['tunedeck.pro'], environments: ['Production'] });
+    expect(() => loadConfig({ ...base, GOOGLE_PLAY_PACKAGE_NAME: 'app.tunedeck', GOOGLE_PLAY_PRO_PRODUCT_IDS: 'pro' })).toThrow('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON');
+    expect(() => loadConfig({ ...base, GOOGLE_PLAY_PACKAGE_NAME: 'app.tunedeck', GOOGLE_PLAY_PRO_PRODUCT_IDS: 'pro', GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: '{}' })).toThrow('client_email');
+    const google = loadConfig({
+      ...base,
+      GOOGLE_PLAY_PACKAGE_NAME: 'app.tunedeck',
+      GOOGLE_PLAY_PRO_PRODUCT_IDS: 'pro',
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: JSON.stringify({ client_email: 'a@b', private_key: '-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----' }),
+      GOOGLE_PUBSUB_PUSH_AUDIENCE: 'https://api/v1/webhooks/google',
+      GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT: 'rtdn@p.iam.gserviceaccount.com',
+    }).billing.google;
+    expect(google).toMatchObject({ packageName: 'app.tunedeck', serviceAccount: { clientEmail: 'a@b' } });
+  });
 });

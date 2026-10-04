@@ -70,6 +70,8 @@ export interface CatalogStation {
   bitrateKbps: number | null;
 }
 
+export type ProState = 'verified' | 'pending' | 'revoked' | 'none';
+
 /** Per-change result of POST /v1/sync/push. */
 export type SyncResult =
   | { changeId: string; entityId: string; status: 'applied'; revision: number }
@@ -732,6 +734,13 @@ export function createBff(deps: BffDeps) {
       const res = await callApi(ctx, '/v1/me/favorites', { method: 'GET' }, `web_${randomUUID()}`);
       if (!res) return null;
       return res.ok ? { status: 200, favorites: ((await res.json()) as { favorites: Favorite[] }).favorites } : { status: res.status };
+    },
+
+    /** Server-side read of the account's Pro state per store (store-scoped in R1). Null means sign in again. */
+    async loadEntitlements(ctx: SessionContext): Promise<{ status: number; pro?: Record<'apple' | 'google', ProState> } | null> {
+      const res = await callApi(ctx, '/v1/me/entitlements', { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, pro: ((await res.json()) as { pro: Record<'apple' | 'google', ProState> }).pro } : { status: res.status };
     },
 
     /** Server-side read of the public catalog, up to 500 stations. No session needed: the catalog is public. */
