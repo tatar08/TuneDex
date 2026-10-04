@@ -267,8 +267,8 @@ describe('operational logs', () => {
       expect([plain.status, plain.body.code]).toEqual([401, 'MFA_REQUIRED']);
       expect((await exp({ authTime: now - 600, acr: '2' })).body.code).toBe('MFA_REQUIRED');
       expect((await exp({ authTime: now, acr: '2' })).status).toBe(200);
-      // Searching stays open without MFA.
-      expect((await request(mfaApp.app.getHttpServer()).get('/v1/admin/logs').set('Authorization', `Bearer ${await id.token('ops-1')}`)).status).toBe(200);
+      // Searching needs an MFA sign-in, but not a fresh one.
+      expect((await request(mfaApp.app.getHttpServer()).get('/v1/admin/logs').set('Authorization', `Bearer ${await id.token('ops-1', { authTime: now - 3600, acr: '2' })}`)).status).toBe(200);
     });
 
     it('neutralises cells a spreadsheet would run as formulas', () => {

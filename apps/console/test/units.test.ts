@@ -130,10 +130,10 @@ describe('stream health helpers', () => {
 });
 
 describe('page language', () => {
-  it('follows the switch, then the browser, then Thai', () => {
-    expect(langFrom('en', 'th-TH')).toBe('en');
-    expect(langFrom(undefined, 'en-US,en;q=0.9,th;q=0.8')).toBe('en');
-    expect(langFrom(undefined, 'th-TH,en;q=0.5')).toBe('th');
-    expect(langFrom('xx', null)).toBe('th');
+  it('is Thai unless the switch chose English', () => {
+    expect(langFrom('en')).toBe('en');
+    expect(langFrom('th')).toBe('th');
+    expect(langFrom(undefined)).toBe('th');
+    expect(langFrom('xx')).toBe('th');
   });
 });

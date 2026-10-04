@@ -549,6 +549,13 @@ test('an admin drafts the app config, a second admin publishes it signed, in eve
   await expect(author.getByText('บันทึกร่างแล้ว')).toBeVisible();
   await expect(author.getByText('คุณแก้ร่างนี้เอง ต้องให้แอดมินอีกคนตรวจและเผยแพร่')).toBeVisible();
   await expect(author.getByText('build ขั้นต่ำ iOS, นำเข้าเพลย์ลิสต์').first()).toBeVisible();
+  // Staging first: test builds try it before a second admin approves it for everyone.
+  await author.locator('#cf-stage-reason').fill('ลอง build 42 ขั้นต่ำกับเครื่องทดสอบ');
+  await author.getByRole('button', { name: 'ส่งร่าง r1 ขึ้น staging' }).click();
+  await expect(author.getByText('ส่งขึ้น staging แล้ว')).toBeVisible();
+  await expect(author.getByText('Staging: รุ่น 1 จากร่าง r1 (ตรงกับร่างนี้)')).toBeVisible();
+  const staged = await (await fetch(`${stack.api.url}/v1/config?channel=staging`)).json();
+  expect(staged).toMatchObject({ release: 1, environment: 'staging' });
 
   const reviewer = await signInAs(browser, 'e2e-admin2', '/admin/config');
   await reviewer.locator('#cf-reason').fill('build 41 ล่มตอนนำเข้า บังคับ 42 และปิดนำเข้าชั่วคราว');
@@ -556,11 +563,11 @@ test('an admin drafts the app config, a second admin publishes it signed, in eve
   if (SHOTS) await reviewer.screenshot({ path: `${SHOTS}/config-publish.png`, fullPage: true });
   await reviewer.getByRole('button', { name: 'เผยแพร่ร่าง r1' }).click();
   await expect(reviewer.getByText('เผยแพร่แล้ว')).toBeVisible();
-  await expect(reviewer.getByText('แอปใช้ รุ่น 1').first()).toBeVisible();
+  await expect(reviewer.getByText('แอปใช้ รุ่น 2').first()).toBeVisible();
 
-  // What the apps get: release 1, signed (the JWS payload carries the same document).
+  // What the apps get: release 2 (promoted from staging release 1), signed (the JWS payload carries the same document).
   const served = await (await fetch(`${stack.api.url}/v1/config`)).json();
-  expect(served).toMatchObject({ release: 1, config: { minSupportedBuild: { ios: 42, android: null }, features: { playlistImport: false } } });
+  expect(served).toMatchObject({ release: 2, environment: 'production', config: { minSupportedBuild: { ios: 42, android: null }, features: { playlistImport: false } } });
   expect(served.jws.split('.')).toHaveLength(3);
 
   const picker = reviewer.getByLabel('เลือกธีมหน้าทีมงาน');
@@ -574,7 +581,7 @@ test('an admin drafts the app config, a second admin publishes it signed, in eve
   for (const [theme, selector] of Object.entries(layouts)) {
     await picker.selectOption(theme);
     await expect(reviewer.locator(selector)).toBeVisible();
-    await expect(reviewer.getByText('รุ่น 1').first()).toBeVisible();
+    await expect(reviewer.getByText('รุ่น 2').first()).toBeVisible();
     if (SHOTS) await reviewer.screenshot({ path: `${SHOTS}/config-${theme}.png`, fullPage: true });
   }
 
@@ -587,6 +594,6 @@ test('an admin drafts the app config, a second admin publishes it signed, in eve
   await expect(editor.getByRole('link', { name: 'ตั้งค่าแอป' })).toHaveCount(0);
 
   const audit = (await stack.api.sql(`SELECT action FROM audit_events WHERE target_type = 'config' ORDER BY id`)) as { rows: { action: string }[] };
-  expect(audit.rows.map((r) => r.action)).toEqual(['config.update', 'config.publish']);
+  expect(audit.rows.map((r) => r.action)).toEqual(['config.update', 'config.stage', 'config.publish']);
 });
 
