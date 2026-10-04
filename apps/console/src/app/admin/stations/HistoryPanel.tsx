@@ -3,12 +3,14 @@
 import { useEffect, useState } from 'react';
 import { actionLabel, formatDateTime } from '@/lib/admin';
 import type { StationHistoryEntry } from '@/lib/bff';
+import { useAdmin } from '../AdminShell';
 
 /**
  * Version history of one station from the audit trail: edits, publishes, disables and rights changes, newest first.
  * `refreshKey` changes after each change made on this page, so the list reloads from the first page.
  */
 export function HistoryPanel({ stationId, refreshKey }: { stationId: string; refreshKey: string }) {
+  const { t, lang } = useAdmin();
   const [events, setEvents] = useState<StationHistoryEntry[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -34,18 +36,18 @@ export function HistoryPanel({ stationId, refreshKey }: { stationId: string; ref
   }, [stationId, refreshKey]);
 
   return (
-    <section className="adm-panel" aria-label="ประวัติเวอร์ชัน">
-      <h3>ประวัติเวอร์ชัน</h3>
-      {failed && <p className="adm-alert">โหลดประวัติไม่ได้ ลองโหลดหน้าใหม่</p>}
-      {events && events.length === 0 && <p className="dim">ยังไม่มีประวัติ</p>}
+    <section className="adm-panel" aria-label={t('ประวัติเวอร์ชัน')}>
+      <h3>{t('ประวัติเวอร์ชัน')}</h3>
+      {failed && <p className="adm-alert">{t('โหลดประวัติไม่ได้ ลองโหลดหน้าใหม่')}</p>}
+      {events && events.length === 0 && <p className="dim">{t('ยังไม่มีประวัติ')}</p>}
       {events && events.length > 0 && (
         <ol className="rt-history">
           {events.map((e) => (
             <li key={e.id}>
               <span className="mono">{e.revision !== null ? `r${e.revision}` : '—'}</span>
-              <span>{actionLabel(e.action)}</span>
+              <span>{t(actionLabel(e.action))}</span>
               <small>
-                {e.actorSubject ?? e.actor} · {formatDateTime(e.occurredAt)}
+                {e.actorSubject ?? e.actor} · {formatDateTime(e.occurredAt, lang)}
                 {e.reason && ` · ${e.reason}`}
               </small>
             </li>
@@ -54,7 +56,7 @@ export function HistoryPanel({ stationId, refreshKey }: { stationId: string; ref
       )}
       {cursor && (
         <button type="button" className="btn secondary" disabled={busy} onClick={() => load(cursor)}>
-          {busy ? 'กำลังโหลด…' : 'โหลดเพิ่ม'}
+          {busy ? t('กำลังโหลด…') : t('โหลดเพิ่ม')}
         </button>
       )}
     </section>
