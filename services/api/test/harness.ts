@@ -56,6 +56,7 @@ export function testConfig(databaseUrl: string): AppConfig {
     oidc: { issuer: ISSUER, audience: AUDIENCE, jwksUri: 'https://idp.test/unused', algorithms: ['RS256'] },
     rateLimit: { enabled: false, readsPerMinute: 120, writesPerMinute: 30, catalogPerMinutePerIp: 60, trustProxyHops: 0 },
     stationCheck: { enabled: false, intervalMinutes: 15, region: 'test-region' },
+    configSigningKey: null,
     idpAdmin: {
       tokenUrl: 'https://idp.test/realms/tunedeck/protocol/openid-connect/token',
       adminBase: 'https://idp.test/admin/realms/tunedeck',

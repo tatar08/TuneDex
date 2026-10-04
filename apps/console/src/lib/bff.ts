@@ -223,6 +223,33 @@ export interface JobsPage {
 }
 const JOB_ID = /^[0-9a-f]{64}$/;
 
+/** GET /v1/admin/config (Doc 17 /admin/config): the draft, the current and recent releases. */
+export type ConfigFeature = 'catalogBrowse' | 'playlistImport' | 'diagnosticsUpload';
+export interface AppConfigPayload {
+  minSupportedBuild: { ios: number | null; android: number | null };
+  features: Record<ConfigFeature, boolean>;
+  catalogRefreshHours: number;
+}
+export interface ConfigRelease {
+  release: number;
+  schemaVersion: number;
+  config: AppConfigPayload;
+  rollbackOf: number | null;
+  draftRevision: number | null;
+  publishedAt: string;
+  expiresAt: string;
+  reason: string;
+  publishedByYou: boolean;
+}
+export interface AdminConfigView {
+  draft: { config: AppConfigPayload; revision: number; updatedAt: string | null; changedSinceRelease: string[] };
+  current: ConfigRelease | null;
+  releases: ConfigRelease[];
+  publishBlockers: string[];
+  defaults: AppConfigPayload;
+  signingKeyId: string;
+}
+
 /** POST /v1/admin/users/lookup (Doc 17 support lookup): no settings values, stations or roles. */
 export interface UserSupportView {
   matchedBy: 'user' | 'device' | 'email';
@@ -487,6 +514,21 @@ export function createBff(deps: BffDeps) {
     jobRetry: (req: Request, id: string) =>
       timed(req, '/bff/admin/jobs/:id/retry', async (requestId) =>
         JOB_ID.test(id) ? adminProxy(req, requestId, `/v1/admin/jobs/${id}/retry`, true) : notFound(requestId),
+      ),
+
+    /** Server-side read for /admin/config. Null means the user must sign in again. */
+    async loadConfig(ctx: SessionContext): Promise<{ status: number; view?: AdminConfigView } | null> {
+      const res = await callApi(ctx, '/v1/admin/config', { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, view: (await res.json()) as AdminConfigView } : { status: res.status };
+    },
+
+    /** PATCH /bff/admin/config/draft (If-Match), POST …/publish (If-Match) and …/releases/{n}/rollback; the API checks roles. */
+    configDraft: (req: Request) => timed(req, '/bff/admin/config/draft', (requestId) => adminProxy(req, requestId, '/v1/admin/config/draft', true)),
+    configPublish: (req: Request) => timed(req, '/bff/admin/config/publish', (requestId) => adminProxy(req, requestId, '/v1/admin/config/publish', true)),
+    configRollback: (req: Request, release: string) =>
+      timed(req, '/bff/admin/config/releases/:release/rollback', async (requestId) =>
+        /^[1-9]\d{0,14}$/.test(release) ? adminProxy(req, requestId, `/v1/admin/config/releases/${release}/rollback`, true) : notFound(requestId),
       ),
 
     /** POST /bff/admin/users/lookup with `{ query, reason }`; the API checks the role and records the lookup. */

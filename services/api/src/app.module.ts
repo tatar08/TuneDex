@@ -6,6 +6,7 @@ import type { JWTVerifyGetKey } from 'jose';
 import type { Pool } from 'pg';
 import { AccountDeletionStatusController, AccountService, MyAccountController } from './account/account';
 import { IDP_FETCH, IdpFetch, IdpUsersService } from './account/idp-users';
+import { AdminConfigController, AppConfigService, CONFIG_SIGNER, createConfigSigner, PublicConfigController } from './app-config/app-config';
 import { AdminJobsController, JobsService } from './jobs/jobs';
 import { AdminUsersController, AdminUsersService } from './users/admin-users';
 import { AdminOverviewController, OverviewService } from './overview/overview';
@@ -48,7 +49,7 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, AdminOverviewController, AdminJobsController, AdminUsersController],
+      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, AdminOverviewController, AdminJobsController, AdminUsersController, AdminConfigController, PublicConfigController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },
@@ -66,6 +67,8 @@ export class AppModule {
         DiagnosticsService,
         AccountService,
         IdpUsersService,
+        AppConfigService,
+        { provide: CONFIG_SIGNER, useValue: createConfigSigner(deps.config.configSigningKey) },
         { provide: IDP_FETCH, useValue: deps.idpFetch ?? ((input: Parameters<IdpFetch>[0], init?: Parameters<IdpFetch>[1]) => fetch(input, init)) },
         OverviewService,
         JobsService,

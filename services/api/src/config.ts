@@ -25,6 +25,11 @@ export interface AppConfig {
    * and production; in dev it may be left out and deletion then keeps the Keycloak user.
    */
   idpAdmin: { tokenUrl: string; adminBase: string; clientId: string; clientSecret: string } | null;
+  /**
+   * Ed25519 private key (PKCS#8 PEM) that signs GET /v1/config. Required in staging and production, where the
+   * apps pin its public key; dev without one signs with a throwaway key per start.
+   */
+  configSigningKey: string | null;
   /** Scheduled stream checks of published stations (Doc 17). Off unless STATION_CHECK_ENABLED=true. */
   stationCheck: {
     enabled: boolean;
@@ -75,6 +80,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     rateLimit: loadRateLimit(env),
     idpAdmin: loadIdpAdmin(env, appEnv, required(env, 'OIDC_ISSUER')),
+    configSigningKey: loadConfigSigningKey(env, appEnv),
     stationCheck: loadStationCheck(env),
   };
 }
@@ -98,6 +104,18 @@ function loadIdpAdmin(env: NodeJS.ProcessEnv, appEnv: AppEnv, issuer: string): A
     clientId,
     clientSecret,
   };
+}
+
+/** Accepts the PEM as is, or on one line with `\n` escapes as most secret stores hold it. */
+function loadConfigSigningKey(env: NodeJS.ProcessEnv, appEnv: AppEnv): string | null {
+  const raw = env.CONFIG_SIGNING_KEY?.trim() ?? '';
+  if (!raw) {
+    if (appEnv !== 'dev') throw new Error('Missing required environment variable CONFIG_SIGNING_KEY (the apps verify remote config with its public key)');
+    return null;
+  }
+  const pem = raw.replace(/\\n/g, '\n');
+  if (!/^-----BEGIN PRIVATE KEY-----\n[\s\S]+\n-----END PRIVATE KEY-----$/.test(pem)) throw new Error('CONFIG_SIGNING_KEY must be a PKCS#8 PEM private key');
+  return pem;
 }
 
 function wholeNumber(env: NodeJS.ProcessEnv, key: string, fallback: number, min: number, max: number): number {

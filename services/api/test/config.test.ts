@@ -64,4 +64,15 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, KEYCLOAK_ADMIN_CLIENT_ID: 'api-admin' })).toThrow('KEYCLOAK_ADMIN_CLIENT_SECRET');
     expect(() => loadConfig({ ...base, KEYCLOAK_ADMIN_CLIENT_ID: 'a', KEYCLOAK_ADMIN_CLIENT_SECRET: 'b', OIDC_ISSUER: 'https://id.example/oauth' })).toThrow('OIDC_ISSUER');
   });
+
+  it('reads the config signing key, also from a one-line secret, and requires it outside dev', () => {
+    const { generateKeyPairSync } = require('node:crypto') as typeof import('node:crypto');
+    const pem = generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }).toString().trim();
+    expect(loadConfig(base).configSigningKey).toBeNull();
+    expect(loadConfig({ ...base, CONFIG_SIGNING_KEY: pem.replace(/\n/g, '\\n') }).configSigningKey).toBe(pem);
+    expect(() => loadConfig({ ...base, CONFIG_SIGNING_KEY: 'not a key' })).toThrow('CONFIG_SIGNING_KEY');
+    const idp = { KEYCLOAK_ADMIN_CLIENT_ID: 'a', KEYCLOAK_ADMIN_CLIENT_SECRET: 'b' };
+    expect(() => loadConfig({ ...base, ...idp, APP_ENV: 'staging' })).toThrow('CONFIG_SIGNING_KEY');
+    expect(loadConfig({ ...base, ...idp, APP_ENV: 'staging', CONFIG_SIGNING_KEY: pem }).configSigningKey).toBe(pem);
+  });
 });

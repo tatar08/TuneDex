@@ -799,3 +799,59 @@
 @media (max-width: 900px) {
   .adm .us-form, .t-control-room .us-kpis, .t-daylight-bento .us-bento, .t-broadcast-rack .us-rack li { grid-template-columns: 1fr; }
 }
+
+/* /admin/config: shared pieces, then per-theme arrangement */
+.adm .cf-form { display: grid; gap: 12px; }
+.adm .cf-form fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: block; }
+.adm .cf-fs { display: grid; gap: 10px; }
+.adm .cf-builds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.adm .cf-form .fld, .adm .cf-publish .fld { display: grid; gap: 4px; min-width: 0; }
+.adm .cf-form input:not([type='checkbox']), .adm .cf-publish textarea, .adm .cf-publish select {
+  width: 100%; font: inherit; color: var(--t); background: var(--b); border: 1px solid var(--l); border-radius: var(--r); padding: 7px 9px;
+}
+.adm .cf-form input[inputmode='numeric'] { font-family: var(--mono); }
+.adm .cf-feats { display: grid; gap: 8px; }
+.adm .cf-feat { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start; }
+.adm .cf-feat input { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--a); }
+.adm .cf-feat span { display: grid; gap: 2px; }
+.adm .cf-feat small { font-size: 12px; }
+.adm .cf-form > .btn { justify-self: start; }
+.adm .cf-publish { display: grid; gap: 10px; }
+.adm .cf-publish > .btn { justify-self: start; }
+.adm .cf-days { max-width: 160px; }
+.adm .cf-blockers { margin: 0; padding-left: 18px; color: var(--m); display: grid; gap: 4px; }
+.adm .cf-current p { margin: 0 0 6px; }
+.adm .cf-sum { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.adm .cf-sum .cf-off b { color: var(--e); }
+.adm .cf-rel { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.adm .cf-rel > li { display: grid; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--l); justify-items: start; }
+.adm .cf-rel > li:last-child { border-bottom: 0; }
+.adm .cf-rel-head { display: flex; gap: 8px; align-items: center; }
+.adm .cf-reason { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.adm .cf-rel .jb-retry { align-items: flex-start; }
+.adm .cf-cols { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.adm .cf-sub { font-size: 14px; margin: 16px 0 6px; }
+.adm .cf h3, .adm .cf h4 { margin: 0 0 10px; }
+.adm .tag.jb-completed, .adm .cf-rel .tag { font-size: 11px; padding: 1px 8px; border: 1px solid var(--l); border-radius: 999px; color: var(--ok); }
+.t-control-room .cf .pn { padding: 14px 16px; }
+.t-control-room .cf .pn + h3, .t-control-room .cf .pn h3 + .cf-current { margin-top: 0; }
+.t-control-room .cf .cf-publish + h3 { margin-top: 16px; }
+.t-broadcast-rack .cf-rack { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 12px; margin-bottom: 12px; }
+.t-broadcast-rack .cf .adm-panel h4 { display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: .04em; font-size: 12px; }
+.t-broadcast-rack .cf .cf-current { margin-bottom: 14px; }
+.t-daylight-bento .cf-bento { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+.t-daylight-bento .cf-bento section { background: var(--p); border-radius: var(--r); padding: 16px 18px; display: grid; gap: 8px; align-content: start; }
+.t-daylight-bento .cf-bento .b-kpi small { color: var(--m); font-size: 12px; }
+.t-daylight-bento .cf-bento .b-kpi b { font-size: 26px; font-weight: 700; }
+.t-daylight-bento .cf-bento .b-kpi.warn b { color: var(--e); }
+.t-daylight-bento .cf-bento .b-wide { grid-column: 1 / -1; }
+.t-daylight-bento .cf-rel-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.t-daylight-bento .cf-rel-grid > li { border: 1px solid var(--l); border-radius: var(--r); padding: 12px; }
+.t-workbench .cf-wb-list { padding: 0 16px; overflow-y: auto; }
+.t-workbench .det .cf-form, .t-workbench .det .cf-publish { margin-top: 14px; }
+.t-workbench .det hr { border: 0; border-top: 1px solid var(--l); margin: 18px 0 4px; }
+.t-minimal .cf .cf-cols { margin: 0; }
+@media (max-width: 900px) {
+  .adm .cf-cols, .t-broadcast-rack .cf-rack, .t-daylight-bento .cf-bento { grid-template-columns: 1fr; }
+  .adm .cf-builds { grid-template-columns: 1fr; }
+}

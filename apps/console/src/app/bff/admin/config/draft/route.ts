@@ -1,0 +1,5 @@
+import { getBff } from '@/lib/runtime';
+
+export const dynamic = 'force-dynamic';
+
+export const PATCH = (req: Request) => getBff().configDraft(req);
