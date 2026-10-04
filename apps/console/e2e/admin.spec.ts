@@ -374,3 +374,42 @@ test('operators see the overview in every theme; editors cannot', async ({ brows
   await editor.goto(`${stack.base}/admin/overview`);
   await expect(editor.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูภาพรวมระบบ');
 });
+
+test('operators retry a failed account deletion with a reason, in every theme', async ({ browser }) => {
+  // A deletion whose last background attempt failed five minutes ago (the purge itself works in tests).
+  await stack.api.sql(
+    `WITH u AS (INSERT INTO users (oidc_subject, status) VALUES ('e2e-jobs-leaver', 'deleting') RETURNING id)
+     INSERT INTO account_deletions (ticket_hash, user_id, subject_hash, status, attempts, last_attempt_at, requested_at)
+     SELECT repeat('ab', 32), id, 's-e2e', 'failed', 3, now() - interval '5 minutes', now() - interval '2 days' FROM u`,
+  );
+  const page = await signInAs(browser, 'e2e-ops', '/admin/jobs');
+  const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
+  const layouts: Record<string, string> = {
+    'control-room': '.t-control-room .cr-page .jb-kpis + .pn .jb-table',
+    'broadcast-rack': '.t-broadcast-rack .jb-rack li.jb-failed',
+    'daylight-bento': '.t-daylight-bento .jb-bento .b-job',
+    workbench: '.t-workbench .split .jb-it.sel',
+    minimal: '.t-minimal .fv-logstats + .fv-card .jb-list',
+  };
+  for (const [theme, selector] of Object.entries(layouts)) {
+    await picker.selectOption(theme);
+    await expect(page.locator(selector).first()).toBeVisible();
+    await expect(page.getByText('ไม่สำเร็จ กำลังลองใหม่อัตโนมัติ').first()).toBeVisible();
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/jobs-${theme}.png`, fullPage: true });
+  }
+
+  await picker.selectOption('minimal');
+  await page.getByRole('button', { name: 'ลองใหม่ตอนนี้' }).click();
+  await page.getByLabel('เหตุผล (จะถูกบันทึกไว้ในประวัติ)').fill('ลองใหม่หลังแก้ฐานข้อมูลแล้ว');
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/jobs-retry.png`, fullPage: true });
+  await page.getByRole('button', { name: 'ลองใหม่', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'ลบข้อมูลบัญชีเสร็จแล้ว' })).toBeVisible();
+  await expect(page.locator('.jb-empty')).toHaveText('ไม่มีงานค้าง');
+  const logged = (await stack.api.sql(`SELECT reason, changes->>'result' AS result FROM audit_events WHERE action = 'job.retry'`)) as { rows: { reason: string; result: string }[] };
+  expect(logged.rows).toEqual([{ reason: 'ลองใหม่หลังแก้ฐานข้อมูลแล้ว', result: 'completed' }]);
+
+  const editor = await signInAs(browser, 'e2e-editor');
+  await expect(editor.getByRole('link', { name: 'งานเบื้องหลัง' })).toHaveCount(0);
+  await editor.goto(`${stack.base}/admin/jobs`);
+  await expect(editor.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูงานเบื้องหลัง');
+});

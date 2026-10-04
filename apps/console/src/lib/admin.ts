@@ -273,6 +273,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'account.export': 'ผู้ใช้ดาวน์โหลดข้อมูล',
   'account.delete_requested': 'ผู้ใช้ขอลบบัญชี',
   'account.deleted': 'ลบข้อมูลบัญชีเสร็จ',
+  'job.retry': 'สั่งงานเบื้องหลังซ้ำ',
 };
 export const actionLabel = (a: string) => ACTION_LABELS[a] ?? a;
 /** Family used for colors and the action filter. */

@@ -17,6 +17,8 @@ export type ErrorCode =
   | 'CHECK_TOO_SOON'
   | 'API_RATE_LIMITED'
   | 'ACCOUNT_DELETING'
+  | 'JOB_RETRY_TOO_SOON'
+  | 'JOB_BUSY'
   | 'INTERNAL';
 
 export const MESSAGE_KEYS: Record<ErrorCode, string> = {
@@ -36,6 +38,8 @@ export const MESSAGE_KEYS: Record<ErrorCode, string> = {
   CHECK_TOO_SOON: 'errors.stations.checkTooSoon',
   API_RATE_LIMITED: 'errors.request.rateLimited',
   ACCOUNT_DELETING: 'errors.account.deleting',
+  JOB_RETRY_TOO_SOON: 'errors.jobs.retryTooSoon',
+  JOB_BUSY: 'errors.jobs.busy',
   INTERNAL: 'errors.service.internal',
 };
 

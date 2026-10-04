@@ -175,6 +175,44 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
     return this.working;
   }
 
+  /**
+   * Runs one open request now (staff "retry" on /admin/jobs). Takes the same queue lock as the background
+   * run, so the two never purge at once; 'busy' means another run holds it and will reach this job anyway.
+   */
+  async retryOne(ticketHash: string): Promise<'completed' | 'failed' | 'busy'> {
+    const client = await this.pool.connect();
+    try {
+      const [{ locked }] = (await client.query<{ locked: boolean }>('SELECT pg_try_advisory_lock($1) AS locked', [LOCK_KEY])).rows;
+      if (!locked) return 'busy';
+      try {
+        const [job] = await this.db.query<{ user_id: string }>(
+          `SELECT user_id FROM account_deletions WHERE ticket_hash = $1 AND status <> 'completed'`,
+          [ticketHash],
+        );
+        if (!job) return 'completed';
+        return (await this.attempt(ticketHash, job.user_id)) ? 'completed' : 'failed';
+      } finally {
+        await client.query('SELECT pg_advisory_unlock($1)', [LOCK_KEY]);
+      }
+    } finally {
+      client.release();
+    }
+  }
+
+  /** One purge attempt; a failure is counted on the request and logged without details. */
+  private async attempt(ticketHash: string, userId: string): Promise<boolean> {
+    try {
+      await this.purge(ticketHash, userId);
+      return true;
+    } catch (err) {
+      await this.db
+        .query(`UPDATE account_deletions SET status = 'failed', attempts = attempts + 1, last_attempt_at = now() WHERE ticket_hash = $1`, [ticketHash])
+        .catch(() => undefined);
+      this.logger.log('ERROR', { eventCode: 'ACCOUNT_PURGE_FAILED', errorName: (err as Error)?.name ?? 'Error' });
+      return false;
+    }
+  }
+
   private async drain(): Promise<number> {
     const client = await this.pool.connect();
     try {
@@ -191,15 +229,7 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
         let done = 0;
         for (const job of open) {
           if (this.stopped) break;
-          try {
-            await this.purge(job.ticket_hash, job.user_id);
-            done++;
-          } catch (err) {
-            await this.db
-              .query(`UPDATE account_deletions SET status = 'failed', attempts = attempts + 1, last_attempt_at = now() WHERE ticket_hash = $1`, [job.ticket_hash])
-              .catch(() => undefined);
-            this.logger.log('ERROR', { eventCode: 'ACCOUNT_PURGE_FAILED', errorName: (err as Error)?.name ?? 'Error' });
-          }
+          if (await this.attempt(job.ticket_hash, job.user_id)) done++;
         }
         return done;
       } finally {
