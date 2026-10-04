@@ -3,12 +3,22 @@ import type { Pool } from 'pg';
 import { StructuredLogger } from '../common/logger';
 import { APP_CONFIG, AppConfig } from '../config';
 import { Database, PG_POOL } from '../db/database';
+import { JobKind, jobsCte } from '../jobs/queues';
 
 /** Tests only: stands in for the network when posting to the alert webhook. */
 export const ALERT_FETCH = Symbol('ALERT_FETCH');
 export type AlertFetch = (url: string, init: { method: 'POST'; headers: Record<string, string>; body: string; signal: AbortSignal }) => Promise<{ status: number }>;
 
-export type AlertCode = 'api_error_rate' | 'api_latency' | 'account_deletion_failed' | 'account_deletion_stuck' | 'account_deletion_late' | 'station_checker_stale';
+export type AlertCode =
+  | 'api_error_rate'
+  | 'api_latency'
+  | 'account_deletion_failed'
+  | 'account_deletion_stuck'
+  | 'account_deletion_late'
+  | 'account_export_stuck'
+  | 'idp_session_end_stuck'
+  | 'job_dead_letter'
+  | 'station_checker_stale';
 type Severity = 'critical' | 'warning';
 
 export interface Reading {
@@ -32,8 +42,11 @@ export interface OpenAlert {
 export const RULES = {
   errorRate: { windowMs: 5 * 60_000, minRequests: 100, threshold: 0.02 },
   latency: { windowMs: 10 * 60_000, minRequests: 20, p95Ms: 1000 },
-  /** A deletion normally finishes seconds after the request; still pending after this means the queue is stuck. */
-  deletionStuckMs: 5 * 60_000,
+  /**
+   * Doc 17 "queue oldest > 5 min", per queue: a job normally runs seconds after it is due (requested, or its
+   * backoff ended); one still waiting after this means that queue's worker is stuck.
+   */
+  queueStuckMs: 5 * 60_000,
   deletionLateDays: 25,
 } as const;
 const EVERY_MS = 60_000;
@@ -42,8 +55,11 @@ const LOCK_KEY = 7_421_031;
 const DESCRIBE: Record<AlertCode, (v: number | null, n: number | null) => string> = {
   api_error_rate: (v, n) => `API ตอบ 5xx ${((v ?? 0) * 100).toFixed(1)}% ใน 5 นาที (${n} คำขอ)`,
   api_latency: (v, n) => `API ช้า: p95 ${v} ms ใน 10 นาที (${n} คำขอ)`,
-  account_deletion_failed: (v) => `ลบบัญชีไม่สำเร็จ ${v} คำขอ กำลังลองใหม่`,
+  account_deletion_failed: (v) => `ลบบัญชีไม่สำเร็จ ${v} คำขอ`,
   account_deletion_stuck: (v) => `คำขอลบบัญชีค้างเกิน 5 นาที ${v} คำขอ`,
+  account_export_stuck: (v) => `คำขอส่งออกข้อมูลค้างเกิน 5 นาที ${v} คำขอ`,
+  idp_session_end_stuck: (v) => `การปิดเซสชัน Keycloak ค้างเกิน 5 นาที ${v} รายการ`,
+  job_dead_letter: (v) => `งานเบื้องหลังลองครบ 5 ครั้งแล้วไม่สำเร็จ ${v} งาน รอทีมงานสั่งลองใหม่`,
   account_deletion_late: (v) => `คำขอลบบัญชีค้างเกิน 25 วัน ${v} คำขอ (กำหนด 30 วัน)`,
   station_checker_stale: () => 'ตัวตรวจสตรีมไม่ได้รันเกิน 2.5 รอบ',
 };
@@ -99,18 +115,22 @@ export class AlertService implements OnApplicationBootstrap, OnApplicationShutdo
     const at = now.toISOString();
     const req = `FROM operational_logs WHERE event_code = 'HTTP_REQUEST' AND logged_at >= $1 AND logged_at < $2`;
     const since = (ms: number) => new Date(now.getTime() - ms).toISOString();
-    const [[errors], [latency], [deletions], [lastCheck], [live]] = await Promise.all([
+    const [[errors], [latency], [deletions], queues, [lastCheck], [live]] = await Promise.all([
       this.db.query<{ n: string; s5: string }>(`SELECT count(*) AS n, count(*) FILTER (WHERE status >= 500) AS s5 ${req}`, [since(RULES.errorRate.windowMs), at]),
       this.db.query<{ n: string; p95: number | null }>(`SELECT count(*) AS n, percentile_disc(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95 ${req}`, [
         since(RULES.latency.windowMs),
         at,
       ]),
-      this.db.query<{ failed: string; stuck: string; late: string }>(
-        `SELECT count(*) FILTER (WHERE status = 'failed') AS failed,
-                count(*) FILTER (WHERE status = 'pending' AND requested_at < $1) AS stuck,
-                count(*) FILTER (WHERE requested_at < $2) AS late
+      // Failed covers retrying and dead-lettered requests: both still have to finish within 30 days.
+      this.db.query<{ failed: string; late: string }>(
+        `SELECT count(*) FILTER (WHERE status IN ('failed', 'dead_letter')) AS failed, count(*) FILTER (WHERE requested_at < $1) AS late
            FROM account_deletions WHERE status <> 'completed'`,
-        [since(RULES.deletionStuckMs), since(RULES.deletionLateDays * 86_400_000)],
+        [since(RULES.deletionLateDays * 86_400_000)],
+      ),
+      this.db.query<{ kind: JobKind; dead: string; stuck: string }>(
+        `${jobsCte(this.config.idpAdmin !== null)}
+         SELECT kind, count(*) FILTER (WHERE state = 'dead_letter') AS dead, count(*) FILTER (WHERE due < $1) AS stuck FROM jobs GROUP BY kind`,
+        [since(RULES.queueStuckMs)],
       ),
       this.db.query<{ at: Date | null }>(`SELECT max(checked_at) AS at FROM station_health WHERE target = 'published'`),
       this.db.query<{ n: string }>(`SELECT count(*) AS n FROM radio_stations WHERE published IS NOT NULL AND disabled_at IS NULL`),
@@ -120,6 +140,7 @@ export class AlertService implements OnApplicationBootstrap, OnApplicationShutdo
     const s5 = Number(errors.s5);
     const ln = Number(latency.n);
     const count = (code: AlertCode, severity: Severity, v: number): Reading => ({ code, severity, state: v > 0 ? 'firing' : 'ok', value: v, sample: null });
+    const stuck = (kind: JobKind) => Number(queues.find((q) => q.kind === kind)?.stuck ?? 0);
     const readings: Reading[] = [
       {
         code: 'api_error_rate',
@@ -136,9 +157,13 @@ export class AlertService implements OnApplicationBootstrap, OnApplicationShutdo
         sample: ln,
       },
       count('account_deletion_failed', 'critical', Number(deletions.failed)),
-      count('account_deletion_stuck', 'warning', Number(deletions.stuck)),
+      count('account_deletion_stuck', 'warning', stuck('account_deletion')),
       count('account_deletion_late', 'critical', Number(deletions.late)),
+      count('account_export_stuck', 'warning', stuck('account_export')),
+      count('job_dead_letter', 'critical', queues.reduce((n, q) => n + Number(q.dead), 0)),
     ];
+    // Without a Keycloak admin client no session end is ever attempted, so that queue has nothing to say.
+    if (this.config.idpAdmin) readings.push(count('idp_session_end_stuck', 'warning', stuck('idp_session_end')));
     if (this.config.stationCheck.enabled && Number(live.n) > 0) {
       const late = !lastCheck.at || now.getTime() - lastCheck.at.getTime() > 2.5 * this.config.stationCheck.intervalMinutes * 60_000;
       readings.push({ code: 'station_checker_stale', severity: 'warning', state: late ? 'firing' : 'ok', value: null, sample: null });

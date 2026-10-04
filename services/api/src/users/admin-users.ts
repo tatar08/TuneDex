@@ -28,7 +28,7 @@ export interface UserSupportView {
   }[];
   /** `access`: this staff member's running access to the reports, granted by the customer's code (null if none). */
   diagnostics: { reportsLast7Days: number; access: { id: string; expiresAt: string } | null };
-  deletion: { status: 'pending' | 'failed' | 'completed'; requestedAt: string } | null;
+  deletion: { status: 'pending' | 'failed' | 'dead_letter' | 'completed'; requestedAt: string } | null;
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+$/;
@@ -89,7 +89,7 @@ export class AdminUsersService {
         [userId],
       ),
       this.db.query<{ n: string }>(`SELECT count(*) AS n FROM diagnostic_reports WHERE user_id = $1 AND received_at > now() - make_interval(days => $2)`, [userId, DIAGNOSTICS_DAYS]),
-      this.db.query<{ status: 'pending' | 'failed' | 'completed'; requested_at: Date }>(
+      this.db.query<{ status: 'pending' | 'failed' | 'dead_letter' | 'completed'; requested_at: Date }>(
         'SELECT status, requested_at FROM account_deletions WHERE user_id = $1 ORDER BY requested_at DESC LIMIT 1',
         [userId],
       ),

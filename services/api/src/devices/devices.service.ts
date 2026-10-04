@@ -4,6 +4,7 @@ import { StructuredLogger } from '../common/logger';
 import { writeAudit } from '../audit/audit';
 import { ApiError } from '../common/api-error';
 import { Database } from '../db/database';
+import { afterFailure, jobErrorCode, WORKER_TICK_MS } from '../jobs/retry-policy';
 import { normalizeOverrides, Overrides } from './device-preferences';
 import { DeviceReport, MAX_ACTIVE_DEVICES } from './devices.schema';
 
@@ -54,8 +55,16 @@ const toView = (r: Row): DeviceView => ({
   preferencesRevision: Number(r.pref_revision ?? 0),
 });
 
-/** A failed Keycloak session end is retried this often, for devices signed out in the last 30 days. */
-const SESSION_RETRY_MS = 10 * 60 * 1000;
+/**
+ * A failed Keycloak session end backs off per the shared retry policy and is dead-lettered after 5 attempts
+ * (shown on /admin/jobs, alerted). Only devices signed out in the last 30 days are worked on.
+ */
+export const SESSION_END_WINDOW_DAYS = 30;
+/** A worker holds a due session end this long while it calls Keycloak, so instances do not double up. */
+const SESSION_LEASE_MINUTES = 5;
+
+/** What a session-end attempt left behind. */
+export type SessionEndOutcome = 'ended' | 'retrying' | 'dead_letter' | 'not_configured';
 
 @Injectable()
 export class DevicesService implements OnApplicationBootstrap, OnApplicationShutdown {
@@ -68,7 +77,7 @@ export class DevicesService implements OnApplicationBootstrap, OnApplicationShut
   ) {}
 
   onApplicationBootstrap(): void {
-    this.timer = setInterval(() => void this.retrySessionEnds().catch(() => undefined), SESSION_RETRY_MS);
+    this.timer = setInterval(() => void this.retrySessionEnds().catch(() => undefined), WORKER_TICK_MS);
     this.timer.unref();
   }
 
@@ -76,27 +85,69 @@ export class DevicesService implements OnApplicationBootstrap, OnApplicationShut
     if (this.timer) clearInterval(this.timer);
   }
 
-  /** Ends the Keycloak session of each recently signed-out device whose session end has not been confirmed. */
+  /** Ends the Keycloak session of each recently signed-out device whose session end is due and not yet confirmed. */
   async retrySessionEnds(): Promise<number> {
-    const rows = await this.db.query<{ user_id: string; id: string; idp_session_id: string }>(
-      `SELECT user_id, id, idp_session_id FROM devices
-        WHERE revoked_at IS NOT NULL AND revoked_at > now() - interval '30 days' AND idp_session_id IS NOT NULL AND idp_session_ended_at IS NULL
-        LIMIT 100`,
+    const rows = await this.db.query<{ user_id: string; id: string; idp_session_id: string; idp_session_attempts: number }>(
+      `UPDATE devices SET idp_session_next_attempt_at = now() + make_interval(mins => $2)
+        WHERE (user_id, id) IN (
+          SELECT user_id, id FROM devices
+           WHERE revoked_at IS NOT NULL AND revoked_at > now() - make_interval(days => $1) AND idp_session_id IS NOT NULL
+             AND idp_session_ended_at IS NULL AND idp_session_dead_at IS NULL
+             AND (idp_session_next_attempt_at IS NULL OR idp_session_next_attempt_at <= now())
+           LIMIT 100 FOR UPDATE SKIP LOCKED)
+        RETURNING user_id, id, idp_session_id, idp_session_attempts`,
+      [SESSION_END_WINDOW_DAYS, SESSION_LEASE_MINUTES],
     );
     let ended = 0;
-    for (const r of rows) if (await this.endIdpSession(r.user_id, r.id, r.idp_session_id)) ended++;
+    for (const r of rows) if ((await this.endIdpSession(r.user_id, r.id, r.idp_session_id, r.idp_session_attempts)) === 'ended') ended++;
     return ended;
   }
 
-  /** Best effort: the API already refuses the session, so a Keycloak failure is logged and retried later. */
-  private async endIdpSession(ownerId: string, deviceId: string, sid: string): Promise<boolean> {
+  /**
+   * Ends one signed-out device's Keycloak session now (staff "retry" on /admin/jobs). A dead-lettered one starts
+   * a new round of attempts. Null when there is no open session end for that device.
+   */
+  async retrySessionEnd(ownerId: string, deviceId: string): Promise<SessionEndOutcome | null> {
+    const [row] = await this.db.query<{ idp_session_id: string; idp_session_attempts: number }>(
+      `UPDATE devices SET idp_session_dead_at = NULL, idp_session_next_attempt_at = NULL,
+              idp_session_attempts = CASE WHEN idp_session_dead_at IS NOT NULL THEN 0 ELSE idp_session_attempts END
+        WHERE user_id = $1 AND id = $2 AND revoked_at IS NOT NULL AND idp_session_id IS NOT NULL AND idp_session_ended_at IS NULL
+        RETURNING idp_session_id, idp_session_attempts`,
+      [ownerId, deviceId],
+    );
+    return row ? this.endIdpSession(ownerId, deviceId, row.idp_session_id, row.idp_session_attempts) : null;
+  }
+
+  /**
+   * Best effort: the API already refuses the session, so a Keycloak failure is logged with its code and retried
+   * later per the retry policy. Without a Keycloak admin client nothing is called and nothing is counted.
+   */
+  private async endIdpSession(ownerId: string, deviceId: string, sid: string, attemptsBefore: number): Promise<SessionEndOutcome> {
     try {
-      if ((await this.idp.endSession(sid)) === 'not_configured') return false;
-      await this.db.query('UPDATE devices SET idp_session_ended_at = now() WHERE user_id = $1 AND id = $2', [ownerId, deviceId]);
-      return true;
+      if ((await this.idp.endSession(sid)) === 'not_configured') return 'not_configured';
+      await this.db.query(
+        `UPDATE devices SET idp_session_ended_at = now(), idp_session_last_attempt_at = now(), idp_session_next_attempt_at = NULL,
+                idp_session_attempts = idp_session_attempts + 1
+          WHERE user_id = $1 AND id = $2`,
+        [ownerId, deviceId],
+      );
+      return 'ended';
     } catch (err) {
-      this.logger.log('WARN', { eventCode: 'IDP_SESSION_END_FAILED', ...(err instanceof IdpError ? { errorCode: 'IDP_SESSION_FAILED', status: err.status } : { errorName: (err as Error)?.name }) });
-      return false;
+      const next = afterFailure(attemptsBefore);
+      await this.db
+        .query(
+          `UPDATE devices SET idp_session_attempts = $3, idp_session_last_attempt_at = now(), idp_session_error_code = $4,
+                  idp_session_next_attempt_at = now() + make_interval(secs => $5::int),
+                  idp_session_dead_at = CASE WHEN $5::int IS NULL THEN now() END
+            WHERE user_id = $1 AND id = $2 AND idp_session_ended_at IS NULL`,
+          [ownerId, deviceId, next.attempts, jobErrorCode(err), next.retryInSeconds],
+        )
+        .catch(() => undefined);
+      this.logger.log('WARN', {
+        eventCode: next.retryInSeconds === null ? 'IDP_SESSION_END_DEAD_LETTERED' : 'IDP_SESSION_END_FAILED',
+        ...(err instanceof IdpError ? { errorCode: 'IDP_SESSION_FAILED', status: err.status } : { errorName: (err as Error)?.name }),
+      });
+      return next.retryInSeconds === null ? 'dead_letter' : 'retrying';
     }
   }
 
@@ -161,7 +212,7 @@ export class DevicesService implements OnApplicationBootstrap, OnApplicationShut
    * The first revoke is audited in the same transaction; repeating it changes nothing and writes nothing.
    */
   async revoke(ownerId: string, deviceId: string, requestId?: string): Promise<DeviceView> {
-    const { view, sid } = await this.db.transaction(async (query) => {
+    const { view, sid, attempts } = await this.db.transaction(async (query) => {
       const before = await query<{ revoked_at: Date | null }>('SELECT revoked_at FROM devices WHERE user_id = $1 AND id = $2 FOR UPDATE', [ownerId, deviceId]);
       if (!before[0]) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
       const rows = await query<Row>(
@@ -178,11 +229,16 @@ export class DevicesService implements OnApplicationBootstrap, OnApplicationShut
           requestId,
         });
       }
-      const [session] = await query<{ idp_session_id: string | null; idp_session_ended_at: Date | null }>('SELECT idp_session_id, idp_session_ended_at FROM devices WHERE user_id = $1 AND id = $2', [ownerId, deviceId]);
-      return { view: toView(rows[0]), sid: session.idp_session_ended_at ? null : session.idp_session_id };
+      const [session] = await query<{ idp_session_id: string | null; idp_session_ended_at: Date | null; idp_session_dead_at: Date | null; idp_session_attempts: number }>(
+        'SELECT idp_session_id, idp_session_ended_at, idp_session_dead_at, idp_session_attempts FROM devices WHERE user_id = $1 AND id = $2',
+        [ownerId, deviceId],
+      );
+      // A dead-lettered session end waits for an operator; revoking again does not start a new round.
+      const open = !session.idp_session_ended_at && !session.idp_session_dead_at;
+      return { view: toView(rows[0]), sid: open ? session.idp_session_id : null, attempts: session.idp_session_attempts };
     });
     // After the commit: the API refuses the session from now on; Keycloak is told too, and retried if it fails.
-    if (sid) await this.endIdpSession(ownerId, deviceId, sid);
+    if (sid) await this.endIdpSession(ownerId, deviceId, sid, attempts);
     return view;
   }
 }

@@ -71,18 +71,32 @@ describe('account exports as jobs (Doc 17 POST /me/exports)', () => {
     expect((await t.pool.query('SELECT 1 FROM account_exports WHERE id = $1', [job.body.id])).rows).toHaveLength(0);
   });
 
-  it('retries a failed build up to three times, then reports it failed', async () => {
+  it('retries a failed build with backoff up to five times, then dead-letters it and reports it failed', async () => {
     const carol = await bearer('exp-carol', now());
     const service = t.app.get(AccountExportsService);
     const spy = jest.spyOn(t.app.get(AccountService), 'export').mockRejectedValue(new Error('boom'));
     let job: request.Response;
     try {
       job = await http().post('/v1/me/exports').set(carol).expect(202);
-      for (let i = 0; i < 5; i++) await service.processQueue();
-      expect(spy).toHaveBeenCalledTimes(3);
+      await service.processQueue();
+      // Not due again until the backoff ends: 1, 5, 15, then 60 minutes.
+      const waits: number[] = [];
+      for (let i = 0; i < 6; i++) {
+        await service.processQueue();
+        const { rows: [r] } = await t.pool.query(`SELECT extract(epoch FROM next_attempt_at - now())::int AS wait FROM account_exports WHERE id = $1`, [job.body.id]);
+        if (r.wait !== null) waits.push(Math.round(r.wait / 60));
+        await t.pool.query(`UPDATE account_exports SET next_attempt_at = now() WHERE id = $1 AND next_attempt_at IS NOT NULL`, [job.body.id]);
+        if (i === 0) {
+          expect((await http().get(`/v1/me/exports/${job.body.id}`).set(carol).expect(200)).body.status).toBe('pending');
+        }
+      }
+      expect(waits).toEqual([1, 5, 15, 60]);
+      expect(spy).toHaveBeenCalledTimes(5);
     } finally {
       spy.mockRestore();
     }
+    const { rows: [row] } = await t.pool.query(`SELECT status, attempts, last_error_code, dead_lettered_at FROM account_exports WHERE id = $1`, [job.body.id]);
+    expect(row).toMatchObject({ status: 'dead_letter', attempts: 5, last_error_code: 'INTERNAL_ERROR', dead_lettered_at: expect.any(Date) });
     const res = await http().get(`/v1/me/exports/${job.body.id}`).set(carol).expect(200);
     expect(res.body.status).toBe('failed');
     expect(res.body.download).toBeUndefined();

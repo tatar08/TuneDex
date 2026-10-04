@@ -19,12 +19,12 @@ import { requireRecentSignIn } from '../auth/recent-sign-in';
 import { ApiError } from '../common/api-error';
 import { StructuredLogger } from '../common/logger';
 import { Database } from '../db/database';
+import { afterFailure, jobErrorCode } from '../jobs/retry-policy';
 import { AccountService } from './account';
 
 /** Doc 17: a download link is valid for at most 15 minutes. */
 export const EXPORT_LINK_MINUTES = 15;
 /** Doc 17: user exports are deleted within 24 hours (the expiry is set in migration 017). */
-const MAX_ATTEMPTS = 3;
 const CLAIM_STALE_MINUTES = 5;
 const SWEEP_EVERY_MS = 60_000;
 
@@ -33,6 +33,10 @@ const LINK = /^[A-Za-z0-9_-]{43}$/;
 const hashLink = (token: string) => createHash('sha256').update(token).digest('hex');
 
 export type ExportStatus = 'pending' | 'ready' | 'failed';
+/** The row's state in the queue. Users see 'dead_letter' as 'failed'; a retrying export is still 'pending' to them. */
+type ExportJobState = 'pending' | 'ready' | 'dead_letter';
+/** What a staff retry left behind (/admin/jobs). */
+export type ExportRetryOutcome = 'completed' | 'retrying' | 'dead_letter' | 'busy' | 'superseded' | 'gone';
 
 export interface ExportView {
   id: string;
@@ -46,7 +50,7 @@ export interface ExportView {
 
 interface Row {
   id: string;
-  status: ExportStatus;
+  status: ExportJobState;
   requested_at: Date;
   ready_at: Date | null;
   expires_at: Date;
@@ -54,7 +58,7 @@ interface Row {
 
 const view = (r: Row): ExportView => ({
   id: r.id,
-  status: r.status,
+  status: r.status === 'dead_letter' ? 'failed' : r.status,
   requestedAt: r.requested_at.toISOString(),
   readyAt: r.ready_at?.toISOString() ?? null,
   expiresAt: r.expires_at.toISOString(),
@@ -63,7 +67,8 @@ const view = (r: Row): ExportView => ({
 /**
  * Doc 17 `POST /me/exports`: the account's data is built in the background into `account_exports`, then
  * fetched through a short-lived link that works without a sign-in (so a phone can open it in a browser).
- * Built exports are deleted after 24 hours, failed ones are retried up to 3 times.
+ * Built exports are deleted after 24 hours. Failed builds back off per the shared retry policy (jobs/retry-policy)
+ * and are dead-lettered after 5 attempts; the user then sees 'failed' and can ask again.
  */
 @Injectable()
 export class AccountExportsService implements OnApplicationBootstrap, OnApplicationShutdown {
@@ -137,35 +142,90 @@ export class AccountExportsService implements OnApplicationBootstrap, OnApplicat
     return this.working;
   }
 
+  /**
+   * Builds one export now (staff "retry" on /admin/jobs). A dead-lettered export starts a new round of attempts,
+   * unless the account has since asked for a new one ('superseded'). 'busy' means a worker is building it.
+   */
+  async retryOne(id: string): Promise<ExportRetryOutcome> {
+    let reset: { id: string }[];
+    try {
+      reset = await this.db.query<{ id: string }>(
+        `UPDATE account_exports SET status = 'pending', next_attempt_at = NULL, dead_lettered_at = NULL,
+                attempts = CASE WHEN status = 'dead_letter' THEN 0 ELSE attempts END
+          WHERE id = $1 AND status <> 'ready' AND expires_at > now()
+            AND (claimed_at IS NULL OR claimed_at < now() - make_interval(mins => $2))
+          RETURNING id`,
+        [id, CLAIM_STALE_MINUTES],
+      );
+    } catch (err) {
+      if ((err as { code?: string }).code === '23505') return 'superseded'; // account_exports_one_pending
+      throw err;
+    }
+    if (!reset[0]) {
+      const [row] = await this.db.query<{ status: ExportJobState }>(`SELECT status FROM account_exports WHERE id = $1 AND expires_at > now()`, [id]);
+      return !row ? 'gone' : row.status === 'ready' ? 'completed' : 'busy';
+    }
+    const job = await this.claim(id);
+    if (!job) return 'busy';
+    const result = await this.build(job);
+    return result === 'ready' ? 'completed' : result;
+  }
+
   private async drain(): Promise<number> {
     await this.db.query(`DELETE FROM account_exports WHERE expires_at <= now()`);
     let built = 0;
     for (;;) {
-      const [job] = await this.db.query<{ id: string; user_id: string; attempts: number }>(
-        `UPDATE account_exports SET claimed_at = now(), attempts = attempts + 1
-         WHERE id = (SELECT id FROM account_exports
-                     WHERE status = 'pending' AND (claimed_at IS NULL OR claimed_at < now() - make_interval(mins => $1))
-                     ORDER BY requested_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-         RETURNING id, user_id, attempts`,
-        [CLAIM_STALE_MINUTES],
-      );
+      const job = await this.claim(null);
       if (!job) return built;
-      try {
-        const payload = await this.account.export(job.user_id);
-        await this.db.query(`UPDATE account_exports SET status = 'ready', ready_at = now(), payload = $2::jsonb, claimed_at = NULL WHERE id = $1`, [
-          job.id,
-          JSON.stringify(payload),
-        ]);
-        built++;
-      } catch (err) {
-        const failed = job.attempts >= MAX_ATTEMPTS;
-        await this.db
-          .query(`UPDATE account_exports SET status = $2, claimed_at = NULL WHERE id = $1`, [job.id, failed ? 'failed' : 'pending'])
-          .catch(() => undefined);
-        this.logger.log('ERROR', { eventCode: 'ACCOUNT_EXPORT_FAILED', errorName: (err as Error)?.name ?? 'Error' });
-        // Leave the rest for the next sweep rather than spinning on a failing database.
-        if (!failed) return built;
-      }
+      const result = await this.build(job);
+      if (result === 'ready') built++;
+      // Leave the rest for the next sweep rather than spinning on a failing database.
+      else return built;
+    }
+  }
+
+  /** Takes the oldest due export (or the given one) for building. Counts the attempt. */
+  private async claim(id: string | null): Promise<{ id: string; user_id: string; attempts: number } | undefined> {
+    const [job] = await this.db.query<{ id: string; user_id: string; attempts: number }>(
+      `UPDATE account_exports SET claimed_at = now(), last_attempt_at = now(), attempts = attempts + 1
+       WHERE id = (SELECT id FROM account_exports
+                   WHERE status = 'pending' AND ($2::uuid IS NULL OR id = $2)
+                     AND (next_attempt_at IS NULL OR next_attempt_at <= now())
+                     AND (claimed_at IS NULL OR claimed_at < now() - make_interval(mins => $1))
+                   ORDER BY requested_at LIMIT 1 FOR UPDATE SKIP LOCKED)
+       RETURNING id, user_id, attempts`,
+      [CLAIM_STALE_MINUTES, id],
+    );
+    return job;
+  }
+
+  /** One build attempt. A failure schedules the next try, or dead-letters the export after the 5th. */
+  private async build(job: { id: string; user_id: string; attempts: number }): Promise<'ready' | 'retrying' | 'dead_letter'> {
+    try {
+      const payload = await this.account.export(job.user_id);
+      await this.db.query(
+        `UPDATE account_exports SET status = 'ready', ready_at = now(), payload = $2::jsonb, claimed_at = NULL, next_attempt_at = NULL WHERE id = $1`,
+        [job.id, JSON.stringify(payload)],
+      );
+      return 'ready';
+    } catch (err) {
+      // The claim already counted this attempt.
+      const next = afterFailure(job.attempts - 1);
+      await this.db
+        .query(
+          `UPDATE account_exports SET claimed_at = NULL, last_error_code = $3,
+                  status = CASE WHEN $2::int IS NULL THEN 'dead_letter' ELSE 'pending' END,
+                  next_attempt_at = now() + make_interval(secs => $2::int),
+                  dead_lettered_at = CASE WHEN $2::int IS NULL THEN now() END
+            WHERE id = $1`,
+          [job.id, next.retryInSeconds, jobErrorCode(err)],
+        )
+        .catch(() => undefined);
+      this.logger.log('ERROR', {
+        eventCode: next.retryInSeconds === null ? 'ACCOUNT_EXPORT_DEAD_LETTERED' : 'ACCOUNT_EXPORT_FAILED',
+        errorName: (err as Error)?.name ?? 'Error',
+      });
+      return next.retryInSeconds === null ? 'dead_letter' : 'retrying';
     }
   }
 }

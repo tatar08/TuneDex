@@ -33,6 +33,9 @@ export type IncidentCode =
   | 'account_deletion_failed'
   | 'account_deletion_stuck'
   | 'account_deletion_late'
+  | 'account_export_stuck'
+  | 'idp_session_end_stuck'
+  | 'job_dead_letter'
   | 'no_recent_traffic';
 
 export interface Incident {
@@ -121,7 +124,7 @@ export class OverviewService {
         `SELECT id, disabled_at IS NOT NULL AS disabled FROM radio_stations WHERE published IS NOT NULL`,
       ),
       this.db.query<{ open: string; failed: string; oldest: Date | null }>(
-        `SELECT count(*) AS open, count(*) FILTER (WHERE status = 'failed') AS failed, min(requested_at) AS oldest
+        `SELECT count(*) AS open, count(*) FILTER (WHERE status IN ('failed', 'dead_letter')) AS failed, min(requested_at) AS oldest
            FROM account_deletions WHERE status <> 'completed'`,
       ),
       this.db.query<{ n: string }>(`SELECT count(*) AS n FROM diagnostic_reports WHERE received_at >= $1 AND received_at < $2`, range),

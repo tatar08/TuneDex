@@ -113,4 +113,37 @@ describe('Doc 17 alerts', () => {
     expect(stuck).toMatchObject({ severity: 'warning', count: 1 });
     expect(typeof stuck.since).toBe('string');
   });
+
+  it('fires on any dead letter across queues and on each queue whose oldest due job waits over 5 minutes', async () => {
+    await t.pool.query(`DELETE FROM account_deletions`);
+    const [{ id: userId }] = (await t.pool.query(`INSERT INTO users (oidc_subject) VALUES ('alert-queues') RETURNING id`)).rows;
+    // A retrying deletion whose next try is still ahead is neither stuck nor dead.
+    await t.pool.query(
+      `INSERT INTO account_deletions (ticket_hash, user_id, subject_hash, status, attempts, next_attempt_at, requested_at)
+       VALUES ('h-backoff', $1, 's', 'failed', 2, now() + interval '4 minutes', now() - interval '20 minutes')`,
+      [userId],
+    );
+    // A signed-out phone whose Keycloak session end has been due for 10 minutes, and one dead-lettered.
+    await t.pool.query(
+      `INSERT INTO devices (user_id, id, platform, os_major, app_build, revoked_at, idp_session_id, idp_session_attempts, idp_session_next_attempt_at, idp_session_dead_at)
+       VALUES ($1, '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d', 'ios', 18, '1', now() - interval '1 hour', 'kc-alert-1', 1, now() - interval '10 minutes', NULL),
+              ($1, '1a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d', 'ios', 18, '1', now() - interval '2 hours', 'kc-alert-2', 5, NULL, now())`,
+      [userId],
+    );
+    const before = posts.length;
+    await alerts().run(new Date());
+    const fired = await open();
+    expect(fired).toEqual(expect.arrayContaining(['idp_session_end_stuck', 'job_dead_letter', 'account_deletion_failed']));
+    expect(fired).not.toContain('account_deletion_stuck');
+    expect(fired).not.toContain('account_export_stuck');
+    const sent = posts.slice(before).map((p) => p.text).join('\n');
+    expect(sent).toContain('[job_dead_letter]');
+    expect(sent).toContain('[idp_session_end_stuck]');
+    expect(sent).not.toMatch(/kc-alert|h-backoff|[0-9a-f]{8}-[0-9a-f]{4}/);
+
+    await t.pool.query(`UPDATE devices SET idp_session_ended_at = now() WHERE user_id = $1`, [userId]);
+    await t.pool.query(`DELETE FROM account_deletions WHERE user_id = $1`, [userId]);
+    await alerts().run(new Date());
+    expect((await open()).filter((c) => c.includes('session') || c.startsWith('job_') || c.startsWith('account_'))).toEqual([]);
+  });
 });

@@ -47,7 +47,7 @@ Do not reuse the local stack as is. In particular:
 - API: `APP_ENV=staging` or `production`, `STAFF_MFA_ACR=mfa`, `CONFIG_SIGNING_KEY`, `KEYCLOAK_ADMIN_CLIENT_*`. Turn on `STATION_CHECK_ENABLED=true` once the network egress rules from Doc 17 are in place. The API refuses to start without the first three.
 - Console: an https `CONSOLE_BASE_URL`, `SESSION_DATABASE_URL`, `OIDC_MFA_ACR=mfa`.
 - The API and console must reach Keycloak at the same issuer URL the browsers use.
-- Alerts: the API covers traffic, latency and the deletion queue (set `ALERT_WEBHOOK_URL` for chat messages). The hosting platform has to cover what the API cannot see: database connection pool above 80% for 10 minutes, disk above 80%, and no successful backup for 24 hours (Doc 17).
+- Alerts: the API covers traffic, latency, the background queues (oldest due job over 5 minutes per queue, any dead letter) and late deletions (set `ALERT_WEBHOOK_URL` for chat messages). The hosting platform has to cover what the API cannot see: database connection pool above 80% for 10 minutes, disk above 80%, and no successful backup for 24 hours (Doc 17).
 
 ## Load test (`infra/load`)
 

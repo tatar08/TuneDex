@@ -19,6 +19,8 @@ export type ErrorCode =
   | 'ACCOUNT_DELETING'
   | 'JOB_RETRY_TOO_SOON'
   | 'JOB_BUSY'
+  | 'JOB_RETRY_LIMIT'
+  | 'JOB_SUPERSEDED'
   | 'SYNC_RESET_REQUIRED'
   | 'PURCHASE_INVALID'
   | 'PURCHASE_CONFLICT'
@@ -47,6 +49,8 @@ export const MESSAGE_KEYS: Record<ErrorCode, string> = {
   ACCOUNT_DELETING: 'errors.account.deleting',
   JOB_RETRY_TOO_SOON: 'errors.jobs.retryTooSoon',
   JOB_BUSY: 'errors.jobs.busy',
+  JOB_RETRY_LIMIT: 'errors.jobs.retryLimit',
+  JOB_SUPERSEDED: 'errors.jobs.superseded',
   SYNC_RESET_REQUIRED: 'errors.sync.resetRequired',
   PURCHASE_INVALID: 'errors.billing.invalid',
   PURCHASE_CONFLICT: 'errors.billing.ownedByAnotherAccount',

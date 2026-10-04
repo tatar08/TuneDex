@@ -395,17 +395,18 @@ test('operators see the overview in every theme; editors cannot', async ({ brows
 });
 
 test('operators retry a failed account deletion with a reason, in every theme', async ({ browser }) => {
-  // A deletion whose last background attempt failed five minutes ago (the purge itself works in tests).
+  // A deletion whose last background attempt failed five minutes ago (the purge itself works in tests). Its next
+  // automatic try is an hour away, so the background worker leaves it for the operator here.
   await stack.api.sql(
     `WITH u AS (INSERT INTO users (oidc_subject, status) VALUES ('e2e-jobs-leaver', 'deleting') RETURNING id)
-     INSERT INTO account_deletions (ticket_hash, user_id, subject_hash, status, attempts, last_attempt_at, requested_at)
-     SELECT repeat('ab', 32), id, 's-e2e', 'failed', 3, now() - interval '5 minutes', now() - interval '2 days' FROM u`,
+     INSERT INTO account_deletions (ticket_hash, user_id, subject_hash, status, attempts, last_attempt_at, next_attempt_at, last_error_code, requested_at)
+     SELECT repeat('ab', 32), id, 's-e2e', 'failed', 3, now() - interval '5 minutes', now() + interval '1 hour', 'IDP_DELETE_FAILED', now() - interval '2 days' FROM u`,
   );
   const page = await signInAs(browser, 'e2e-ops', '/admin/jobs');
   const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
   const layouts: Record<string, string> = {
     'control-room': '.t-control-room .cr-page .jb-kpis + .pn .jb-table',
-    'broadcast-rack': '.t-broadcast-rack .jb-rack li.jb-failed',
+    'broadcast-rack': '.t-broadcast-rack .jb-rack li.jb-retrying',
     'daylight-bento': '.t-daylight-bento .jb-bento .b-job',
     workbench: '.t-workbench .split .jb-it.sel',
     minimal: '.t-minimal .fv-logstats + .fv-card .jb-list',
@@ -414,6 +415,7 @@ test('operators retry a failed account deletion with a reason, in every theme', 
     await picker.selectOption(theme);
     await expect(page.locator(selector).first()).toBeVisible();
     await expect(page.getByText('ไม่สำเร็จ กำลังลองใหม่อัตโนมัติ').first()).toBeVisible();
+    await expect(page.getByText('IDP_DELETE_FAILED').first()).toBeVisible();
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/jobs-${theme}.png`, fullPage: true });
   }
 
