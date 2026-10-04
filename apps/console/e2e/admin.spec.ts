@@ -209,6 +209,10 @@ test('the log page has its own layout in each theme', async ({ browser }) => {
   for (const [theme, selector] of Object.entries(layouts)) {
     await picker.selectOption(theme);
     await expect(page.locator(selector).first()).toBeVisible();
+    // Every theme offers the trace and error-code filters and the audited export.
+    await expect(page.getByLabel('traceId')).toBeVisible();
+    await expect(page.getByLabel('รหัสข้อผิดพลาด')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'ส่งออก CSV' })).toBeVisible();
     if (theme === 'workbench') {
       // j moves to the next line and the detail pane follows.
       const second = await page.locator('.lg-it').nth(1).locator('small').innerText();

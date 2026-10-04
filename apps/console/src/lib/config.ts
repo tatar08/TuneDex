@@ -18,6 +18,9 @@ export interface ConsoleConfig {
   sessionAbsoluteMs: number;
   /** PostgreSQL for sessions shared by every console instance. Required outside localhost; unset there means in-memory. */
   sessionDatabaseUrl: string | null;
+  /** Written on every log line (Doc 17 log schema): APP_ENV and BUILD_VERSION, as for the API. */
+  environment: string;
+  build: string;
 }
 
 function required(env: Record<string, string | undefined>, key: string): string {
@@ -45,6 +48,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (sessionDatabaseUrl && !/^postgres(ql)?:\/\//.test(sessionDatabaseUrl)) throw new Error('SESSION_DATABASE_URL must be a postgres:// URL');
   const mfaAcr = (env.OIDC_MFA_ACR ?? '').split(/[\s,]+/).filter(Boolean).join(' ');
   if (mfaAcr && !/^[A-Za-z0-9:._/-]+( [A-Za-z0-9:._/-]+)*$/.test(mfaAcr)) throw new Error('OIDC_MFA_ACR must list acr values');
+  const environment = env.APP_ENV?.trim() || 'unknown';
+  if (!/^[a-z0-9-]{1,20}$/.test(environment)) throw new Error('APP_ENV must be a short lowercase name such as staging');
+  const build = env.BUILD_VERSION?.trim() || 'unknown';
+  if (!/^[A-Za-z0-9._+-]{1,64}$/.test(build)) throw new Error('BUILD_VERSION must be a build label such as 1.4.0+52');
   return {
     baseUrl: baseUrl.origin,
     apiBaseUrl: new URL(required(env, 'API_BASE_URL')).origin,
@@ -61,5 +68,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     sessionIdleMs: 12 * 60 * 60 * 1000,
     sessionAbsoluteMs: 7 * 24 * 60 * 60 * 1000,
     sessionDatabaseUrl,
+    environment,
+    build,
   };
 }

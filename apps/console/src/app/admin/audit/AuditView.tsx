@@ -20,7 +20,7 @@ import {
 } from '@/lib/admin';
 import type { AuditEvent, AuditPage } from '@/lib/bff';
 import { Icon, useAdmin } from '../AdminShell';
-import { isMfaRequired, MfaLink, MFA_NEEDED } from '../MfaPrompt';
+import { CsvExport } from '../CsvExport';
 
 /**
  * Staff audit trail (Doc 17 /admin/audit): who, what, when, why and a change summary.
@@ -139,110 +139,19 @@ function SearchForm({ search, className, pickers = true }: { search: AuditSearch
   );
 }
 
-const EXPORT_PROBLEMS: Record<string, string> = {
-  reason: 'เหตุผลต้องยาว 10–500 ตัวอักษร',
-  too_many_rows: 'ผลการค้นหาเกิน 10,000 รายการ กรุณาแคบช่วงเวลาหรือเพิ่มตัวกรอง',
-  forbidden: 'ส่งออกได้เฉพาะ auditor หรือ admin',
-  expired: 'หมดเวลาเข้าใช้งาน กรุณาเข้าสู่ระบบอีกครั้ง',
-  rate: RATE_LIMITED,
-  down: 'ระบบไม่พร้อมใช้งานชั่วคราว ลองอีกครั้งภายหลัง',
-};
-
-/**
- * Doc 17 audit export: the current search as CSV (at most 10,000 rows). A reason is required and is
- * recorded with the export. Each theme places the button in its own header.
- */
-function ExportPanel({ search, className = 'btn secondary' }: { search: AuditSearch; className?: string }) {
-  const { csrfToken } = useAdmin();
-  const [open, setOpen] = useState(false);
-  const [reason, setReason] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState('');
-  const [done, setDone] = useState('');
-  const ref = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    if (open) ref.current?.focus();
-  }, [open]);
-
-  async function submit(ev: React.FormEvent) {
-    ev.preventDefault();
-    setBusy(true);
-    setProblem('');
-    setDone('');
-    const { cursor: _c, limit: _l, ...params } = auditApiParams({ ...search, cursor: '' });
-    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]);
-    try {
-      const res = await fetch(`/bff/admin/audit/export?${qs}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
-        body: JSON.stringify({ reason }),
-      });
-      if (res.ok) {
-        const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'tunedeck-audit.csv';
-        const url = URL.createObjectURL(await res.blob());
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = name;
-        a.click();
-        URL.revokeObjectURL(url);
-        setDone(`ดาวน์โหลด ${name} แล้ว การส่งออกนี้ถูกบันทึกพร้อมเหตุผล`);
-        setReason('');
-        setOpen(false);
-        return;
-      }
-      const body = (await res.json().catch(() => ({}))) as { code?: string; details?: { field?: string; reason?: string } };
-      if (isMfaRequired(res.status, body)) return setProblem(MFA_NEEDED);
-      setProblem(
-        EXPORT_PROBLEMS[
-          res.status === 400 ? (body.details?.reason === 'too_many_rows' ? 'too_many_rows' : 'reason') : res.status === 403 ? 'forbidden' : res.status === 401 ? 'expired' : res.status === 429 ? 'rate' : 'down'
-        ],
-      );
-    } catch {
-      setProblem(EXPORT_PROBLEMS.down);
-    } finally {
-      setBusy(false);
-    }
-  }
-
+/** Doc 17 audit export: the current search as CSV. Each theme places the button in its own header. */
+function ExportPanel({ search, className }: { search: AuditSearch; className?: string }) {
+  const { cursor: _c, limit: _l, ...params } = auditApiParams({ ...search, cursor: '' });
   return (
-    <div className="au-export">
-      <button type="button" className={className} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        ส่งออก CSV
-      </button>
-      {done && (
-        <p className="au-export-done" role="status">
-          {done}
-        </p>
-      )}
-      {open && (
-        <form className="au-export-panel" onSubmit={submit} aria-label="ส่งออกประวัติ">
-          <label className="fld">
-            <span>เหตุผลในการส่งออก (จะถูกบันทึกไว้)</span>
-            <textarea ref={ref} value={reason} onChange={(e) => setReason(e.target.value)} minLength={10} maxLength={500} rows={3} required />
-          </label>
-          <small className="dim">ส่งออกตามตัวกรองที่ใช้อยู่ สูงสุด 10,000 รายการ</small>
-          {problem && (
-            <p role="alert" className="au-export-err">
-              {problem}
-              {problem === MFA_NEEDED && (
-                <>
-                  {' '}
-                  <MfaLink />
-                </>
-              )}
-            </p>
-          )}
-          <div className="lg-actions">
-            <button type="submit" className="btn" disabled={busy || reason.trim().length < 10}>
-              {busy ? 'กำลังส่งออก…' : 'ดาวน์โหลด CSV'}
-            </button>
-            <button type="button" className="adm-link" onClick={() => setOpen(false)}>
-              ยกเลิก
-            </button>
-          </div>
-        </form>
-      )}
-    </div>
+    <CsvExport
+      endpoint="/bff/admin/audit/export"
+      params={params}
+      forbidden="ส่งออกได้เฉพาะ auditor หรือ admin"
+      formLabel="ส่งออกประวัติ"
+      unit="รายการ"
+      fallbackName="tunedeck-audit.csv"
+      className={className}
+    />
   );
 }
 
