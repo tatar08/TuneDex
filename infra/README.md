@@ -49,6 +49,10 @@ Do not reuse the local stack as is. In particular:
 - The API and console must reach Keycloak at the same issuer URL the browsers use.
 - Alerts: the API covers traffic, latency and the deletion queue (set `ALERT_WEBHOOK_URL` for chat messages). The hosting platform has to cover what the API cannot see: database connection pool above 80% for 10 minutes, disk above 80%, and no successful backup for 24 hours (Doc 17).
 
+## Load test (`infra/load`)
+
+The Doc 17 envelope (100 req/s + 20 diagnostic batches/s, p95 reads ≤ 300 ms, writes ≤ 500 ms) as a runnable tool, with a script for the throwaway test accounts it needs. Steps and the first local numbers are in `infra/load/README.md`. The 30-minute run on staging is still required before any capacity claim.
+
 ## Backup and restore (`infra/backup`)
 
 Doc 17 targets: RPO 15 minutes, RTO 4 hours after an authorised restore, backups kept at most 35 days, and a restore drill before the first release and every quarter.
