@@ -223,10 +223,10 @@ export interface JobsPage {
 }
 const JOB_ID = /^[0-9a-f]{64}$/;
 
-/** POST /v1/admin/users/lookup (Doc 17 support lookup): minimal, no email, settings values or roles. */
+/** POST /v1/admin/users/lookup (Doc 17 support lookup): no settings values, stations or roles. */
 export interface UserSupportView {
-  matchedBy: 'user' | 'device';
-  user: { id: string; status: 'active' | 'deleting' | 'deleted' | 'disabled'; createdAt: string; deletedAt: string | null };
+  matchedBy: 'user' | 'device' | 'email';
+  user: { id: string; email: string | null; emailVerified: boolean; status: 'active' | 'deleting' | 'deleted' | 'disabled'; createdAt: string; deletedAt: string | null };
   settings: { revision: number; updatedAt: string | null };
   devices: {
     id: string;

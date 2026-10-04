@@ -3,7 +3,7 @@ import type { Request } from 'express';
 import { errors, jwtVerify, JWTVerifyGetKey } from 'jose';
 import { ApiError, DependencyUnavailableError } from '../common/api-error';
 import { APP_CONFIG, AppConfig } from '../config';
-import { UsersService } from '../users/users.service';
+import { EmailClaim, emailClaim, UsersService } from '../users/users.service';
 
 /** Resolves signing keys for token verification (remote JWKS at runtime, a local key set in tests). */
 export const KEY_RESOLVER = Symbol('KEY_RESOLVER');
@@ -42,6 +42,7 @@ export class AuthGuard implements CanActivate {
     let subject: string;
     let authTime: number | undefined;
     let issuedAt: number | undefined;
+    let email: EmailClaim | undefined;
     try {
       const { payload } = await jwtVerify(match[1], this.keys, {
         issuer: this.config.oidc.issuer,
@@ -53,6 +54,7 @@ export class AuthGuard implements CanActivate {
       subject = payload.sub as string;
       authTime = typeof payload.auth_time === 'number' ? payload.auth_time : undefined;
       issuedAt = typeof payload.iat === 'number' ? payload.iat : undefined;
+      email = emailClaim(payload);
     } catch (err) {
       if (TOKEN_ERRORS.some((E) => err instanceof E)) {
         throw new ApiError(HttpStatus.UNAUTHORIZED, 'AUTH_REQUIRED');
@@ -61,7 +63,7 @@ export class AuthGuard implements CanActivate {
     }
     if (!subject) throw new ApiError(HttpStatus.UNAUTHORIZED, 'AUTH_REQUIRED');
 
-    const user = await this.users.findOrCreateBySubject(subject, authTime ?? issuedAt);
+    const user = await this.users.findOrCreateBySubject(subject, authTime ?? issuedAt, email);
     // A sign-in from before this identity's account was deleted.
     if (!user) throw new ApiError(HttpStatus.FORBIDDEN, 'ACCOUNT_DELETING');
     if (user.status === 'deleting') throw new ApiError(HttpStatus.FORBIDDEN, 'ACCOUNT_DELETING');

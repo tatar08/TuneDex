@@ -6,9 +6,9 @@ import type { UserSupportView } from '@/lib/bff';
 import { useAdmin } from '../AdminShell';
 
 /**
- * Support lookup (Doc 17 /admin/users): find one customer account by the user id or device id they read out,
- * and see what support needs to help (account state, devices and whether they picked up the latest settings,
- * diagnostics count, deletion state). Minimal by design: no email, setting values, stations or roles.
+ * Support lookup (Doc 17 /admin/users): find one customer account by email, user id or device id, and see
+ * what support needs to help (email, account state, devices and whether they picked up the latest settings,
+ * diagnostics count, deletion state). No setting values, stations or roles.
  * Every lookup needs a reason and is recorded. Data is shared; each theme has its own layout.
  */
 type User = UserSupportView;
@@ -32,9 +32,9 @@ const osLabel = (d: Device) => (d.platform === 'ios' ? `iPhone${d.osMajor ? ` ·
 const short = (id: string) => id.slice(0, 8);
 
 const PROBLEMS: Record<string, string> = {
-  query: 'ใส่รหัสผู้ใช้หรือรหัสเครื่องให้ครบ (รูปแบบ xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)',
+  query: 'ใส่อีเมล หรือรหัสผู้ใช้/รหัสเครื่องให้ครบ (รูปแบบ xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)',
   reason: 'กรอกเหตุผล 10–500 ตัวอักษร',
-  notFound: 'ไม่พบบัญชีที่ตรงกับรหัสนี้ การค้นครั้งนี้ถูกบันทึกแล้ว',
+  notFound: 'ไม่พบบัญชีที่ตรงกัน (หรืออีเมลนี้มีมากกว่าหนึ่งบัญชี ให้ค้นด้วยรหัสแทน) การค้นครั้งนี้ถูกบันทึกแล้ว',
   forbidden: 'บัญชีนี้ไม่มีสิทธิ์ดูข้อมูลผู้ใช้ (ต้องเป็นซัพพอร์ตหรือแอดมิน)',
   expired: 'หมดเวลาใช้งาน เข้าสู่ระบบใหม่แล้วลองอีกครั้ง',
   rate: RATE_LIMITED,
@@ -88,8 +88,8 @@ function SearchForm({ busy, problem, onSearch, className = 'us-form' }: { busy: 
       }}
     >
       <label className="fld">
-        <span>รหัสผู้ใช้หรือรหัสเครื่อง</span>
-        <input id="us-query" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autoComplete="off" spellCheck={false} required />
+        <span>อีเมล รหัสผู้ใช้ หรือรหัสเครื่อง</span>
+        <input id="us-query" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="name@example.com หรือ xxxxxxxx-xxxx-…" autoComplete="off" spellCheck={false} required />
       </label>
       <label className="fld">
         <span>เหตุผล (จะถูกบันทึกไว้ในประวัติ)</span>
@@ -107,12 +107,16 @@ function SearchForm({ busy, problem, onSearch, className = 'us-form' }: { busy: 
   );
 }
 
-const Note = () => <p className="ov-foot dim">ข้อมูลเท่าที่ซัพพอร์ตต้องใช้ ไม่มีอีเมล ค่าที่ตั้ง หรือสถานีของผู้ใช้ · ทุกการค้นถูกบันทึกในประวัติพร้อมเหตุผล</p>;
-const Empty = () => <p className="dim us-empty">ใส่รหัสผู้ใช้หรือรหัสเครื่องที่ลูกค้าแจ้ง พร้อมเหตุผล แล้วกดค้นหา</p>;
+const Note = () => <p className="ov-foot dim">ข้อมูลเท่าที่ซัพพอร์ตต้องใช้ ไม่มีค่าที่ตั้งหรือสถานีของผู้ใช้ · ทุกการค้นถูกบันทึกในประวัติพร้อมเหตุผล (ไม่บันทึกอีเมลที่ค้น)</p>;
+const Empty = () => <p className="dim us-empty">ใส่อีเมล รหัสผู้ใช้ หรือรหัสเครื่องที่ลูกค้าแจ้ง พร้อมเหตุผล แล้วกดค้นหา</p>;
 
 function Facts({ u }: { u: User }) {
   return (
     <dl className="us-facts">
+      <div>
+        <dt>อีเมล</dt>
+        <dd>{u.user.email ? `${u.user.email}${u.user.emailVerified ? '' : ' (ยังไม่ยืนยัน)'}` : 'ไม่มี'}</dd>
+      </div>
       <div>
         <dt>รหัสผู้ใช้</dt>
         <dd className="mo">{u.user.id}</dd>
@@ -176,7 +180,7 @@ function DeviceTable({ u }: { u: User }) {
 const StatusBadge = ({ u, className = 'us-tone' }: { u: User; className?: string }) => (
   <span className={`${className} ${STATUS[u.user.status].tone}`}>{STATUS[u.user.status].label}</span>
 );
-const matchedLine = (u: User) => (u.matchedBy === 'device' ? 'พบจากรหัสเครื่อง' : 'พบจากรหัสผู้ใช้');
+const matchedLine = (u: User) => (u.matchedBy === 'device' ? 'พบจากรหัสเครื่อง' : u.matchedBy === 'email' ? 'พบจากอีเมล' : 'พบจากรหัสผู้ใช้');
 const activeDevices = (u: User) => u.devices.filter((d) => !d.revokedAt);
 const outOfSync = (u: User) => activeDevices(u).filter((d) => !d.inSync).length;
 
@@ -426,7 +430,7 @@ export function UsersView() {
         <div className="fv-card-head">
           <div>
             <h2 id="fv-us-search">ค้นหาผู้ใช้</h2>
-            <small>ใช้รหัสที่ลูกค้าแจ้ง ดูได้ทีละบัญชี</small>
+            <small>ใช้อีเมลหรือรหัสที่ลูกค้าแจ้ง ดูได้ทีละบัญชี</small>
           </div>
         </div>
         {form}

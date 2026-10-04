@@ -53,7 +53,8 @@ export async function startMockIdp(): Promise<MockIdp> {
   };
 
   async function tokens(sub: string, authTime: number, nonce?: string) {
-    const access = await sign({ sub, auth_time: authTime }, API_AUDIENCE, accessTtl);
+    // Keycloak puts the email scope's claims in the access token; the API keeps the address for support.
+    const access = await sign({ sub, auth_time: authTime, email: `${sub}@example.test`, email_verified: true }, API_AUDIENCE, accessTtl);
     const id = nonce !== undefined ? await sign({ sub, nonce, auth_time: authTime }, CLIENT_ID, 300) : undefined;
     const rt = randomBytes(24).toString('base64url');
     refresh.set(rt, { sub, authTime });
@@ -138,6 +139,6 @@ export async function startMockIdp(): Promise<MockIdp> {
     revokeRefreshTokens: () => refresh.clear(),
     ageSignIn: (seconds) => signedInAt.set(user, (signedInAt.get(user) ?? Math.floor(Date.now() / 1000)) - seconds),
     ignoreReauth: (on) => (honorReauth = !on),
-    accessTokenFor: (sub) => sign({ sub }, API_AUDIENCE, 300),
+    accessTokenFor: (sub) => sign({ sub, email: `${sub}@example.test`, email_verified: true }, API_AUDIENCE, 300),
   };
 }

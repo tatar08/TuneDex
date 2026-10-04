@@ -67,15 +67,15 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
     await this.working?.catch(() => undefined);
   }
 
-  async me(userId: string): Promise<{ userId: string; status: string; createdAt: string }> {
-    const [u] = await this.db.query<{ id: string; status: string; created_at: Date }>('SELECT id, status, created_at FROM users WHERE id = $1', [userId]);
-    return { userId: u.id, status: u.status, createdAt: u.created_at.toISOString() };
+  async me(userId: string): Promise<{ userId: string; email: string | null; status: string; createdAt: string }> {
+    const [u] = await this.db.query<{ id: string; email: string | null; status: string; created_at: Date }>('SELECT id, email, status, created_at FROM users WHERE id = $1', [userId]);
+    return { userId: u.id, email: u.email, status: u.status, createdAt: u.created_at.toISOString() };
   }
 
   /** Everything the service holds about the account, as one JSON document. Built on request; nothing is stored. */
   async export(userId: string, requestId?: string) {
-    const [account] = await this.db.query<{ id: string; created_at: Date; locale: string | null }>(
-      'SELECT id, created_at, locale FROM users WHERE id = $1',
+    const [account] = await this.db.query<{ id: string; created_at: Date; locale: string | null; email: string | null }>(
+      'SELECT id, created_at, locale, email FROM users WHERE id = $1',
       [userId],
     );
     const [settings, devices, roles, reports, events] = await Promise.all([
@@ -114,7 +114,7 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
       format: 'tunedeck-account-export',
       version: 1,
       exportedAt: new Date().toISOString(),
-      account: { id: account.id, createdAt: account.created_at.toISOString(), locale: account.locale },
+      account: { id: account.id, email: account.email, createdAt: account.created_at.toISOString(), locale: account.locale },
       settings: settings.revision > 0 ? settings : null,
       devices: devices.devices,
       diagnostics: reports.map((r) => ({
@@ -259,7 +259,7 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
       await query('DELETE FROM account_preferences WHERE owner_id = $1', [userId]);
       await query('DELETE FROM staff_roles WHERE user_id = $1', [userId]);
       await query(
-        `UPDATE users SET status = 'deleted', oidc_subject = 'deleted:' || id::text, locale = NULL, deleted_at = now() WHERE id = $1`,
+        `UPDATE users SET status = 'deleted', oidc_subject = 'deleted:' || id::text, locale = NULL, email = NULL, email_verified = false, deleted_at = now() WHERE id = $1`,
         [userId],
       );
       await query(

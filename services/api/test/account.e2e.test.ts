@@ -47,10 +47,13 @@ describe('account export and deletion', () => {
 
   it('tells the signed-in customer their account id for support, and nothing more', async () => {
     expect((await http().get('/v1/me')).status).toBe(401);
-    const res = await http().get('/v1/me').set(await bearer('acct-me')).expect(200);
+    const res = await http().get('/v1/me').set({ Authorization: `Bearer ${await id.token('acct-me', { email: 'me@example.com' })}` }).expect(200);
     const { rows: [u] } = await t.pool.query(`SELECT id FROM users WHERE oidc_subject = 'acct-me'`);
     expect(res.headers['cache-control']).toBe('no-store');
-    expect(res.body).toEqual({ userId: u.id, status: 'active', createdAt: expect.any(String) });
+    expect(res.body).toEqual({ userId: u.id, email: 'me@example.com', status: 'active', createdAt: expect.any(String) });
+    // A changed address at the provider is picked up on the next request; a token without one keeps the last.
+    await http().get('/v1/me').set({ Authorization: `Bearer ${await id.token('acct-me', { email: 'new@example.com', emailVerified: false })}` }).expect(200);
+    expect((await http().get('/v1/me').set(await bearer('acct-me')).expect(200)).body.email).toBe('new@example.com');
   });
 
   it('exports the account’s own data as a JSON download, and audits it', async () => {
@@ -86,6 +89,7 @@ describe('account export and deletion', () => {
   it('locks the account at once, purges its data, and reports progress by ticket', async () => {
     await seed('acct-delete');
     const fresh = await bearer('acct-delete', now());
+    await http().get('/v1/me').set({ Authorization: `Bearer ${await id.token('acct-delete', { email: 'leaver@example.com' })}` }).expect(200);
     const { rows: [user] } = await t.pool.query(`SELECT id FROM users WHERE oidc_subject = 'acct-delete'`);
 
     const res = await http().delete('/v1/me/account').set(fresh).expect(202);
@@ -105,8 +109,8 @@ describe('account export and deletion', () => {
       expect((await t.pool.query(`SELECT 1 FROM ${table} WHERE ${column} = $1`, [user.id])).rows).toEqual([]);
     }
     // A tombstone stays for station history and the audit trail, with no link to the identity.
-    const { rows: [tomb] } = await t.pool.query('SELECT status, oidc_subject, locale, deleted_at FROM users WHERE id = $1', [user.id]);
-    expect(tomb).toMatchObject({ status: 'deleted', oidc_subject: `deleted:${user.id}`, locale: null });
+    const { rows: [tomb] } = await t.pool.query('SELECT status, oidc_subject, locale, email, deleted_at FROM users WHERE id = $1', [user.id]);
+    expect(tomb).toMatchObject({ status: 'deleted', oidc_subject: `deleted:${user.id}`, locale: null, email: null });
     expect(tomb.deleted_at).not.toBeNull();
     const audit = await t.pool.query(`SELECT actor, action FROM audit_events WHERE target_type = 'account' AND target_id = $1 ORDER BY id`, [user.id]);
     expect(audit.rows).toEqual([

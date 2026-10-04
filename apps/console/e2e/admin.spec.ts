@@ -415,10 +415,10 @@ test('operators retry a failed account deletion with a reason, in every theme', 
   await expect(editor.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูงานเบื้องหลัง');
 });
 
-test('support looks up a customer by device id with a reason, in every theme', async ({ browser }) => {
+test('support looks up a customer by email or device id with a reason, in every theme', async ({ browser }) => {
   // A customer whose tablet has not picked up the latest settings yet.
   await stack.api.sql(
-    `WITH u AS (INSERT INTO users (id, oidc_subject) VALUES ('6f1d2c3b-0000-4000-8000-00000000c0de', 'e2e-support-case') RETURNING id),
+    `WITH u AS (INSERT INTO users (id, oidc_subject, email, email_verified) VALUES ('6f1d2c3b-0000-4000-8000-00000000c0de', 'e2e-support-case', 'nok@example.test', true) RETURNING id),
           p AS (INSERT INTO account_preferences (owner_id, schema_version, revision, value) SELECT id, 1, 3, '{}' FROM u)
      INSERT INTO devices (user_id, id, platform, os_major, app_build, applied_settings_revision, last_seen_at)
      SELECT u.id, d.id::uuid, d.platform, d.os, d.build, d.rev, now() - d.ago FROM u,
@@ -440,15 +440,16 @@ test('support looks up a customer by device id with a reason, in every theme', a
   };
   for (const [theme, selector] of Object.entries(layouts)) {
     await picker.selectOption(theme);
-    await page.getByLabel('รหัสผู้ใช้หรือรหัสเครื่อง').fill('99999999-8888-4777-8666-555555555555');
+    await page.getByLabel('อีเมล รหัสผู้ใช้ หรือรหัสเครื่อง').fill(theme === 'minimal' ? 'NOK@example.test' : '99999999-8888-4777-8666-555555555555');
     await page.getByLabel('เหตุผล (จะถูกบันทึกไว้ในประวัติ)').fill('ลูกค้าแจ้งว่าแท็บเล็ตไม่ได้ธีมใหม่');
     await page.getByRole('button', { name: 'ค้นหา' }).click();
     await expect(page.locator(selector).first()).toBeVisible();
     if (theme !== 'workbench') await expect(page.getByText('ยังไม่ได้รับการตั้งค่าล่าสุด (ใช้ r1 จาก r3)').first()).toBeVisible();
+    await expect(page.getByText('nok@example.test').first()).toBeVisible();
     await expect(page.locator('body')).not.toContainText('e2e-support-case');
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/users-${theme}.png`, fullPage: true });
   }
-  await page.getByLabel('รหัสผู้ใช้หรือรหัสเครื่อง').fill('00000000-0000-4000-8000-000000000000');
+  await page.getByLabel('อีเมล รหัสผู้ใช้ หรือรหัสเครื่อง').fill('00000000-0000-4000-8000-000000000000');
   await page.getByRole('button', { name: 'ค้นหา' }).click();
   await expect(page.locator('.us-problem')).toContainText('ไม่พบบัญชี');
 

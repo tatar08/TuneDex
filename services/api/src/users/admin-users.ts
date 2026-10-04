@@ -12,8 +12,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DIAGNOSTICS_DAYS = 7;
 
 export interface UserSupportView {
-  matchedBy: 'user' | 'device';
-  user: { id: string; status: 'active' | 'deleting' | 'deleted' | 'disabled'; createdAt: string; deletedAt: string | null };
+  matchedBy: 'user' | 'device' | 'email';
+  user: { id: string; email: string | null; emailVerified: boolean; status: 'active' | 'deleting' | 'deleted' | 'disabled'; createdAt: string; deletedAt: string | null };
   settings: { revision: number; updatedAt: string | null };
   devices: {
     id: string;
@@ -30,28 +30,40 @@ export interface UserSupportView {
   deletion: { status: 'pending' | 'failed' | 'completed'; requestedAt: string } | null;
 }
 
-/** Body `{ query, reason }`: query is a user id or a device id the customer reads out from the app. */
-export function parseLookup(body: unknown): { query: string; reason: string } {
-  const query = typeof body === 'object' && body !== null ? (body as { query?: unknown }).query : undefined;
-  if (typeof query !== 'string' || !UUID.test(query.trim())) throw new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', { field: 'query', reason: 'invalid' });
-  return { query: query.trim().toLowerCase(), reason: parseExportReason(body) };
+const EMAIL = /^[^\s@]+@[^\s@]+$/;
+
+/** Body `{ query, reason }`: query is a user id, a device id or the customer's email (exact, any case). */
+export function parseLookup(body: unknown): { query: string; kind: 'id' | 'email'; reason: string } {
+  const raw = typeof body === 'object' && body !== null ? (body as { query?: unknown }).query : undefined;
+  const query = typeof raw === 'string' ? raw.trim() : '';
+  const kind = UUID.test(query) ? 'id' : query.length <= 320 && EMAIL.test(query) ? 'email' : null;
+  if (!kind) throw new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', { field: 'query', reason: 'invalid' });
+  return { query: query.toLowerCase(), kind, reason: parseExportReason(body) };
 }
 
 /**
  * Doc 17 /admin/users support lookup: one account by user or device id, with what support needs to help
- * (account state, devices and whether they picked up the latest settings, diagnostics count, deletion state).
- * Minimal by design: no email or name (the service never stores them), no setting values, no stations or
- * favorites, no roles. Every lookup is audited with its reason, including ones that find nothing.
+ * (email, account state, devices and whether they picked up the latest settings, diagnostics count, deletion
+ * state). No setting values, stations, favorites or roles. Every lookup is audited with its reason, including
+ * ones that find nothing; the audit records how the account was matched, never the email searched for.
  */
 @Injectable()
 export class AdminUsersService {
   constructor(private readonly db: Database) {}
 
-  async lookup(actor: { userId: string; requestId?: string }, query: string, reason: string): Promise<UserSupportView> {
-    const [byUser] = await this.db.query<{ id: string }>('SELECT id FROM users WHERE id = $1', [query]);
-    const byDevice = byUser ? [] : await this.db.query<{ user_id: string }>('SELECT DISTINCT user_id FROM devices WHERE id = $1', [query]);
-    const userId = byUser?.id ?? (byDevice.length === 1 ? byDevice[0].user_id : null);
-    const matchedBy = byUser ? 'user' : 'device';
+  async lookup(actor: { userId: string; requestId?: string }, query: string, kind: 'id' | 'email', reason: string): Promise<UserSupportView> {
+    let userId: string | null = null;
+    let matchedBy: UserSupportView['matchedBy'] = 'email';
+    if (kind === 'email') {
+      // An email can sit on more than one account (a provider change); only a single match is an answer.
+      const rows = await this.db.query<{ id: string }>('SELECT id FROM users WHERE lower(email) = $1 LIMIT 2', [query]);
+      userId = rows.length === 1 ? rows[0].id : null;
+    } else {
+      const [byUser] = await this.db.query<{ id: string }>('SELECT id FROM users WHERE id = $1', [query]);
+      const byDevice = byUser ? [] : await this.db.query<{ user_id: string }>('SELECT DISTINCT user_id FROM devices WHERE id = $1', [query]);
+      userId = byUser?.id ?? (byDevice.length === 1 ? byDevice[0].user_id : null);
+      matchedBy = byUser ? 'user' : 'device';
+    }
 
     await writeAudit(this.db.query.bind(this.db), {
       actor: `user:${actor.userId}`,
@@ -65,8 +77,8 @@ export class AdminUsersService {
     if (!userId) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
 
     const [[u], [prefs], devices, [diag], [deletion]] = await Promise.all([
-      this.db.query<{ id: string; status: UserSupportView['user']['status']; created_at: Date; deleted_at: Date | null }>(
-        'SELECT id, status, created_at, deleted_at FROM users WHERE id = $1',
+      this.db.query<{ id: string; email: string | null; email_verified: boolean; status: UserSupportView['user']['status']; created_at: Date; deleted_at: Date | null }>(
+        'SELECT id, email, email_verified, status, created_at, deleted_at FROM users WHERE id = $1',
         [userId],
       ),
       this.db.query<{ revision: string; updated_at: Date }>('SELECT revision, updated_at FROM account_preferences WHERE owner_id = $1', [userId]),
@@ -84,7 +96,7 @@ export class AdminUsersService {
     const revision = Number(prefs?.revision ?? 0);
     return {
       matchedBy,
-      user: { id: u.id, status: u.status, createdAt: u.created_at.toISOString(), deletedAt: u.deleted_at?.toISOString() ?? null },
+      user: { id: u.id, email: u.email, emailVerified: u.email_verified, status: u.status, createdAt: u.created_at.toISOString(), deletedAt: u.deleted_at?.toISOString() ?? null },
       settings: { revision, updatedAt: prefs?.updated_at.toISOString() ?? null },
       devices: devices.map((d) => ({
         id: d.id,
@@ -113,8 +125,8 @@ export class AdminUsersController {
   @Post('lookup')
   @HttpCode(HttpStatus.OK)
   async lookup(@Req() req: Request, @Body() body: unknown, @Res({ passthrough: true }) res: Response): Promise<UserSupportView> {
-    const { query, reason } = parseLookup(body);
+    const { query, kind, reason } = parseLookup(body);
     res.setHeader('Cache-Control', 'no-store');
-    return this.users.lookup({ userId: req.actor!.userId, requestId: req.requestId }, query, reason);
+    return this.users.lookup({ userId: req.actor!.userId, requestId: req.requestId }, query, kind, reason);
   }
 }

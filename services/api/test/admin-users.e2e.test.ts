@@ -25,7 +25,7 @@ describe('/v1/admin/users/lookup', () => {
     expect(await staff('grant', 'users-ops', 'operator', '--by', 'tar', '--reason', 'ops')).toBe(0);
 
     // A customer with two devices: the phone picked up the first save, the tablet has not checked in since.
-    const who = await bearer('users-customer');
+    const who = { Authorization: `Bearer ${await id.token('users-customer', { email: 'Nok.Customer@example.com' })}` };
     await http().put(`/v1/me/devices/${tablet}`).set(who).send({ platform: 'android', osMajor: 14, appBuild: '1.0.0+40' }).expect(200);
     await http().patch('/v1/me/settings').set(who).set('If-Match', '"0"').send({ theme: 'dark' }).expect(200);
     await http().put(`/v1/me/devices/${phone}`).set(who).send({ platform: 'ios', osMajor: 18, appBuild: '1.0.0+42', appliedSettingsRevision: 1 }).expect(200);
@@ -50,7 +50,7 @@ describe('/v1/admin/users/lookup', () => {
     expect(res.headers['cache-control']).toBe('no-store');
     expect(res.body).toMatchObject({
       matchedBy: 'user',
-      user: { id: customer, status: 'active', deletedAt: null },
+      user: { id: customer, email: 'Nok.Customer@example.com', emailVerified: true, status: 'active', deletedAt: null },
       settings: { revision: 1 },
       diagnostics: { reportsLast7Days: 0 },
       deletion: null,
@@ -60,17 +60,27 @@ describe('/v1/admin/users/lookup', () => {
     expect(byId[tablet]).toMatchObject({ platform: 'android', appliedSettingsRevision: 0, inSync: false });
     // No setting values, subject or roles leave the API.
     expect(JSON.stringify(res.body)).not.toMatch(/dark|users-customer|oidc|role/);
+    const { rows: [stored] } = await t.pool.query('SELECT email, email_verified FROM users WHERE id = $1', [customer]);
+    expect(stored).toEqual({ email: 'Nok.Customer@example.com', email_verified: true });
 
     const viaDevice = await http().post('/v1/admin/users/lookup').set(sup).send({ query: tablet.toUpperCase(), reason }).expect(200);
     expect(viaDevice.body).toMatchObject({ matchedBy: 'device', user: { id: customer } });
     expect((await http().post('/v1/admin/users/lookup').set(sup).send({ query: randomUUID(), reason })).status).toBe(404);
+    // Email, any case, exact match only.
+    const viaEmail = await http().post('/v1/admin/users/lookup').set(sup).send({ query: ' nok.customer@EXAMPLE.com ', reason }).expect(200);
+    expect(viaEmail.body).toMatchObject({ matchedBy: 'email', user: { id: customer } });
+    expect((await http().post('/v1/admin/users/lookup').set(sup).send({ query: 'nok@example.com', reason })).status).toBe(404);
 
     const audit = await t.pool.query(`SELECT target_id, reason, changes FROM audit_events WHERE action = 'user.lookup' ORDER BY id`);
     expect(audit.rows.map((r) => [r.target_id, r.changes.found])).toEqual([
       [customer, true],
       [customer, true],
       ['none', false],
+      [customer, true],
+      ['none', false],
     ]);
     expect(audit.rows.every((r) => r.reason === reason)).toBe(true);
+    // The audit trail never holds the email that was searched for.
+    expect(JSON.stringify(audit.rows)).not.toMatch(/example\.com/i);
   });
 });
