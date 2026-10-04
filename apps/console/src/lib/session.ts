@@ -30,9 +30,8 @@ export interface SessionStore {
 const keyOf = (id: string) => createHash('sha256').update(id).digest('hex');
 
 /**
- * Single-instance store for development and tests. Production needs a shared
- * store (Redis or PostgreSQL) behind the same interface before running more
- * than one console instance.
+ * Single-instance store for local development and tests. Anywhere else the
+ * console uses PgSessionStore (pg-session.ts), shared by every instance.
  */
 export class MemorySessionStore implements SessionStore {
   private readonly sessions = new Map<string, Session>();

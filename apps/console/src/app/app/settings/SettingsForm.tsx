@@ -17,7 +17,8 @@ type Problem =
   | { kind: 'conflict'; server: SettingsView | null; currentRevision: number }
   | { kind: 'invalid' }
   | { kind: 'expired' }
-  | { kind: 'unavailable' };
+  | { kind: 'unavailable' }
+  | { kind: 'rateLimited' };
 
 /** Last-seen times are shown in Thailand time whatever the browser's zone, so staff and users read the same clock. */
 const seenFormat = (lang: string) =>
@@ -73,6 +74,8 @@ export function SettingsForm({
         setProblem({ kind: 'conflict', server: latest, currentRevision: latest?.revision ?? body?.details?.currentRevision ?? revision });
       } else if (res.status === 401) {
         setProblem({ kind: 'expired' });
+      } else if (res.status === 429) {
+        setProblem({ kind: 'rateLimited' });
       } else if (res.status === 400) {
         setProblem({ kind: 'invalid' });
       } else {
@@ -136,6 +139,7 @@ export function SettingsForm({
           )}
           {problem.kind === 'invalid' && <p>{t.invalid}</p>}
           {problem.kind === 'unavailable' && <p>{t.unavailable}</p>}
+          {problem.kind === 'rateLimited' && <p>{t.rateLimited}</p>}
           {problem.kind === 'expired' && (
             <p>
               {t.expired} <a href="/auth/login?returnTo=/app/settings">{t.signIn}</a>

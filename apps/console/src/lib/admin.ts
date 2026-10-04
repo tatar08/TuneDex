@@ -362,6 +362,9 @@ export function changeSummary(e: AuditEvent): string {
 const dayFmt = new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 export const formatDay = (iso: string) => dayFmt.format(new Date(iso));
 
+/** Shown when the API answers 429 API_RATE_LIMITED. */
+export const RATE_LIMITED = 'ทำรายการถี่เกินไป รอประมาณหนึ่งนาทีแล้วลองใหม่';
+
 export const HEALTH_LABELS: Record<HealthState, string> = {
   unknown: 'ยังไม่ได้ตรวจ',
   ok: 'เล่นได้',

@@ -27,6 +27,10 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, APP_ENV: 'prod' })).toThrow('APP_ENV');
   });
 
+  it('uses the Doc 17 request limits by default and trusts no proxy', () => {
+    expect(loadConfig(base).rateLimit).toEqual({ enabled: true, readsPerMinute: 120, writesPerMinute: 30, catalogPerMinutePerIp: 60, trustProxyHops: 0 });
+  });
+
   it('keeps stream checks off by default', () => {
     expect(loadConfig(base).stationCheck).toEqual({ enabled: false, intervalMinutes: 15, region: 'default' });
   });
@@ -36,6 +40,10 @@ describe('loadConfig', () => {
     ['STATION_CHECK_INTERVAL_MIN', '1'],
     ['STATION_CHECK_INTERVAL_MIN', '7.5'],
     ['STATION_CHECK_REGION', 'Asia Southeast'],
+    ['RATE_LIMIT_READS_PER_MIN', '0'],
+    ['RATE_LIMIT_WRITES_PER_MIN', 'many'],
+    ['RATE_LIMIT_CATALOG_PER_MIN', '1.5'],
+    ['TRUST_PROXY_HOPS', '9'],
   ])('refuses %s=%s', (key, value) => {
     expect(() => loadConfig({ ...base, [key]: value })).toThrow(key);
   });

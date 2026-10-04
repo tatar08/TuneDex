@@ -271,6 +271,8 @@ export function createBff(deps: BffDeps) {
     const headers: Record<string, string> = {};
     const etag = upstream.headers.get('etag');
     if (etag) headers.etag = etag;
+    const retryAfter = upstream.headers.get('retry-after');
+    if (retryAfter && /^\d{1,3}$/.test(retryAfter)) headers['retry-after'] = retryAfter;
     const body = await upstream.text();
     return new Response(body, {
       status: upstream.status,

@@ -7,6 +7,7 @@ import {
   countByHealth,
   countByStatus,
   FIELD_LABELS,
+  RATE_LIMITED,
   FILTER_LABELS,
   formatDate,
   formatDateTime,
@@ -72,7 +73,7 @@ function QuickAdd() {
       if (res.status === 201) router.push(href(body as AdminStation));
       else if (res.status === 400 && body.details?.field)
         setError(`${FIELD_LABELS[body.details.field] ?? body.details.field}: ${REASON_LABELS[body.details.reason] ?? body.details.reason}`);
-      else setError(res.status === 401 ? 'หมดเวลาเข้าใช้งาน กรุณาเข้าสู่ระบบอีกครั้ง' : 'สร้างไม่สำเร็จ ลองอีกครั้ง');
+      else setError(res.status === 401 ? 'หมดเวลาเข้าใช้งาน กรุณาเข้าสู่ระบบอีกครั้ง' : res.status === 429 ? RATE_LIMITED : 'สร้างไม่สำเร็จ ลองอีกครั้ง');
     } catch {
       setError('เชื่อมต่อระบบไม่ได้ ลองอีกครั้ง');
     } finally {

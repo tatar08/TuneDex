@@ -1,10 +1,12 @@
 import { DynamicModule, INestApplication, Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import type { JWTVerifyGetKey } from 'jose';
 import type { Pool } from 'pg';
 import { AdminAuditController, AuditSearchService } from './audit/audit-search';
 import { AuthGuard, KEY_RESOLVER } from './auth/auth.guard';
 import { ErrorEnvelopeFilter } from './common/error.filter';
+import { RateLimitInterceptor } from './common/rate-limit';
 import { LOG_SINK, LOG_WRITER, LogWriter, StructuredLogger, stdoutWriter } from './common/logger';
 import { requestContext } from './common/request-context';
 import { APP_CONFIG, AppConfig } from './config';
@@ -58,6 +60,7 @@ export class AppModule {
         ...(deps.probeDeps ? [{ provide: PROBE_DEPS, useValue: deps.probeDeps }] : []),
         AuthGuard,
         StaffGuard,
+        { provide: APP_INTERCEPTOR, useClass: RateLimitInterceptor },
       ],
     };
   }
@@ -67,6 +70,8 @@ export class AppModule {
 export function configureApp(app: NestExpressApplication): INestApplication {
   const logger = app.get(StructuredLogger);
   app.disable('x-powered-by');
+  // Only our own proxies' X-Forwarded-For is believed; 0 means the socket address.
+  app.set('trust proxy', app.get<AppConfig>(APP_CONFIG).rateLimit.trustProxyHops);
   app.use(requestContext(logger));
   app.useBodyParser('json', { limit: '16kb' });
   app.useGlobalFilters(new ErrorEnvelopeFilter(logger));

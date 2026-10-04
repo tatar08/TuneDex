@@ -38,6 +38,8 @@ export async function startStack(): Promise<Stack> {
       OIDC_CLIENT_ID: CLIENT_ID,
       OIDC_CLIENT_SECRET: CLIENT_SECRET,
       SESSION_SECRET: 'e2e-'.repeat(10),
+      // The real shared session store, as in production.
+      SESSION_DATABASE_URL: api.databaseUrl,
     },
   });
   for (let i = 0; i < 100; i++) {

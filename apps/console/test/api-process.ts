@@ -32,6 +32,8 @@ async function psql(url: string, sql: string) {
 
 export interface ApiProcess {
   url: string;
+  /** This run's throwaway database (the console's session table can live here too). */
+  databaseUrl: string;
   stop: () => Promise<void>;
   /** Runs the operator staff CLI (grant/revoke/list) against this API's database. */
   staff: (...args: string[]) => void;
@@ -75,6 +77,7 @@ export async function startApi(issuer: string): Promise<ApiProcess> {
   }
   return {
     url,
+    databaseUrl: dbUrl.toString(),
     sql: (query) => psql(dbUrl.toString(), query),
     staff: (...args) => {
       execFileSync('node', ['dist/staff/staff-cli.js', ...args], { cwd: API_DIR, env, stdio: 'ignore' });

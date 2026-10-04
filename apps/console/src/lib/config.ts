@@ -8,6 +8,8 @@ export interface ConsoleConfig {
   /** Doc 17: web user session idle 12 hours. Absolute lifetime is a proposal. */
   sessionIdleMs: number;
   sessionAbsoluteMs: number;
+  /** PostgreSQL for sessions shared by every console instance. Required outside localhost; unset there means in-memory. */
+  sessionDatabaseUrl: string | null;
 }
 
 function required(env: Record<string, string | undefined>, key: string): string {
@@ -28,6 +30,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (algorithms.length === 0 || algorithms.some((a) => a === 'none' || a.startsWith('HS'))) {
     throw new Error('OIDC_ALGORITHMS must list asymmetric algorithms only');
   }
+  const sessionDatabaseUrl = env.SESSION_DATABASE_URL?.trim() || null;
+  if (!sessionDatabaseUrl && !isLocalHttp) {
+    throw new Error('SESSION_DATABASE_URL is required outside localhost: in-memory sessions are lost on restart and cannot be shared');
+  }
+  if (sessionDatabaseUrl && !/^postgres(ql)?:\/\//.test(sessionDatabaseUrl)) throw new Error('SESSION_DATABASE_URL must be a postgres:// URL');
   return {
     baseUrl: baseUrl.origin,
     apiBaseUrl: new URL(required(env, 'API_BASE_URL')).origin,
@@ -42,5 +49,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     secureCookies: !isLocalHttp,
     sessionIdleMs: 12 * 60 * 60 * 1000,
     sessionAbsoluteMs: 7 * 24 * 60 * 60 * 1000,
+    sessionDatabaseUrl,
   };
 }

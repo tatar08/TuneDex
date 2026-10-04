@@ -32,6 +32,10 @@ test('sign in, save by keyboard, resolve a conflict, sign out', async ({ browser
   expect(cookies.map((c) => c.name)).toEqual(['td_session']);
   expect(cookies[0]).toMatchObject({ httpOnly: true, sameSite: 'Lax' });
   expect(await page.evaluate(() => [document.cookie, Object.keys(localStorage).length, Object.keys(sessionStorage).length])).toEqual(['', 0, 0]);
+  // The session lives in the shared PostgreSQL store, keyed by a hash of the cookie, not the cookie itself.
+  const rows = (await stack.api.sql('SELECT key FROM console_sessions')) as { rows: { key: string }[] };
+  expect(rows.rows.length).toBeGreaterThan(0);
+  expect(rows.rows.map((r) => r.key)).not.toContain(cookies[0].value);
 
   // Keyboard only: focus the theme group, pick "dark", tab to Save, press Enter.
   await page.getByRole('radio', { name: 'ตามระบบ' }).focus();

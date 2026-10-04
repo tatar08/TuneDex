@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { formatDateTime, HEALTH_LABELS, probeReason } from '@/lib/admin';
+import { formatDateTime, HEALTH_LABELS, probeReason, RATE_LIMITED } from '@/lib/admin';
 import type { AdminStation, HealthCheck } from '@/lib/bff';
 import { useAdmin } from '../AdminShell';
 
@@ -30,7 +30,8 @@ export function HealthPanel({ station, history }: { station: AdminStation; histo
         body: '{}',
       });
       const body = (await res.json().catch(() => ({}))) as Partial<HealthCheck> & { code?: string };
-      if (res.ok) {
+      if (res.status === 429 && body.code === 'API_RATE_LIMITED') setMessage({ ok: false, text: RATE_LIMITED });
+      else if (res.ok) {
         setMessage({ ok: !!body.ok, text: body.ok ? `เล่นได้ · ${body.latencyMs} ms` : `ตรวจไม่ผ่าน · ${probeReason(body.reason ?? '', body.httpStatus ?? null)}` });
         router.refresh();
       } else if (res.status === 429) setMessage({ ok: false, text: 'เพิ่งตรวจไปไม่ถึงนาที รอสักครู่แล้วลองใหม่' });
