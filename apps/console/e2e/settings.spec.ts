@@ -366,3 +366,20 @@ test('one device keeps its own theme, previewed on the settings page and reset f
   const after = await (await fetch(`${api.url}/v1/me/devices/${car}/preferences`, { headers: { authorization: `Bearer ${token}` } })).json();
   expect(after.overrides).toEqual({});
 });
+
+test('sign-in links to register and recover, each with its states, in Thai or English', async ({ page }) => {
+  await page.goto(`${base}/login`);
+  await page.getByRole('link', { name: 'สร้างบัญชี' }).click();
+  await expect(page.getByRole('heading', { name: 'สร้างบัญชี TuneDeck' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'สร้างบัญชี', exact: true })).toHaveAttribute('href', '/auth/login?register=1');
+
+  await page.goto(`${base}/recover?expired=1`);
+  await expect(page.getByRole('status')).toHaveText('ลิงก์นี้หมดอายุหรือถูกใช้ไปแล้ว ขอลิงก์ใหม่ได้จากปุ่มด้านล่าง');
+  await expect(page.getByRole('link', { name: 'ไปหน้าตั้งรหัสผ่านใหม่' })).toHaveAttribute('href', '/auth/recover');
+
+  await page.getByRole('link', { name: 'English' }).click();
+  await expect(page).toHaveURL(`${base}/recover`);
+  await expect(page.getByRole('heading', { name: 'Reset your password' })).toBeVisible();
+  await page.goto(`${base}/login`);
+  await expect(page.getByRole('heading', { name: 'Sign in to TuneDeck' })).toBeVisible();
+});

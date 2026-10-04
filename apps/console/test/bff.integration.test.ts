@@ -287,6 +287,16 @@ describe('staff routes through the BFF', () => {
     expect((await published.json()).status).toBe('published');
   });
 
+  it('ends the web session when a staff role is granted or revoked after sign-in (Doc 17)', async () => {
+    api.staff('grant', 'bff-role-change', 'support', '--by', 'test', '--reason', 'test');
+    const cookie = await signIn('bff-role-change');
+    const ctx = await bff.sessionFromCookie(cookie);
+    expect(await bff.loadStaff(ctx!)).toEqual({ roles: ['support'], mfa: true });
+    api.staff('revoke', 'bff-role-change', 'support', '--by', 'test', '--reason', 'test');
+    expect(await bff.loadStaff((await bff.sessionFromCookie(cookie))!)).toBeNull();
+    expect(await bff.sessionFromCookie(cookie)).toBeNull();
+  });
+
   it('passes the API refusal through for accounts without a staff role', async () => {
     const customer = await signIn('bff-customer');
     expect((await bff.stations(new Request(`${BASE}/bff/admin/stations`, { headers: { cookie: customer } }))).status).toBe(403);
@@ -435,6 +445,24 @@ describe('upstream failures and logging', () => {
 
 it('readCookie ignores lookalike cookie names', () => {
   expect(readCookie('xtd_session=a; td_session=b', 'td_session')).toBe('b');
+});
+
+describe('register and recover (Doc 17)', () => {
+  it('opens the provider\'s sign-up form with the usual PKCE and state, and hands password reset to the provider', async () => {
+    const start = await bff.login(new Request(`${BASE}/auth/login?register=1`));
+    const url = new URL(start.headers.get('location')!);
+    expect(url.searchParams.get('prompt')).toBe('create');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(url.searchParams.get('state')).toBeTruthy();
+    const plain = new URL((await bff.login(new Request(`${BASE}/auth/login`))).headers.get('location')!);
+    expect(plain.searchParams.has('prompt')).toBe(false);
+
+    const recover = await bff.recover(new Request(`${BASE}/auth/recover`));
+    expect(recover.status).toBe(302);
+    const reset = new URL(recover.headers.get('location')!);
+    expect(reset.pathname).toMatch(/\/login-actions\/reset-credentials$/);
+    expect(reset.searchParams.get('client_id')).toBe(config().oidc.clientId);
+  });
 });
 
 describe('MFA step-up for staff actions', () => {

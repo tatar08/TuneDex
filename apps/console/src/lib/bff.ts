@@ -169,6 +169,8 @@ export interface HealthCheck {
 }
 
 /** Lower-case UUID: station ids and diagnostic report ids. */
+/** At most 2,000 stations on one admin page. */
+const STATION_PAGES_MAX = 20;
 const STATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** Deletion tickets: 32 random bytes, base64url. */
 const DELETION_TICKET = /^[A-Za-z0-9_-]{43}$/;
@@ -493,24 +495,31 @@ export function createBff(deps: BffDeps) {
       redirect: 'error',
     });
     if (!res.ok) return;
-    const { roles } = (await res.json()) as { roles: StaffRole[] };
-    if (roles.length > 0) {
-      session.staff = true;
+    const { roles, rolesVersion } = (await res.json()) as { roles: StaffRole[]; rolesVersion?: string };
+    if (roles.length > 0 || rolesVersion !== undefined) {
+      if (roles.length > 0) session.staff = true;
+      session.staffVersion = rolesVersion;
       await store.update(id, session);
     }
   }
 
   /** Reads the caller's staff roles and marks the session as a staff session when there are any. */
-  async function loadStaff(ctx: SessionContext): Promise<{ roles: StaffRole[] } | { status: number } | null> {
+  async function loadStaff(ctx: SessionContext): Promise<{ roles: StaffRole[]; mfa: boolean } | { status: number } | null> {
     const res = await callApi(ctx, '/v1/me/staff', { method: 'GET' }, `web_${randomUUID()}`);
     if (!res) return null;
     if (!res.ok) return { status: res.status };
-    const { roles } = (await res.json()) as { roles: StaffRole[] };
-    if (roles.length > 0 && !ctx.session.staff) {
-      ctx.session.staff = true;
+    const { roles, mfa, rolesVersion } = (await res.json()) as { roles: StaffRole[]; mfa?: boolean; rolesVersion?: string };
+    // Doc 17: a role granted or revoked since this session started ends the session; the person signs in again.
+    if (ctx.session.staffVersion !== undefined && rolesVersion !== undefined && rolesVersion !== ctx.session.staffVersion) {
+      await store.delete(ctx.id);
+      return null;
+    }
+    if ((roles.length > 0 && !ctx.session.staff) || (rolesVersion !== undefined && ctx.session.staffVersion === undefined)) {
+      if (roles.length > 0) ctx.session.staff = true;
+      ctx.session.staffVersion = rolesVersion;
       await store.update(ctx.id, ctx.session);
     }
-    return { roles };
+    return { roles, mfa: mfa !== false };
   }
 
   /** Forwards one staff call to the API. The API enforces roles; the BFF adds session, CSRF and size checks. */
@@ -543,9 +552,20 @@ export function createBff(deps: BffDeps) {
 
     /** Server-side read for staff pages: list (no id) or one station. Null means the user must sign in again. */
     async loadStations(ctx: SessionContext): Promise<{ status: number; stations?: AdminStation[] } | null> {
-      const res = await callApi(ctx, '/v1/admin/stations', { method: 'GET' }, `web_${randomUUID()}`);
-      if (!res) return null;
-      return res.ok ? { status: 200, stations: ((await res.json()) as { stations: AdminStation[] }).stations } : { status: res.status };
+      // The API pages by 100 at most (Doc 17); the catalog screens show the whole list, so follow the pages.
+      const stations: AdminStation[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < STATION_PAGES_MAX; page++) {
+        const qs = `?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+        const res = await callApi(ctx, `/v1/admin/stations${qs}`, { method: 'GET' }, `web_${randomUUID()}`);
+        if (!res) return null;
+        if (!res.ok) return { status: res.status };
+        const body = (await res.json()) as { stations: AdminStation[]; nextCursor?: string | null };
+        stations.push(...body.stations);
+        cursor = body.nextCursor ?? null;
+        if (!cursor) break;
+      }
+      return { status: 200, stations };
     },
     async loadStation(ctx: SessionContext, id: string): Promise<{ status: number; station?: AdminStation } | null> {
       if (!STATION_ID.test(id)) return { status: 404 };
@@ -717,6 +737,7 @@ export function createBff(deps: BffDeps) {
      * GET /auth/login — starts authorization code + PKCE; the destination is limited to /app/ paths.
      * `reauth=1` makes the provider ask for credentials again, for actions that need a recent sign-in;
      * `mfa=1` also asks for the MFA level, for staff actions the API guards with a recent-MFA check.
+     * `register=1` opens the provider's sign-up form instead of the sign-in form.
      */
     login: (req: Request) =>
       timed(req, '/auth/login', async () => {
@@ -732,11 +753,15 @@ export function createBff(deps: BffDeps) {
           exp: Date.now() + LOGIN_TX_SECONDS * 1000,
           ...(reauth ? { reauthSince: Math.floor(Date.now() / 1000) } : {}),
         };
-        const url = await oidc.authorizeUrl({ ...tx, reauth, mfa });
+        const register = params.get('register') === '1';
+        const url = await oidc.authorizeUrl({ ...tx, reauth, mfa, register });
         return redirect(url, 302, [
           serializeCookie(names.tx, sealTransaction(tx, config.sessionSecret), { secure, maxAgeSeconds: LOGIN_TX_SECONDS }),
         ]);
       }),
+
+    /** GET /auth/recover — hands over to the provider's password reset; no email ever passes through the console. */
+    recover: (req: Request) => timed(req, '/auth/recover', async () => redirect(oidc.passwordResetUrl(), 302)),
 
     /** GET /auth/callback — checks state, exchanges the code, verifies the ID token, starts a fresh session. */
     callback: (req: Request) =>

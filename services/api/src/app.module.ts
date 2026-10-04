@@ -118,7 +118,19 @@ export function configureApp(app: NestExpressApplication): INestApplication {
   const logger = app.get(StructuredLogger);
   app.disable('x-powered-by');
   // Only our own proxies' X-Forwarded-For is believed; 0 means the socket address.
-  app.set('trust proxy', app.get<AppConfig>(APP_CONFIG).rateLimit.trustProxyHops);
+  const config = app.get<AppConfig>(APP_CONFIG);
+  app.set('trust proxy', config.rateLimit.trustProxyHops);
+  // Doc 17: an explicit per-environment allowlist; with none set, no CORS headers at all. No cookies cross origins.
+  if (config.corsAllowedOrigins.length > 0) {
+    app.enableCors({
+      origin: config.corsAllowedOrigins,
+      credentials: false,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+      allowedHeaders: ['Authorization', 'Content-Type', 'If-Match', 'If-None-Match', 'Idempotency-Key', 'X-Request-Id', 'traceparent'],
+      exposedHeaders: ['ETag', 'Retry-After', 'X-Request-Id', 'Idempotent-Replayed', 'Location', 'traceparent'],
+      maxAge: 600,
+    });
+  }
   app.use(requestContext(logger));
   // Diagnostic batches may be up to 128 KiB (Doc 17); every other body stays at 16 KiB. Registered first, so it wins for that path.
   app.use('/v1/diagnostics/batches', json({ limit: DIAGNOSTIC_LIMITS.batchBytes }));

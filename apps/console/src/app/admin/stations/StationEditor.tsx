@@ -69,6 +69,8 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
   const [notice, setNotice] = useState('');
   const [reason, setReason] = useState('');
   const [toggleReason, setToggleReason] = useState('');
+  const [emergencyReason, setEmergencyReason] = useState('');
+  const [emergencyOk, setEmergencyOk] = useState(false);
   // Until hydration a click would fall back to a native GET submit and drop the typed values.
   const [ready, setReady] = useState(false);
   useEffect(() => setReady(true), []);
@@ -136,14 +138,18 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
     } else fail(r.res, r.body);
   }
 
-  async function act(action: 'publish' | 'disable' | 'enable') {
+  async function act(action: 'publish' | 'disable' | 'enable', emergency = false) {
     if (!station) return;
-    const why = action === 'publish' ? reason : toggleReason;
-    const r = await call(`/bff/admin/stations/${station.id}/${action}`, 'POST', { reason: why }, action === 'publish' ? station.revision : undefined);
+    const why = emergency ? emergencyReason : action === 'publish' ? reason : toggleReason;
+    const body = emergency ? { reason: why, emergency: true } : { reason: why };
+    const r = await call(`/bff/admin/stations/${station.id}/${action}`, 'POST', body, action === 'publish' ? station.revision : undefined);
     if (!r) return;
     if (r.res.ok) {
       setStation(r.body as AdminStation);
-      if (action === 'publish') setReason('');
+      if (emergency) {
+        setEmergencyReason('');
+        setEmergencyOk(false);
+      } else if (action === 'publish') setReason('');
       else setToggleReason('');
       setNotice(action === 'publish' ? `เผยแพร่ revision ${r.body.revision} แล้ว แอปจะเห็นในการโหลดรายการครั้งถัดไป` : action === 'disable' ? 'ปิดสถานีแล้ว แอปจะไม่เห็นสถานีนี้' : 'เปิดสถานีอีกครั้งแล้ว');
       router.refresh();
@@ -278,11 +284,39 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
               {dirty ? (
                 <p className="dim">บันทึกร่างก่อน แล้วให้แอดมินอีกคนตรวจและเผยแพร่</p>
               ) : blockers.length > 0 ? (
-                <ul className="chk">
-                  {blockers.map((b) => (
-                    <li key={b}>{BLOCKER_LABELS[b] ?? b}</li>
-                  ))}
-                </ul>
+                <>
+                  <ul className="chk">
+                    {blockers.map((b) => (
+                      <li key={b}>{BLOCKER_LABELS[b] ?? b}</li>
+                    ))}
+                  </ul>
+                  {/* Doc 17 emergency exception: only when the sole blocker is that this admin made the change. */}
+                  {isAdmin && blockers.length === 1 && blockers[0] === 'own_change' && (
+                    <details className="emergency">
+                      <summary>กรณีฉุกเฉิน: เผยแพร่โดยไม่มีแอดมินคนที่สอง</summary>
+                      <p className="dim">
+                        ใช้เมื่อรอแอดมินคนอื่นไม่ได้ เช่น ลิงก์สตรีมเสียและผู้ฟังเล่นไม่ได้ ต้องยืนยัน MFA ภายใน 5 นาที
+                        รายการนี้บันทึกใน audit แยกเป็น “เผยแพร่แบบฉุกเฉิน” เพื่อให้ทีมตรวจย้อนหลัง
+                      </p>
+                      <label className="fld">
+                        <span>เหตุผลที่ต้องเผยแพร่ทันที (อย่างน้อย 20 ตัวอักษร)</span>
+                        <textarea value={emergencyReason} onChange={(e) => setEmergencyReason(e.target.value)} maxLength={500} rows={2} />
+                      </label>
+                      <label className="fld check">
+                        <input type="checkbox" checked={emergencyOk} onChange={(e) => setEmergencyOk(e.target.checked)} />
+                        <span>ฉันตรวจร่างนี้แล้ว และเข้าใจว่าไม่มีผู้ตรวจคนที่สอง</span>
+                      </label>
+                      <button
+                        type="button"
+                        className="btn danger"
+                        disabled={busy || !emergencyOk || emergencyReason.trim().length < 20}
+                        onClick={() => act('publish', true)}
+                      >
+                        เผยแพร่ฉุกเฉิน revision {station.revision}
+                      </button>
+                    </details>
+                  )}
+                </>
               ) : (
                 <>
                   <ul className="chk ok">

@@ -56,6 +56,12 @@ export interface AppConfig {
    * dev without it does not ask for MFA.
    */
   staffMfaAcr: string[] | null;
+  /**
+   * Doc 17: browser origins allowed to call the API directly (CORS), per environment, from CORS_ALLOWED_ORIGINS.
+   * Empty by default, so no CORS headers are sent and browsers refuse cross-origin calls. The web console calls
+   * the API from its server (BFF) and needs no entry here.
+   */
+  corsAllowedOrigins: string[];
   /** Scheduled stream checks of published stations (Doc 17). Off unless STATION_CHECK_ENABLED=true. */
   /** Doc 17 alerts: evaluated every minute; transitions go to the logs and, when set, to a webhook. */
   alerts: { enabled: boolean; webhookUrl: string | null };
@@ -112,6 +118,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     billing: { apple: loadApple(env), google: loadGoogle(env) },
     auditRetentionEnabled: flag(env, 'AUDIT_RETENTION_ENABLED', true),
     staffMfaAcr: loadStaffMfa(env, appEnv),
+    corsAllowedOrigins: loadCorsOrigins(env, appEnv),
     alerts: loadAlerts(env),
     stationCheck: loadStationCheck(env),
   };
@@ -202,6 +209,22 @@ function loadAlerts(env: NodeJS.ProcessEnv): AppConfig['alerts'] {
     if (u.protocol !== 'https:' || u.username || u.password) throw new Error('ALERT_WEBHOOK_URL must be an https URL');
   }
   return { enabled: flag(env, 'ALERTS_ENABLED', true), webhookUrl: raw || null };
+}
+
+function loadCorsOrigins(env: NodeJS.ProcessEnv, appEnv: AppEnv): string[] {
+  return listOf(env.CORS_ALLOWED_ORIGINS).map((raw) => {
+    let u: URL;
+    try {
+      u = new URL(raw);
+    } catch {
+      throw new Error('CORS_ALLOWED_ORIGINS must list origins such as https://app.example.com');
+    }
+    // An exact origin only: no paths, no wildcards, and plain http only for local development.
+    if (u.origin !== raw || (u.protocol !== 'https:' && !(appEnv === 'dev' && u.protocol === 'http:'))) {
+      throw new Error('CORS_ALLOWED_ORIGINS must list origins such as https://app.example.com');
+    }
+    return u.origin;
+  });
 }
 
 function loadStaffMfa(env: NodeJS.ProcessEnv, appEnv: AppEnv): string[] | null {

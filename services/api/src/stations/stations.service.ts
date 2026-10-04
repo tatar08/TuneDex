@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { writeAudit } from '../audit/audit';
 import { ApiError } from '../common/api-error';
+import { encodeCursor } from '../common/pagination';
 import { Database } from '../db/database';
 import { publishBlocker, StationDraft } from './stations.schema';
 
@@ -96,9 +97,20 @@ const PUBLIC_PAGE_MAX = 100;
 export class StationsService {
   constructor(private readonly db: Database) {}
 
-  async list(actor: StationActor): Promise<AdminStationView[]> {
-    const rows = await this.db.query<Row>(`SELECT ${COLUMNS} FROM radio_stations ORDER BY draft->>'name', id LIMIT 500`);
-    return rows.map((r) => toAdminView(r, actor));
+  /** One page by name, then id (Doc 17: cursor pages of at most 100). */
+  async list(actor: StationActor, after: string[] | null, limit: number): Promise<{ stations: AdminStationView[]; nextCursor: string | null }> {
+    const rows = after
+      ? await this.db.query<Row>(
+          `SELECT ${COLUMNS} FROM radio_stations WHERE (draft->>'name', id::text) > ($1, $2) ORDER BY draft->>'name', id::text LIMIT $3`,
+          [after[0], after[1], limit + 1],
+        )
+      : await this.db.query<Row>(`SELECT ${COLUMNS} FROM radio_stations ORDER BY draft->>'name', id::text LIMIT $1`, [limit + 1]);
+    const page = rows.slice(0, limit);
+    const last = page.at(-1);
+    return {
+      stations: page.map((r) => toAdminView(r, actor)),
+      nextCursor: rows.length > limit && last ? encodeCursor([last.draft.name, last.id]) : null,
+    };
   }
 
   async get(actor: StationActor, id: string): Promise<AdminStationView> {
@@ -163,14 +175,17 @@ export class StationsService {
    * Publishes exactly the draft revision the reviewer looked at. The reviewer must be an admin
    * who did not change the draft since its last publish, and the rights record must be complete and current.
    */
-  async publish(actor: StationActor, id: string, expectedRevision: number, reason: string): Promise<AdminStationView> {
+  async publish(actor: StationActor, id: string, expectedRevision: number, reason: string, emergency = false): Promise<AdminStationView> {
     const row = await this.db.transaction(async (query) => {
       const [current] = await query<Row>(`SELECT ${COLUMNS} FROM radio_stations WHERE id = $1 FOR UPDATE`, [id]);
       if (!current) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
       if (Number(current.revision) !== expectedRevision) {
         throw new ApiError(HttpStatus.PRECONDITION_FAILED, 'REVISION_MISMATCH', { currentRevision: Number(current.revision) });
       }
-      const reasons = blockers(current, actor);
+      const all = blockers(current, actor);
+      // Emergency: an admin may publish their own change alone. Every other check still applies.
+      const bypassed = emergency && all.includes('own_change');
+      const reasons = emergency ? all.filter((b) => b !== 'own_change') : all;
       if (reasons.length) throw new ApiError(HttpStatus.CONFLICT, 'PUBLISH_BLOCKED', { reasons });
       const [r] = await query<Row>(
         `UPDATE radio_stations
@@ -181,11 +196,15 @@ export class StationsService {
       );
       await writeAudit(query, {
         actor: actorLabel(actor),
-        action: 'station.publish',
+        action: bypassed ? 'station.publish_emergency' : 'station.publish',
         targetType: 'station',
         targetId: id,
         reason,
-        changes: { revision: Number(r.revision), previousPublishedRevision: current.published_revision === null ? null : Number(current.published_revision) },
+        changes: {
+          revision: Number(r.revision),
+          previousPublishedRevision: current.published_revision === null ? null : Number(current.published_revision),
+          ...(bypassed ? { emergency: true, reviewer: 'none' } : {}),
+        },
         requestId: actor.requestId,
       });
       return r;

@@ -83,8 +83,9 @@ describe('device sign-out ends the Keycloak session, and privileged staff action
 
     const plain = await publish({ authTime: now(), acr: '1' });
     expect(plain.status).toBe(401);
-    expect(plain.body).toMatchObject({ code: 'MFA_REQUIRED', details: { maxAgeSeconds: 300 } });
-    expect((await publish({ authTime: now() - 600, acr: '2' })).body.code).toBe('MFA_REQUIRED');
+    // A password-only session is stopped at the door; an MFA session from 10 minutes ago needs a fresh code to publish.
+    expect(plain.body).toMatchObject({ code: 'MFA_REQUIRED', details: { scope: 'session' } });
+    expect((await publish({ authTime: now() - 600, acr: '2' })).body).toMatchObject({ code: 'MFA_REQUIRED', details: { maxAgeSeconds: 300 } });
     // With fresh MFA the request reaches the normal publish rules (here: nothing to publish).
     const fresh = await publish({ authTime: now(), acr: '2' });
     expect(fresh.status).toBe(409);
@@ -95,7 +96,43 @@ describe('device sign-out ends the Keycloak session, and privileged staff action
       http().post('/v1/admin/audit/export').set('Authorization', `Bearer ${await id.token('mfa-auditor', o)}`).send({ reason: 'quarterly review of changes' });
     expect((await (await exp({ authTime: now() }))()).body.code).toBe('MFA_REQUIRED');
     expect((await (await exp({ authTime: now(), acr: '2' }))()).status).toBe(200);
-    // Reading stays open without MFA.
-    await http().get('/v1/admin/config').set('Authorization', `Bearer ${await id.token('mfa-admin')}`).expect(200);
+    // Reading needs a session that signed in with MFA, but not a fresh one.
+    const read = await http().get('/v1/admin/config').set('Authorization', `Bearer ${await id.token('mfa-admin')}`);
+    expect(read.status).toBe(401);
+    expect(read.body).toMatchObject({ code: 'MFA_REQUIRED', details: { scope: 'session' } });
+    await http().get('/v1/admin/config').set('Authorization', `Bearer ${await id.token('mfa-admin', { authTime: now() - 3600, acr: '2' })}`).expect(200);
+  });
+
+  it('lets staff in only with an MFA sign-in, which lasts for the Keycloak session after the token drops to password level', async () => {
+    const staff = (...args: string[]) => runStaffCli(args, new Database(t.pool), () => undefined);
+    await http().get('/v1/me/settings').set('Authorization', `Bearer ${await id.token('mfa-ops')}`).expect(200);
+    expect(await staff('grant', 'mfa-ops', 'operator', '--by', 'tar', '--reason', 'mfa tests')).toBe(0);
+    const as = async (o: { sid?: string; authTime?: number; acr?: string }) => ({ Authorization: `Bearer ${await id.token('mfa-ops', o)}` });
+
+    // Signed in with a password only: roles are visible, staff pages are not.
+    const me = await http().get('/v1/me/staff').set(await as({ sid: 'kc-ops-1', authTime: now(), acr: '1' })).expect(200);
+    expect(me.body).toMatchObject({ roles: ['operator'], mfa: false });
+    expect((await http().get('/v1/admin/jobs').set(await as({ sid: 'kc-ops-1', authTime: now(), acr: '1' }))).body.code).toBe('MFA_REQUIRED');
+
+    // An MFA sign-in in that session; later refreshed tokens say `acr` 1 but the session still counts.
+    expect((await http().get('/v1/me/staff').set(await as({ sid: 'kc-ops-1', authTime: now(), acr: '2' })).expect(200)).body.mfa).toBe(true);
+    await http().get('/v1/admin/jobs').set(await as({ sid: 'kc-ops-1', authTime: now() - 600, acr: '1' })).expect(200);
+    // Another Keycloak session of the same person does not.
+    expect((await http().get('/v1/admin/jobs').set(await as({ sid: 'kc-ops-2', acr: '1' }))).status).toBe(401);
+    // After 12 hours the session no longer counts.
+    await t.pool.query(`UPDATE staff_mfa_sessions SET mfa_at = now() - interval '13 hours'`);
+    expect((await http().get('/v1/admin/jobs').set(await as({ sid: 'kc-ops-1', acr: '1' }))).status).toBe(401);
+  });
+
+  it('reports a new roles version whenever a role is granted or revoked', async () => {
+    const staff = (...args: string[]) => runStaffCli(args, new Database(t.pool), () => undefined);
+    const me = async () => (await http().get('/v1/me/staff').set('Authorization', `Bearer ${await id.token('mfa-version')}`).expect(200)).body;
+    const none = (await me()).rolesVersion;
+    expect(await staff('grant', 'mfa-version', 'support', '--by', 'tar', '--reason', 'v')).toBe(0);
+    const granted = (await me()).rolesVersion;
+    expect(granted).not.toBe(none);
+    expect((await me()).rolesVersion).toBe(granted);
+    expect(await staff('revoke', 'mfa-version', 'support', '--by', 'tar', '--reason', 'v')).toBe(0);
+    expect((await me()).rolesVersion).not.toBe(granted);
   });
 });

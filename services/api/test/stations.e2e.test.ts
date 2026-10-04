@@ -83,8 +83,8 @@ describe('station catalog', () => {
     });
 
     it('tells each caller their own current roles', async () => {
-      expect((await http().get('/v1/me/staff').set(as('editor'))).body).toEqual({ roles: ['catalog_editor'] });
-      expect((await http().get('/v1/me/staff').set(as('user'))).body).toEqual({ roles: [] });
+      expect((await http().get('/v1/me/staff').set(as('editor'))).body).toMatchObject({ roles: ['catalog_editor'], mfa: true });
+      expect((await http().get('/v1/me/staff').set(as('user'))).body).toMatchObject({ roles: [], mfa: false });
       expect((await http().get('/v1/me/staff')).status).toBe(401);
     });
 
@@ -141,6 +141,27 @@ describe('station catalog', () => {
       await publish('admin2', editorDraft.body.id, 1).expect(200);
       await patch('editor', editorDraft.body.id, 1, { bitrateKbps: 64 }).expect(200);
       await publish('admin', editorDraft.body.id, 2).expect(200);
+    });
+
+    it('lets an admin publish their own change alone only as a reviewed emergency (Doc 17)', async () => {
+      const sid = (await create('admin')).body.id;
+      const emergency = (reason: string, by: keyof typeof tokens = 'admin') =>
+        http().post(`/v1/admin/stations/${sid}/publish`).set(as(by)).set('If-Match', '"1"').send({ reason, emergency: true });
+      // A short reason is not enough to explain skipping the second admin.
+      expect((await emergency('urgent')).body).toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'reason', reason: 'too_short' } });
+      expect((await http().post(`/v1/admin/stations/${sid}/publish`).set(as('admin')).set('If-Match', '"1"').send({ reason: 'x'.repeat(30), emergency: 'yes' })).status).toBe(400);
+      // Editors still cannot publish, emergency or not.
+      expect((await emergency('the stream moved and listeners cannot play it', 'editor')).status).toBe(403);
+
+      const done = await emergency('the stream moved and listeners cannot play it').expect(200);
+      expect(done.body.status).toBe('published');
+      const [row] = (await t.pool.query(`SELECT action, reason, changes FROM audit_events WHERE target_id = $1 AND action LIKE 'station.publish%'`, [sid])).rows;
+      expect(row).toMatchObject({ action: 'station.publish_emergency', reason: 'the stream moved and listeners cannot play it', changes: { emergency: true, reviewer: 'none' } });
+
+      // An emergency flag on an ordinary review is recorded as an ordinary publish.
+      const other = (await create('editor')).body.id;
+      await http().post(`/v1/admin/stations/${other}/publish`).set(as('admin')).set('If-Match', '"1"').send({ reason: 'reviewed by a second admin anyway', emergency: true }).expect(200);
+      expect((await t.pool.query(`SELECT action FROM audit_events WHERE target_id = $1 AND action LIKE 'station.publish%'`, [other])).rows).toEqual([{ action: 'station.publish' }]);
     });
 
     it('publishes only the revision the reviewer saw', async () => {

@@ -96,6 +96,14 @@ describe('loadConfig', () => {
     expect(google).toMatchObject({ packageName: 'app.tunedeck', serviceAccount: { clientEmail: 'a@b' } });
   });
 
+  it('allows CORS only for listed exact origins', () => {
+    expect(loadConfig(base).corsAllowedOrigins).toEqual([]);
+    expect(loadConfig({ ...base, CORS_ALLOWED_ORIGINS: 'https://a.example, http://localhost:3000' }).corsAllowedOrigins).toEqual(['https://a.example', 'http://localhost:3000']);
+    for (const bad of ['*', 'https://a.example/path', 'a.example']) {
+      expect(() => loadConfig({ ...base, CORS_ALLOWED_ORIGINS: bad })).toThrow('CORS_ALLOWED_ORIGINS');
+    }
+  });
+
   it('requires the MFA acr values outside dev, and removes old audit records unless told not to', () => {
     expect(loadConfig(base).staffMfaAcr).toBeNull();
     expect(loadConfig({ ...base, STAFF_MFA_ACR: '2, gold' }).staffMfaAcr).toEqual(['2', 'gold']);

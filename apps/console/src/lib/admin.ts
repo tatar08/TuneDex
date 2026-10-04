@@ -87,6 +87,7 @@ export const REASON_LABELS: Record<string, string> = {
   value_not_allowed: 'ค่าที่เลือกไม่อนุญาต',
   out_of_range: 'ค่าเกินช่วงที่รับได้ (8–512)',
   date_yyyy_mm_dd: 'วันที่ไม่ถูกต้อง',
+  too_short: 'สั้นเกินไป อธิบายอย่างน้อย 20 ตัวอักษร',
 };
 
 const dateFmt = new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeZone: 'Asia/Bangkok' });
@@ -264,6 +265,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'station.create': 'สร้างร่างสถานี',
   'station.update': 'แก้ร่างสถานี',
   'station.publish': 'เผยแพร่สถานี',
+  'station.publish_emergency': 'เผยแพร่สถานีแบบฉุกเฉิน (ไม่มีผู้ตรวจคนที่สอง ต้องตรวจย้อนหลัง)',
   'station.disable': 'ปิดสถานี',
   'station.enable': 'เปิดสถานีอีกครั้ง',
   'station.check': 'ตรวจสตรีม',

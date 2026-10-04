@@ -3,9 +3,10 @@ import type { Request, Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { requireRecentMfa } from '../auth/recent-sign-in';
 import { ApiError } from '../common/api-error';
+import { decodeCursor, parseLimit } from '../common/pagination';
 import { parseIfMatch } from '../settings/settings.schema';
 import { RequireRoles, StaffGuard } from '../staff/staff';
-import { parseNewStation, parseReason, parseStationId, parseStationPatch } from './stations.schema';
+import { parseNewStation, parsePublish, parseReason, parseStationId, parseStationPatch } from './stations.schema';
 import { HealthCheck, StationHealth, StationHealthService } from './station-health';
 import { AdminStationView, StationActor, StationsService } from './stations.service';
 
@@ -30,11 +31,14 @@ export class AdminStationsController {
   }
 
   @Get()
-  async list(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  async list(@Req() req: Request, @Query('cursor') cursor: unknown, @Query('limit') limit: unknown, @Res({ passthrough: true }) res: Response) {
     res.setHeader('Cache-Control', 'no-store');
-    const views = await this.stations.list(actorOf(req));
-    const health = await this.health.summaries(views.map((v) => v.id));
-    return { stations: views.map((v): WithHealth => ({ ...v, health: health.get(v.id) ?? { state: 'unknown', regions: [] } })) };
+    const page = await this.stations.list(actorOf(req), decodeCursor(cursor, 2), parseLimit(limit));
+    const health = await this.health.summaries(page.stations.map((v) => v.id));
+    return {
+      stations: page.stations.map((v): WithHealth => ({ ...v, health: health.get(v.id) ?? { state: 'unknown', regions: [] } })),
+      nextCursor: page.nextCursor,
+    };
   }
 
   @Get(':id')
@@ -89,9 +93,9 @@ export class AdminStationsController {
   ) {
     const stationId = parseStationId(id);
     const expected = parseIfMatch(ifMatch);
-    const reason = parseReason(body);
+    const { reason, emergency } = parsePublish(body);
     requireRecentMfa(req);
-    return this.send(res, await this.stations.publish(actorOf(req), stationId, expected, reason));
+    return this.send(res, await this.stations.publish(actorOf(req), stationId, expected, reason, emergency));
   }
 
   @Post(':id/disable')

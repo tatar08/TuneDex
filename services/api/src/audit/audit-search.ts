@@ -9,7 +9,7 @@ import { writeAudit } from './audit';
 
 const MAX_WINDOW_MS = 90 * 24 * 3600 * 1000;
 const DEFAULT_WINDOW_MS = 7 * 24 * 3600 * 1000;
-const MAX_LIMIT = 200;
+const MAX_LIMIT = 100;
 /** Searching logs or the audit trail is itself recorded; these rows are hidden unless asked for. */
 const READ_ACTIONS = ['logs.search', 'audit.search'];
 /** Doc 17: exports hold at most 10k rows per job. */
@@ -61,7 +61,7 @@ function time(q: Record<string, unknown>, field: string): Date | undefined {
   return d;
 }
 
-/** Parses and bounds an audit search: a window of at most 90 days (default 7), at most 200 rows a page. */
+/** Parses and bounds an audit search: a window of at most 90 days (default 7), at most 100 rows a page (Doc 17). */
 export function parseAuditQuery(q: Record<string, unknown>, now = new Date()): AuditQuery {
   const to = time(q, 'to') ?? now;
   const from = time(q, 'from') ?? new Date(to.getTime() - DEFAULT_WINDOW_MS);

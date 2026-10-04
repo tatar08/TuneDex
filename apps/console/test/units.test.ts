@@ -4,6 +4,7 @@ import type { AdminStation } from '@/lib/bff';
 import { loadConfig } from '@/lib/config';
 import { openTransaction, safeReturnTo, sealTransaction } from '@/lib/cookies';
 import { MemorySessionStore } from '@/lib/session';
+import { langFrom } from '@/lib/lang';
 
 const env = {
   CONSOLE_BASE_URL: 'https://console.tunedeck.test',
@@ -90,5 +91,14 @@ describe('stream health helpers', () => {
       failing: 0,
       suspect: 1,
     });
+  });
+});
+
+describe('page language', () => {
+  it('follows the switch, then the browser, then Thai', () => {
+    expect(langFrom('en', 'th-TH')).toBe('en');
+    expect(langFrom(undefined, 'en-US,en;q=0.9,th;q=0.8')).toBe('en');
+    expect(langFrom(undefined, 'th-TH,en;q=0.5')).toBe('th');
+    expect(langFrom('xx', null)).toBe('th');
   });
 });

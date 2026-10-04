@@ -27,6 +27,7 @@
 .adm .btn { font: inherit; font-weight: 600; font-size: 13px; background: var(--a); color: var(--ai); border: 1px solid var(--a); border-radius: var(--r); padding: 7px 14px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
 .adm .btn.secondary { background: transparent; color: var(--t); border-color: var(--l); }
 .adm .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.adm .btn.danger { background: var(--e); border-color: var(--e); color: #fff; }
 .adm .adm-alert { border: 1px solid var(--e); border-left-width: 4px; border-radius: var(--r); padding: 10px 14px; margin: 12px 0; background: color-mix(in srgb, var(--e) 10%, var(--p)); }
 .adm .adm-ok { border-left: 4px solid var(--ok); padding: 8px 14px; margin: 12px 0; background: color-mix(in srgb, var(--ok) 10%, var(--p)); border-radius: var(--r); }
 
@@ -50,6 +51,12 @@
 .adm .fld input, .adm .fld select, .adm .fld textarea { font: inherit; color: var(--t); background: var(--b); border: 1px solid var(--l); border-radius: calc(var(--r) * 0.7); padding: 7px 10px; width: 100%; min-width: 0; }
 .adm .fld.bad input, .adm .fld.bad select { border-color: var(--e); }
 .adm .fld em { color: var(--e); font-style: normal; font-size: 12px; }
+.adm .fld.check { flex-direction: row; align-items: flex-start; gap: 8px; }
+.adm .fld.check input { width: auto; margin-top: 2px; }
+.adm .fld.check > span { color: var(--t); }
+.adm details.emergency { border-top: 1px solid var(--l); padding-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+.adm details.emergency summary { cursor: pointer; color: var(--e); font-size: 13px; font-weight: 600; }
+.adm details.emergency > * + * { margin-top: 10px; }
 .adm .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .adm .ed-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding-top: 4px; }
 .adm .chk { margin: 0; padding-left: 18px; color: var(--w); }

@@ -60,6 +60,7 @@ export function testConfig(databaseUrl: string): AppConfig {
     billing: { apple: null, google: null },
     auditRetentionEnabled: false,
     staffMfaAcr: null,
+    corsAllowedOrigins: [],
     alerts: { enabled: false, webhookUrl: null },
     stationCheck: { enabled: false, intervalMinutes: 15, region: 'test-region' },
     configSigningKey: null,

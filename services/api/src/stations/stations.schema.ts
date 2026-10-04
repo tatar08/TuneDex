@@ -140,6 +140,23 @@ export function parseReason(body: unknown): string {
   return text('reason', b.reason, 500);
 }
 
+/** Doc 17: an emergency publish by a single admin needs a reason others can review later. */
+export const EMERGENCY_REASON_MIN = 20;
+
+/**
+ * Publish body: `{ reason, emergency? }`. `emergency: true` lets an admin publish their own change alone
+ * (Doc 17 emergency single-admin exception); it needs a longer reason and is audited separately.
+ */
+export function parsePublish(body: unknown): { reason: string; emergency: boolean } {
+  const b = (typeof body === 'object' && body !== null && !Array.isArray(body) ? body : {}) as Record<string, unknown>;
+  for (const key of Object.keys(b)) if (key !== 'reason' && key !== 'emergency') throw invalid(key, 'unknown_field');
+  if (b.emergency !== undefined && typeof b.emergency !== 'boolean') throw invalid('emergency', 'must_be_boolean');
+  const reason = text('reason', b.reason, 500);
+  const emergency = b.emergency === true;
+  if (emergency && reason.length < EMERGENCY_REASON_MIN) throw invalid('reason', 'too_short');
+  return { reason, emergency };
+}
+
 /** Why a draft cannot be published yet, or null when it can. */
 export function publishBlocker(d: StationDraft, today = new Date()): string | null {
   if (!d.rightsBasis) return 'rights_basis_missing';

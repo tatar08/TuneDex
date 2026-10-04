@@ -289,6 +289,7 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
       await query('DELETE FROM devices WHERE user_id = $1', [userId]);
       await query('DELETE FROM account_preferences WHERE owner_id = $1', [userId]);
       await query('DELETE FROM staff_roles WHERE user_id = $1', [userId]);
+      await query('DELETE FROM staff_mfa_sessions WHERE user_id = $1', [userId]);
       await query('DELETE FROM idempotency_keys WHERE user_id = $1', [userId]);
       await query('DELETE FROM account_exports WHERE user_id = $1', [userId]);
       await query('DELETE FROM support_access_codes WHERE user_id = $1', [userId]);

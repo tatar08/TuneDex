@@ -70,3 +70,6 @@ a.btn { display: inline-block; text-decoration: none; }
 .btn.small { padding: 3px 10px; font-size: 12.5px; }
 .radio-actions { display: flex; gap: 6px; align-items: center; }
 .radio-list li { align-items: center; }
+
+.lang-switch { margin-left: auto; font-size: 0.9rem; }
+.auth-links { margin-top: 1.25rem; font-size: 0.95rem; }
