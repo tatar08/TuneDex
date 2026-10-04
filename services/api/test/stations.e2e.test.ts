@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { StationsService } from '../src/stations/stations.service';
 import { Database } from '../src/db/database';
 import { runStaffCli } from '../src/staff/staff-cli';
 import { createIdentity, createTestApp, createTestDatabase, TestIdentity } from './harness';
@@ -314,6 +315,12 @@ describe('station catalog', () => {
       expect(await inCatalog(sid)).toBe(false);
       const view = (await http().get(`/v1/admin/stations/${sid}`).set(as('editor'))).body;
       expect(view.rights).toMatchObject({ state: 'not_yet_valid', expiresAt: null });
+
+      // When that record's start date arrives, the sweep brings the station back without anyone acting.
+      await t.pool.query(`UPDATE rights_records SET valid_from = (now() AT TIME ZONE 'UTC')::date WHERE station_id = $1 AND valid_from = '2099-01-01'`, [sid]);
+      expect(await t.app.get(StationsService).refreshRights()).toBeGreaterThanOrEqual(1);
+      expect(await inCatalog(sid)).toBe(true);
+      expect(await t.app.get(StationsService).refreshRights()).toBe(0);
     });
 
     it('revokes only a record of the same station', async () => {

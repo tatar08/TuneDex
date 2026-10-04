@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 import { writeAudit } from '../audit/audit';
 import { ApiError } from '../common/api-error';
 import { encodeCursor } from '../common/pagination';
@@ -120,9 +120,37 @@ const HISTORY_ACTIONS = `(a.action LIKE 'station.%' OR a.action LIKE 'rights.%')
 
 const PUBLIC_PAGE_MAX = 100;
 
+/** How often a record whose valid_from has arrived is picked up without anyone acting. */
+const RIGHTS_SWEEP_MS = 15 * 60_000;
+
 @Injectable()
-export class StationsService {
+export class StationsService implements OnApplicationBootstrap, OnApplicationShutdown {
+  private timer: NodeJS.Timeout | null = null;
+
   constructor(private readonly db: Database) {}
+
+  onApplicationBootstrap(): void {
+    this.timer = setInterval(() => void this.refreshRights().catch(() => undefined), RIGHTS_SWEEP_MS);
+    this.timer.unref();
+  }
+
+  onApplicationShutdown(): void {
+    if (this.timer) clearInterval(this.timer);
+  }
+
+  /**
+   * Brings a station back once a future-dated rights record starts (expiry needs nothing: the public query
+   * compares rights_expires_at with now()). Only rows that become or stay visible with a new end are written.
+   */
+  async refreshRights(): Promise<number> {
+    const rows = await this.db.query(
+      `UPDATE radio_stations s SET rights_expires_at = x.until
+         FROM (SELECT id, station_rights_until(id) AS until FROM radio_stations) x
+        WHERE x.id = s.id AND (x.until IS NULL OR x.until > now()) AND x.until IS DISTINCT FROM s.rights_expires_at
+        RETURNING s.id`,
+    );
+    return rows.length;
+  }
 
   /** Rights records of the given stations, oldest first, grouped by station. */
   private async records(ids: string[], query: Database['query'] = this.db.query.bind(this.db)): Promise<Map<string, RightsRow[]>> {
