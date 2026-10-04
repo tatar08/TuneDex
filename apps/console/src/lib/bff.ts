@@ -171,6 +171,38 @@ export interface AuditEvent {
   changes: Record<string, unknown>;
   requestId: string | null;
 }
+export type OverviewWindow = '1h' | '24h' | '7d';
+export type IncidentCode = 'api_error_rate' | 'stations_suspect' | 'station_checker_stale' | 'account_deletion_failed' | 'account_deletion_late' | 'no_recent_traffic';
+/** GET /v1/admin/overview: aggregates only, with sample sizes and a stale flag (Doc 17). */
+export interface Overview {
+  window: { id: OverviewWindow; from: string; to: string };
+  generatedAt: string;
+  api: {
+    requests: number;
+    serverErrors: number;
+    clientErrors: number;
+    errorRate: number | null;
+    p50Ms: number | null;
+    p95Ms: number | null;
+    lastRequestAt: string | null;
+    stale: boolean;
+    buckets: { at: string; requests: number; serverErrors: number; p95Ms: number | null }[];
+    topErrors: { route: string; status: number; count: number }[];
+  };
+  stations: {
+    published: number;
+    disabled: number;
+    health: Record<'ok' | 'failing' | 'suspect' | 'unknown', number>;
+    checkerEnabled: boolean;
+    lastCheckAt: string | null;
+  };
+  queues: {
+    accountDeletions: { open: number; failed: number; oldestRequestedAt: string | null; deadlineDays: number };
+    diagnosticReports: number;
+  };
+  incidents: { code: IncidentCode; severity: 'critical' | 'warning'; count: number }[];
+}
+
 export interface AuditPage {
   events: AuditEvent[];
   nextCursor: string | null;
@@ -393,6 +425,14 @@ export function createBff(deps: BffDeps) {
       if (res.ok) return { status: 200, page: (await res.json()) as LogPage };
       const body = (await res.json().catch(() => ({}))) as { details?: { field?: string } };
       return { status: res.status, field: body.details?.field };
+    },
+
+    /** Server-side read for /admin/overview. Null means the user must sign in again. */
+    async loadOverview(ctx: SessionContext, window: string): Promise<{ status: number; overview?: Overview } | null> {
+      const w = ['1h', '24h', '7d'].includes(window) ? window : '24h';
+      const res = await callApi(ctx, `/v1/admin/overview?window=${w}`, { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, overview: (await res.json()) as Overview } : { status: res.status };
     },
 
     /** Server-side audit search for /admin/audit. Null means the user must sign in again. */

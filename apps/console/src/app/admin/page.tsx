@@ -9,5 +9,5 @@ export default async function AdminHome() {
   const { bff, ctx } = await staffPage('/admin');
   const staff = await bff.loadStaff(ctx).catch(() => null);
   const roles = staff && 'roles' in staff ? staff.roles : [];
-  redirect(canSeeStations(roles) ? '/admin/stations' : canSeeLogs(roles) ? '/admin/logs' : canSeeAudit(roles) ? '/admin/audit' : '/admin/stations');
+  redirect(canSeeStations(roles) ? '/admin/stations' : canSeeLogs(roles) ? '/admin/overview' : canSeeAudit(roles) ? '/admin/audit' : '/admin/stations');
 }

@@ -157,10 +157,11 @@ test('accounts without a staff role see a plain refusal, and signed-out visitors
 
 test('operators search redacted API logs; editors cannot', async ({ browser }) => {
   const ops = await signInAs(browser, 'e2e-ops', '/admin/logs');
-  // Operators have no catalog role, so the menu offers only the log page and /admin lands there.
+  // Operators have no catalog role, so the menu offers no station page and /admin lands on the overview.
   await expect(ops.getByRole('link', { name: 'สถานีวิทยุ' })).toHaveCount(0);
   await ops.goto(`${stack.base}/admin`);
-  await expect(ops).toHaveURL(`${stack.base}/admin/logs`);
+  await expect(ops).toHaveURL(`${stack.base}/admin/overview`);
+  await ops.goto(`${stack.base}/admin/logs`);
   await expect(ops.getByRole('heading', { name: 'บันทึกระบบ' })).toBeVisible();
 
   // Make a failing request with a known requestId and a secret in the URL, then find it.
@@ -332,4 +333,44 @@ test('stream health shows in every theme, and staff can check a stream now', asy
   await expect(panel).toContainText('ประวัติการตรวจ 4 ครั้งล่าสุด');
   await panel.getByRole('button', { name: 'ตรวจตอนนี้' }).click();
   await expect(panel.getByRole('status')).toHaveText('เพิ่งตรวจไปไม่ถึงนาที รอสักครู่แล้วลองใหม่');
+});
+
+test('operators see the overview in every theme; editors cannot', async ({ browser }) => {
+  const page = await signInAs(browser, 'e2e-ops', '/admin/overview');
+  // Every request so far went through the API's own logger (flushed to the database each second).
+  await expect(async () => {
+    await page.reload();
+    await expect(page.locator('.ov-chart svg rect.ok').first()).toBeAttached({ timeout: 500 });
+  }).toPass({ timeout: 10_000 });
+  await expect(page.locator('.ov-chart table tbody tr')).toHaveCount(24);
+  await page.getByRole('link', { name: '1 ชั่วโมง' }).first().click();
+  await expect(page).toHaveURL(`${stack.base}/admin/overview?window=1h`);
+  await expect(page.locator('.ov-chart table tbody tr')).toHaveCount(12);
+
+  const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
+  const layouts: Record<string, string> = {
+    'control-room': '.t-control-room .cr-page .ov-kpis + .ov-grid .ov-chart',
+    'broadcast-rack': '.t-broadcast-rack .ov-lamps + .ov-meters [role=meter]',
+    'daylight-bento': '.t-daylight-bento .ov-bento .b-chart .ov-chart',
+    workbench: '.t-workbench .split .ov-it',
+    minimal: '.t-minimal .fv-logstats + .fv-card .ov-chart',
+  };
+  for (const [theme, selector] of Object.entries(layouts)) {
+    await picker.selectOption(theme);
+    await expect(page.locator(selector).first()).toBeVisible();
+    if (theme === 'workbench') await page.locator('.ov-it .lg-pick', { hasText: 'คำขอ API' }).click();
+    // Hovering a bar shows its numbers.
+    await page.locator('.ov-chart svg g').last().hover();
+    await expect(page.locator('.ov-tip')).toContainText('คำขอ');
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/overview-${theme}.png`, fullPage: true });
+    if (theme === 'workbench') {
+      await page.locator('.ov-it .lg-pick', { hasText: 'สุขภาพสถานี' }).click();
+      await expect(page.locator('.det .ov-dl dt', { hasText: 'น่าสงสัย' })).toBeVisible();
+    }
+  }
+
+  const editor = await signInAs(browser, 'e2e-editor');
+  await expect(editor.getByRole('link', { name: 'ภาพรวมระบบ' })).toHaveCount(0);
+  await editor.goto(`${stack.base}/admin/overview`);
+  await expect(editor.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูภาพรวมระบบ');
 });

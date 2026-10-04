@@ -5,6 +5,7 @@ import { json } from 'express';
 import type { JWTVerifyGetKey } from 'jose';
 import type { Pool } from 'pg';
 import { AccountDeletionStatusController, AccountService, MyAccountController } from './account/account';
+import { AdminOverviewController, OverviewService } from './overview/overview';
 import { AdminAuditController, AuditSearchService } from './audit/audit-search';
 import { AuthGuard, KEY_RESOLVER } from './auth/auth.guard';
 import { ErrorEnvelopeFilter } from './common/error.filter';
@@ -42,7 +43,7 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController],
+      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, AdminOverviewController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },
@@ -59,6 +60,7 @@ export class AppModule {
         DevicesService,
         DiagnosticsService,
         AccountService,
+        OverviewService,
         StaffService,
         StationsService,
         StationHealthService,

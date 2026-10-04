@@ -23,6 +23,7 @@ export function useAdmin(): AdminContextValue {
 }
 
 const NAV = [
+  { href: '/admin/overview', label: 'ภาพรวมระบบ', short: 'OV', icon: 'bolt', show: canSeeLogs },
   { href: '/admin/stations', label: 'สถานีวิทยุ', short: 'ST', icon: 'stations', show: canSeeStations },
   { href: '/admin/logs', label: 'บันทึกระบบ', short: 'LG', icon: 'logs', show: canSeeLogs },
   { href: '/admin/audit', label: 'ประวัติการแก้ไข', short: 'AU', icon: 'audit', show: canSeeAudit },
