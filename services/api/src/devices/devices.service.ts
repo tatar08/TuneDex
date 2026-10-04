@@ -3,6 +3,7 @@ import { IdpError, IdpUsersService } from '../account/idp-users';
 import { StructuredLogger } from '../common/logger';
 import { writeAudit } from '../audit/audit';
 import { ApiError } from '../common/api-error';
+import { encodeCursor, PAGE_MAX } from '../common/pagination';
 import { Database } from '../db/database';
 import { afterFailure, jobErrorCode, WORKER_TICK_MS } from '../jobs/retry-policy';
 import { normalizeOverrides, Overrides } from './device-preferences';
@@ -152,12 +153,37 @@ export class DevicesService implements OnApplicationBootstrap, OnApplicationShut
   }
 
   /** `serverObservedAt` (Doc 17): the server's clock when the list was read, to compare last-seen times against. */
-  async list(ownerId: string): Promise<{ settingsRevision: number; serverObservedAt: string; devices: DeviceView[] }> {
-    const [devices, settings] = await Promise.all([
-      this.db.query<Row>(`SELECT ${COLUMNS} FROM devices WHERE user_id = $1 ORDER BY revoked_at NULLS FIRST, last_seen_at DESC`, [ownerId]),
+  /** Active devices first, then most recently seen; one cursor page (Doc 17: 50 by default, at most 100). */
+  async list(
+    ownerId: string,
+    after: string[] | null = null,
+    limit = PAGE_MAX,
+  ): Promise<{ settingsRevision: number; serverObservedAt: string; devices: DeviceView[]; nextCursor: string | null }> {
+    const params: unknown[] = [ownerId, limit + 1];
+    let where = '';
+    if (after) {
+      if (!/^[01]$/.test(after[0]) || Number.isNaN(Date.parse(after[1]))) throw new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', { field: 'cursor', reason: 'malformed' });
+      params.push(Number(after[0]), after[1], after[2]);
+      // Revoked flag ascending, last seen descending, id ascending.
+      where = ` AND ((revoked_at IS NOT NULL)::int > $3 OR ((revoked_at IS NOT NULL)::int = $3 AND (date_trunc('milliseconds', last_seen_at) < $4::timestamptz
+                 OR (date_trunc('milliseconds', last_seen_at) = $4::timestamptz AND id::text > $5))))`;
+    }
+    const [rows, settings] = await Promise.all([
+      this.db.query<Row & { k_revoked: number; k_seen: Date }>(
+        `SELECT ${COLUMNS}, (revoked_at IS NOT NULL)::int AS k_revoked, date_trunc('milliseconds', last_seen_at) AS k_seen FROM devices
+          WHERE user_id = $1${where} ORDER BY k_revoked, k_seen DESC, id::text LIMIT $2`,
+        params,
+      ),
       this.db.query<{ revision: string }>('SELECT revision FROM account_preferences WHERE owner_id = $1', [ownerId]),
     ]);
-    return { settingsRevision: Number(settings[0]?.revision ?? 0), serverObservedAt: new Date().toISOString(), devices: devices.map(toView) };
+    const page = rows.slice(0, limit);
+    const last = page.at(-1);
+    return {
+      settingsRevision: Number(settings[0]?.revision ?? 0),
+      serverObservedAt: new Date().toISOString(),
+      devices: page.map(toView),
+      nextCursor: rows.length > limit && last ? encodeCursor([String(last.k_revoked), last.k_seen.toISOString(), last.id]) : null,
+    };
   }
 
   /**

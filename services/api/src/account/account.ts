@@ -89,7 +89,8 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
     );
     const [settings, devices, favorites, purchases, roles, reports, events] = await Promise.all([
       this.settings.get(userId),
-      this.devices.list(userId),
+      // The export holds every device, not one page.
+      this.devices.list(userId, null, 10_000),
       this.sync.favorites(userId),
       this.db.query<{ store: string; product_id: string; state: string; environment: string; purchased_at: Date | null; verified_at: Date | null; revoked_at: Date | null }>(
         'SELECT store, product_id, state, environment, purchased_at, verified_at, revoked_at FROM purchases WHERE user_id = $1 ORDER BY created_at',
@@ -355,8 +356,11 @@ export class MyAccountController {
     return this.account.export(req.actor!.userId, req.requestId);
   }
 
-  /** Doc 17 deletion: needs a sign-in from the last 5 minutes. 202, because the purge finishes afterwards. */
-  @Delete('account')
+  /**
+   * Doc 17 deletion: needs a sign-in from the last 5 minutes. 202, because the purge finishes afterwards.
+   * `DELETE /v1/me` is the Doc 17 path; `DELETE /v1/me/account` stays for clients already using it.
+   */
+  @Delete(['/', 'account'])
   @HttpCode(HttpStatus.ACCEPTED)
   async delete(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     requireRecentSignIn(req);

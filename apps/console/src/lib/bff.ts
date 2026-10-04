@@ -881,7 +881,7 @@ export function createBff(deps: BffDeps) {
 
     /** Server-side read of the account's devices for the settings page. Null means the user must sign in again. */
     async loadDevices(ctx: SessionContext): Promise<{ status: number; view?: DevicesView } | null> {
-      const res = await callApi(ctx, '/v1/me/devices', { method: 'GET' }, `web_${randomUUID()}`);
+      const res = await callApi(ctx, '/v1/me/devices?limit=100', { method: 'GET' }, `web_${randomUUID()}`);
       if (!res) return null;
       return res.ok ? { status: 200, view: (await res.json()) as DevicesView } : { status: res.status };
     },
@@ -956,7 +956,7 @@ export function createBff(deps: BffDeps) {
 
     /** Server-side read of the account's own diagnostic reports for /app/privacy. Null means sign in again. */
     async loadDiagnostics(ctx: SessionContext): Promise<{ status: number; view?: DiagnosticsView } | null> {
-      const res = await callApi(ctx, '/v1/me/diagnostics', { method: 'GET' }, `web_${randomUUID()}`);
+      const res = await callApi(ctx, '/v1/me/diagnostics?limit=100', { method: 'GET' }, `web_${randomUUID()}`);
       if (!res) return null;
       return res.ok ? { status: 200, view: (await res.json()) as DiagnosticsView } : { status: res.status };
     },
@@ -979,7 +979,7 @@ export function createBff(deps: BffDeps) {
       timed(req, '/bff/devices', async (requestId) => {
         const ctx = await sessionFromCookie(req.headers.get('cookie'));
         if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
-        const upstream = await callApi(ctx, '/v1/me/devices', { method: 'GET' }, requestId);
+        const upstream = await callApi(ctx, '/v1/me/devices?limit=100', { method: 'GET' }, requestId);
         if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
         return passthrough(upstream, requestId);
       }),
@@ -1032,10 +1032,10 @@ export function createBff(deps: BffDeps) {
         if (!DEVICE_ID.test(id)) return notFound(requestId);
         const ctx = await sessionFromCookie(req.headers.get('cookie'));
         if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
-        const upstream = await callApi(ctx, `/v1/me/exports/${id}`, { method: 'GET' }, requestId);
+        const upstream = await callApi(ctx, `/v1/me/exports/${id}/link`, { method: 'POST' }, requestId);
         if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
         if (!upstream.ok) return passthrough(upstream, requestId);
-        const path = ((await upstream.json()) as { download?: { path?: unknown } }).download?.path;
+        const path = ((await upstream.json()) as { path?: unknown }).path;
         if (typeof path !== 'string' || !EXPORT_LINK.test(path)) return notFound(requestId);
         const file = await fetchImpl(`${config.apiBaseUrl}${path}`, {
           headers: { accept: 'application/json', 'x-request-id': requestId },

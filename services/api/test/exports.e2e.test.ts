@@ -31,8 +31,13 @@ describe('account exports as jobs (Doc 17 POST /me/exports)', () => {
     expect(started.body).toMatchObject({ id: expect.any(String), status: 'pending', readyAt: null });
 
     await t.app.get(AccountExportsService).processQueue();
-    const ready = await http().get(`/v1/me/exports/${started.body.id}`).set(alice).expect(200);
-    expect(ready.body).toMatchObject({ status: 'ready', readyAt: expect.any(String), download: { path: expect.stringMatching(/^\/v1\/export-downloads\/[A-Za-z0-9_-]{43}$/) } });
+    // Reading the status changes nothing; the link is made by a POST.
+    expect((await http().get(`/v1/me/exports/${started.body.id}`).set(alice).expect(200)).body).toEqual({
+      id: started.body.id, status: 'ready', requestedAt: expect.any(String), readyAt: expect.any(String), expiresAt: expect.any(String),
+    });
+    const link = await http().post(`/v1/me/exports/${started.body.id}/link`).set(alice).expect(201);
+    const ready = { body: { download: link.body } };
+    expect(ready.body.download.path).toMatch(/^\/v1\/export-downloads\/[A-Za-z0-9_-]{43}$/);
     const linkLife = new Date(ready.body.download.expiresAt).getTime() - Date.now();
     expect(linkLife).toBeGreaterThan(14 * 60_000);
     expect(linkLife).toBeLessThanOrEqual(15 * 60_000);
@@ -42,8 +47,8 @@ describe('account exports as jobs (Doc 17 POST /me/exports)', () => {
     expect(file.headers['cache-control']).toBe('no-store');
     expect(file.body).toMatchObject({ format: 'tunedeck-account-export', account: { id: expect.any(String) } });
 
-    // A new read replaces the link; the old one stops working.
-    const next = await http().get(`/v1/me/exports/${started.body.id}`).set(alice).expect(200);
+    // A new link replaces the old one, which stops working.
+    const next = { body: { download: (await http().post(`/v1/me/exports/${started.body.id}/link`).set(alice).expect(201)).body } };
     expect(next.body.download.path).not.toBe(ready.body.download.path);
     await http().get(ready.body.download.path).expect(404);
     await http().get(next.body.download.path).expect(200);
@@ -61,9 +66,10 @@ describe('account exports as jobs (Doc 17 POST /me/exports)', () => {
     await http().get('/v1/me/exports/not-a-uuid').set(bob).expect(404);
     await http().get('/v1/export-downloads/short').expect(404);
 
-    const { body } = await http().get(`/v1/me/exports/${job.body.id}`).set(bob).expect(200);
+    await http().post(`/v1/me/exports/${job.body.id}/link`).set(await bearer('exp-mallory')).expect(404);
+    const { body: download } = await http().post(`/v1/me/exports/${job.body.id}/link`).set(bob).expect(201);
     await t.pool.query(`UPDATE account_exports SET link_expires_at = now() - interval '1 second' WHERE id = $1`, [job.body.id]);
-    await http().get(body.download.path).expect(404);
+    await http().get(download.path).expect(404);
 
     await t.pool.query(`UPDATE account_exports SET expires_at = now() - interval '1 second' WHERE id = $1`, [job.body.id]);
     await http().get(`/v1/me/exports/${job.body.id}`).set(bob).expect(404);
@@ -99,7 +105,7 @@ describe('account exports as jobs (Doc 17 POST /me/exports)', () => {
     expect(row).toMatchObject({ status: 'dead_letter', attempts: 5, last_error_code: 'INTERNAL_ERROR', dead_lettered_at: expect.any(Date) });
     const res = await http().get(`/v1/me/exports/${job.body.id}`).set(carol).expect(200);
     expect(res.body.status).toBe('failed');
-    expect(res.body.download).toBeUndefined();
+    expect((await http().post(`/v1/me/exports/${job.body.id}/link`).set(carol)).body).toMatchObject({ code: 'EXPORT_NOT_READY', details: { status: 'failed' } });
     // A new request starts over.
     const retry = await http().post('/v1/me/exports').set(carol).expect(202);
     expect(retry.body.id).not.toBe(job.body.id);

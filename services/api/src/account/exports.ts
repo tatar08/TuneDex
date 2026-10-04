@@ -44,8 +44,6 @@ export interface ExportView {
   requestedAt: string;
   readyAt: string | null;
   expiresAt: string;
-  /** Only when ready: a fresh link, prefixed with the API's base URL. Each read replaces the previous link. */
-  download?: { path: string; expiresAt: string };
 }
 
 interface Row {
@@ -106,7 +104,7 @@ export class AccountExportsService implements OnApplicationBootstrap, OnApplicat
     return view(row);
   }
 
-  /** The account's own export; anyone else's (or an expired one) is 404. A ready export gets a new 15-minute link. */
+  /** The account's own export; anyone else's (or an expired one) is 404. Reading it changes nothing. */
   async get(userId: string, id: string): Promise<ExportView> {
     if (!UUID.test(id)) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
     const [row] = await this.db.query<Row>(
@@ -114,14 +112,20 @@ export class AccountExportsService implements OnApplicationBootstrap, OnApplicat
       [id, userId],
     );
     if (!row) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
-    if (row.status !== 'ready') return view(row);
+    return view(row);
+  }
+
+  /** A new 15-minute download link for a ready export; the previous link stops working. 409 until it is ready. */
+  async link(userId: string, id: string): Promise<{ path: string; expiresAt: string }> {
+    const row = await this.get(userId, id);
+    if (row.status !== 'ready') throw new ApiError(HttpStatus.CONFLICT, 'EXPORT_NOT_READY', { status: row.status });
     const token = randomBytes(32).toString('base64url');
     const [link] = await this.db.query<{ link_expires_at: Date }>(
       `UPDATE account_exports SET link_hash = $2, link_expires_at = LEAST(now() + make_interval(mins => $3), expires_at)
        WHERE id = $1 RETURNING link_expires_at`,
       [id, hashLink(token), EXPORT_LINK_MINUTES],
     );
-    return { ...view(row), download: { path: `/v1/export-downloads/${token}`, expiresAt: link.link_expires_at.toISOString() } };
+    return { path: `/v1/export-downloads/${token}`, expiresAt: link.link_expires_at.toISOString() };
   }
 
   /** The export behind a live link. Unknown, replaced and expired links look the same. */
@@ -248,6 +252,14 @@ export class MyExportsController {
   async get(@Req() req: Request, @Param('id') id: string, @Res({ passthrough: true }) res: Response) {
     res.setHeader('Cache-Control', 'no-store');
     return this.exports.get(req.actor!.userId, id);
+  }
+
+  /** Mints the download link (a POST, since it replaces the previous link; GET never changes anything). */
+  @Post(':id/link')
+  @HttpCode(HttpStatus.CREATED)
+  async link(@Req() req: Request, @Param('id') id: string, @Res({ passthrough: true }) res: Response) {
+    res.setHeader('Cache-Control', 'no-store');
+    return this.exports.link(req.actor!.userId, id);
   }
 }
 
