@@ -3,10 +3,12 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { RATE_LIMITED, BLOCKER_LABELS, FIELD_LABELS, formatDateTime, REASON_LABELS, RIGHTS_BASIS_LABELS, STATUS_LABELS } from '@/lib/admin';
+import { RATE_LIMITED, BLOCKER_LABELS, FIELD_LABELS, formatDateTime, REASON_LABELS, STATUS_LABELS } from '@/lib/admin';
 import type { AdminStation, HealthCheck, StationDraft } from '@/lib/bff';
 import { useAdmin } from '../AdminShell';
 import { HealthPanel } from './HealthPanel';
+import { HistoryPanel } from './HistoryPanel';
+import { RightsPanel } from './RightsPanel';
 import { isMfaRequired, MfaLink, MFA_NEEDED } from '../MfaPrompt';
 
 type Form = Record<keyof StationDraft, string>;
@@ -19,9 +21,6 @@ const EMPTY: Form = {
   streamUrl: 'https://',
   codec: 'mp3',
   bitrateKbps: '',
-  rightsBasis: '',
-  rightsReference: '',
-  rightsExpiresAt: '',
 };
 
 const toForm = (d: StationDraft): Form => ({
@@ -32,9 +31,6 @@ const toForm = (d: StationDraft): Form => ({
   streamUrl: d.streamUrl,
   codec: d.codec,
   bitrateKbps: d.bitrateKbps === null ? '' : String(d.bitrateKbps),
-  rightsBasis: d.rightsBasis ?? '',
-  rightsReference: d.rightsReference ?? '',
-  rightsExpiresAt: d.rightsExpiresAt ?? '',
 });
 
 /** Turns form strings into the API's types; empty optional fields become null. */
@@ -48,14 +44,10 @@ function toDraft(f: Form): StationDraft {
     streamUrl: f.streamUrl.trim(),
     codec: f.codec as StationDraft['codec'],
     bitrateKbps: n === '' ? null : /^\d+$/.test(n) ? Number(n) : (n as unknown as number),
-    rightsBasis: f.rightsBasis || null,
-    rightsReference: f.rightsReference.trim() || null,
-    rightsExpiresAt: f.rightsExpiresAt || null,
   };
 }
 
-const display = (k: keyof StationDraft, v: unknown) =>
-  v === null || v === undefined || v === '' ? '—' : k === 'rightsBasis' ? RIGHTS_BASIS_LABELS[v as string] ?? String(v) : Array.isArray(v) ? v.join(', ') : String(v);
+const display = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : Array.isArray(v) ? v.join(', ') : String(v));
 
 type Problem = { kind: 'field'; field: string; reason: string } | { kind: 'conflict'; revision: number } | { kind: 'message'; text: string } | { kind: 'mfa' };
 
@@ -71,6 +63,8 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
   const [toggleReason, setToggleReason] = useState('');
   const [emergencyReason, setEmergencyReason] = useState('');
   const [emergencyOk, setEmergencyOk] = useState(false);
+  // Bumped after a rights change so the history reloads; the station view is re-read for its blockers.
+  const [rightsTick, setRightsTick] = useState(0);
   // Until hydration a click would fall back to a native GET submit and drop the typed values.
   const [ready, setReady] = useState(false);
   useEffect(() => setReady(true), []);
@@ -156,6 +150,19 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
     } else fail(r.res, r.body);
   }
 
+  /** Rights records are not part of the draft: re-read the station so its rights summary and blockers follow. */
+  async function rightsChanged() {
+    if (!station) return;
+    setRightsTick((n) => n + 1);
+    try {
+      const res = await fetch(`/bff/admin/stations/${station.id}`);
+      if (res.ok) setStation((await res.json()) as AdminStation);
+    } catch {
+      // The panel already reported the change; a reload shows the new blockers.
+    }
+    router.refresh();
+  }
+
   const fieldError = (k: string) =>
     problem?.kind === 'field' && problem.field === k ? REASON_LABELS[problem.reason] ?? problem.reason : null;
   const input = (k: keyof StationDraft, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => {
@@ -235,20 +242,7 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
             </label>
             {input('bitrateKbps', { inputMode: 'numeric' })}
           </div>
-          <h3>สิทธิ์</h3>
-          <label className={`fld${fieldError('rightsBasis') ? ' bad' : ''}`}>
-            <span>{FIELD_LABELS.rightsBasis}</span>
-            <select value={form.rightsBasis} onChange={set('rightsBasis')} disabled={!canEdit}>
-              <option value="">— ยังไม่ระบุ —</option>
-              {Object.entries(RIGHTS_BASIS_LABELS).map(([v, l]) => (
-                <option key={v} value={v}>
-                  {l}
-                </option>
-              ))}
-            </select>
-          </label>
-          {input('rightsReference', { placeholder: 'เช่น เลขสัญญา หรือเลขตั๋ว', maxLength: 200 })}
-          {input('rightsExpiresAt', { type: 'date' })}
+          {!station && <p className="dim">สร้างร่างก่อน แล้วเพิ่มหลักฐานสิทธิ์ในหน้าสถานี</p>}
           {canEdit && (
             <div className="ed-actions">
               <button type="submit" className="btn" disabled={!ready || busy || (!!station && !dirty)}>
@@ -271,7 +265,7 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
                     <div key={k}>
                       <dt>{FIELD_LABELS[k]}</dt>
                       <dd>
-                        <del>{display(k, station.published![k])}</del> <ins>{display(k, station.draft[k])}</ins>
+                        <del>{display(station.published![k])}</del> <ins>{display(station.draft[k])}</ins>
                       </dd>
                     </div>
                   ))}
@@ -320,7 +314,7 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
               ) : (
                 <>
                   <ul className="chk ok">
-                    <li>มีข้อมูลสิทธิ์ครบและยังไม่หมดอายุ</li>
+                    <li>มีหลักฐานสิทธิ์ที่ใช้งานอยู่และครอบคลุมประเทศ {station.draft.country}</li>
                     <li>คุณไม่ได้แก้ร่างนี้เอง</li>
                   </ul>
                   <label className="fld">
@@ -333,6 +327,8 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
                 </>
               )}
             </section>
+
+            <RightsPanel station={station} onChanged={rightsChanged} />
 
             {/* From props, not local state, so a refresh after "check now" shows the new result. */}
             <HealthPanel station={initial ?? station} history={history} />
@@ -352,6 +348,8 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
                 </button>
               </section>
             )}
+
+            <HistoryPanel stationId={station.id} refreshKey={`${station.revision}-${station.publishedRevision}-${station.disabledAt}-${rightsTick}`} />
           </aside>
         )}
       </div>

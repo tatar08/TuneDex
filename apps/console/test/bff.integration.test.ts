@@ -256,7 +256,16 @@ describe('favorites through the BFF and the real API', () => {
 describe('staff routes through the BFF', () => {
   const station = {
     name: 'BFF FM', country: 'TH', language: 'th', genres: [], streamUrl: 'https://stream.example.com/bff.mp3', codec: 'mp3',
-    rightsBasis: 'owner_permission', rightsReference: 'REF-1',
+  };
+  const record = { holder: 'BFF Media', basis: 'owner_permission', reference: 'REF-1', territories: ['TH'], evidenceRefs: ['rights/bff.pdf'] };
+  const rightsPost = (cookie: string, id: string, body: unknown, csrf?: string, recordId?: string) => {
+    const path = recordId ? `/bff/admin/stations/${id}/rights/${recordId}/revoke` : `/bff/admin/stations/${id}/rights`;
+    const req = new Request(`${BASE}${path}`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json', origin: BASE, ...(csrf ? { 'x-csrf-token': csrf } : {}) },
+      body: JSON.stringify(body),
+    });
+    return recordId ? bff.stationRightsRevoke(req, id, recordId) : bff.stationRights(req, id);
   };
   const post = (cookie: string, path: string, body: unknown, o: { csrf?: string; origin?: string; ifMatch?: string } = {}) => {
     const req = new Request(`${BASE}${path}`, {
@@ -280,6 +289,8 @@ describe('staff routes through the BFF', () => {
     const created = await post(editor, '/bff/admin/stations', station, { csrf: await csrfFor(editor) });
     expect(created.status).toBe(201);
     const { id } = await created.json();
+    expect((await rightsPost(editor, id, record)).status).toBe(403);
+    expect((await rightsPost(editor, id, record, await csrfFor(editor))).status).toBe(201);
 
     const admin = await signIn('bff-admin');
     const listed = await bff.stations(new Request(`${BASE}/bff/admin/stations`, { headers: { cookie: admin } }));
@@ -287,6 +298,35 @@ describe('staff routes through the BFF', () => {
     const published = await post(admin, `/bff/admin/stations/${id}/publish`, { reason: 'ok' }, { csrf: await csrfFor(admin), ifMatch: '"1"' });
     expect(published.status).toBe(200);
     expect((await published.json()).status).toBe('published');
+  });
+
+  it('manages rights records and reads the station history through the BFF', async () => {
+    const editor = await signIn('bff-editor');
+    const csrf = await csrfFor(editor);
+    const { id } = await (await post(editor, '/bff/admin/stations', { ...station, name: 'BFF Rights FM' }, { csrf })).json();
+    const added = await rightsPost(editor, id, record, csrf);
+    expect(added.status).toBe(201);
+    const rec = await added.json();
+    expect(rec).not.toHaveProperty('evidenceRefs');
+
+    const list = await bff.stationRights(new Request(`${BASE}/bff/admin/stations/${id}/rights`, { headers: { cookie: editor } }), id);
+    expect((await list.json()).records[0]).toMatchObject({ id: rec.id, evidenceRefs: ['rights/bff.pdf'] });
+
+    expect((await rightsPost(editor, id, { reason: 'owner withdrew permission' }, undefined, rec.id)).status).toBe(403);
+    const revoked = await rightsPost(editor, id, { reason: 'owner withdrew permission' }, csrf, rec.id);
+    expect((await revoked.json()).status).toBe('revoked');
+
+    const history = await bff.stationHistory(new Request(`${BASE}/bff/admin/stations/${id}/history?limit=2&evil=1`, { headers: { cookie: editor } }), id);
+    const body = await history.json();
+    expect(body.events.map((e: { action: string }) => e.action)).toEqual(['rights.revoke', 'rights.add']);
+    expect(body.nextCursor).toEqual(expect.any(String));
+    const next = await bff.stationHistory(new Request(`${BASE}/bff/admin/stations/${id}/history?cursor=${body.nextCursor}`, { headers: { cookie: editor } }), id);
+    expect((await next.json()).events.map((e: { action: string }) => e.action)).toEqual(['station.create']);
+
+    // Ids are checked before they reach an API path.
+    expect((await bff.stationHistory(new Request(`${BASE}/bff/admin/stations/x/history`, { headers: { cookie: editor } }), '../../me')).status).toBe(404);
+    expect((await rightsPost(editor, id, { reason: 'x' }, csrf, '../revoke')).status).toBe(404);
+    expect((await bff.stationRights(new Request(`${BASE}/bff/admin/stations/x/rights`, { headers: { cookie: editor } }), 'x')).status).toBe(404);
   });
 
   it('ends the web session when a staff role is granted or revoked after sign-in (Doc 17)', async () => {

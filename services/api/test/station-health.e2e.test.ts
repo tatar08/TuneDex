@@ -13,10 +13,8 @@ const station = {
   streamUrl: 'https://good.example.com/live.mp3',
   codec: 'mp3',
   bitrateKbps: 128,
-  rightsBasis: 'owner_permission',
-  rightsReference: 'CONTRACT-1',
-  rightsExpiresAt: null,
 };
+const rights = { holder: 'Health Media', basis: 'owner_permission', reference: 'CONTRACT-1', territories: ['TH'] };
 
 describe('stream health checks', () => {
   let db: Awaited<ReturnType<typeof createTestDatabase>>;
@@ -48,6 +46,7 @@ describe('stream health checks', () => {
 
   async function published(body: object = station): Promise<string> {
     const sid = (await http().post('/v1/admin/stations').set(as('editor')).send(body).expect(201)).body.id;
+    await http().post(`/v1/admin/stations/${sid}/rights`).set(as('editor')).send(rights).expect(201);
     await http().post(`/v1/admin/stations/${sid}/publish`).set(as('admin')).set('If-Match', '"1"').send({ reason: 'reviewed' }).expect(200);
     // Publishing resets health; back-date it so checks in this test count.
     await t.pool.query(`UPDATE radio_stations SET published_at = now() - interval '1 hour' WHERE id = $1`, [sid]);

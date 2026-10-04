@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countByHealth, healthLine, logApiParams, logHref, logSearchFrom } from '@/lib/admin';
+import { countByHealth, healthLine, logApiParams, logHref, logSearchFrom, rightsDaysLeft, rightsLine, rightsSoon, visibleInApps } from '@/lib/admin';
 import type { AdminStation } from '@/lib/bff';
 import { loadConfig } from '@/lib/config';
 import { openTransaction, safeReturnTo, sealTransaction } from '@/lib/cookies';
@@ -126,6 +126,31 @@ describe('stream health helpers', () => {
       failing: 0,
       suspect: 1,
     });
+  });
+});
+
+describe('station rights in lists', () => {
+  const now = Date.parse('2026-10-04T12:00:00Z');
+  const s = (rights: Partial<AdminStation['rights']>, published = true) =>
+    ({ published: published ? {} : null, disabledAt: null, rights: { state: 'current', expiresAt: null, reference: null, liveUntil: null, ...rights } }) as unknown as AdminStation;
+
+  it('reads the rights records summary, not draft fields', () => {
+    expect(rightsLine(s({}))).toBe('สิทธิ์ไม่มีวันหมดอายุ');
+    expect(rightsLine(s({ expiresAt: '2027-04-30' }))).toMatch(/^สิทธิ์ถึง /);
+    expect(rightsLine(s({ state: 'missing' }))).toBe('ยังไม่มีข้อมูลสิทธิ์');
+    expect(rightsLine(s({ state: 'territory' }))).toBe('สิทธิ์ไม่ครอบคลุมประเทศนี้');
+    expect(rightsSoon(s({ expiresAt: '2026-10-20' }), now)).toBe(true);
+    expect(rightsSoon(s({ expiresAt: '2027-10-20' }), now)).toBe(false);
+    expect(rightsSoon(s({ state: 'missing' }), now)).toBe(true);
+    expect(rightsDaysLeft(s({ expiresAt: '2026-10-14' }), now)).toBe(11);
+    expect(rightsDaysLeft(s({ state: 'not_yet_valid', expiresAt: '2027-01-01' }), now)).toBeNull();
+  });
+
+  it('counts a published station as visible only while its public rights window is open', () => {
+    expect(visibleInApps(s({}), now)).toBe(true);
+    expect(visibleInApps(s({ liveUntil: '2026-12-31T23:59:59.999Z' }), now)).toBe(true);
+    expect(visibleInApps(s({ liveUntil: '2026-10-04T11:00:00.000Z' }), now)).toBe(false);
+    expect(visibleInApps(s({}, false), now)).toBe(false);
   });
 });
 

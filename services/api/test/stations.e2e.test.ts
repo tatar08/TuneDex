@@ -11,9 +11,16 @@ const station = {
   streamUrl: 'https://stream.example.com/jazz.mp3',
   codec: 'mp3',
   bitrateKbps: 128,
-  rightsBasis: 'owner_permission',
-  rightsReference: 'CONTRACT-2026-014',
-  rightsExpiresAt: null,
+};
+
+const record = {
+  holder: 'Bangkok Jazz Co., Ltd.',
+  basis: 'owner_permission',
+  reference: 'CONTRACT-2026-014',
+  territories: ['TH'],
+  validFrom: '2026-01-01',
+  expiresAt: null,
+  evidenceRefs: ['rights/2026/contract-014.pdf'],
 };
 
 describe('station catalog', () => {
@@ -26,7 +33,16 @@ describe('station catalog', () => {
   const out: string[] = [];
   const staff = (...args: string[]) => runStaffCli(args, new Database(t.pool), (l) => out.push(l));
 
-  const create = (who: keyof typeof tokens, body: object = station) => http().post('/v1/admin/stations').set(as(who)).send(body);
+  const addRights = (sid: string, body: object = record, who: keyof typeof tokens = 'editor') =>
+    http().post(`/v1/admin/stations/${sid}/rights`).set(as(who)).send(body);
+  const revoke = (sid: string, rid: string, body: object = { reason: 'contract terminated by the owner' }, who: keyof typeof tokens = 'editor') =>
+    http().post(`/v1/admin/stations/${sid}/rights/${rid}/revoke`).set(as(who)).send(body);
+  /** Creates a draft and, unless `rights` is null, gives it a current rights record for TH. */
+  const create = async (who: keyof typeof tokens, body: object = station, rights: object | null = record) => {
+    const res = await http().post('/v1/admin/stations').set(as(who)).send(body);
+    if (res.status === 201 && rights) await addRights(res.body.id, rights).expect(201);
+    return res;
+  };
   const patch = (who: keyof typeof tokens, sid: string, rev: number, body: object) =>
     http().patch(`/v1/admin/stations/${sid}`).set(as(who)).set('If-Match', `"${rev}"`).send(body);
   const publish = (who: keyof typeof tokens, sid: string, rev: number, reason = 'reviewed stream and rights') =>
@@ -179,18 +195,43 @@ describe('station catalog', () => {
       expect((await http().post(`/v1/admin/stations/${sid}/publish`).set(as('admin')).set('If-Match', '"1"').send({})).status).toBe(400);
     });
 
-    it('blocks publishing without a complete, current rights record', async () => {
-      const noRights = await create('editor', { ...station, rightsBasis: null, rightsReference: null });
-      expect((await publish('admin', noRights.body.id, 1)).body.details.reasons).toEqual(['rights_basis_missing']);
-      const noRef = await create('editor', { ...station, rightsReference: null });
-      expect((await publish('admin', noRef.body.id, 1)).body.details.reasons).toEqual(['rights_reference_missing']);
-      const expired = await create('editor', { ...station, rightsExpiresAt: '2020-01-01' });
-      expect((await publish('admin', expired.body.id, 1)).body.details.reasons).toEqual(['rights_expired']);
+    it('blocks publishing without an active, current rights record covering the station country', async () => {
+      const reasons = async (rights: object | null, body: object = station) => {
+        const sid = (await create('editor', body, rights)).body.id;
+        return (await publish('admin', sid, 1)).body.details?.reasons;
+      };
+      expect(await reasons(null)).toEqual(['rights_missing']);
+      expect(await reasons({ ...record, territories: ['LA', 'MM'] })).toEqual(['rights_territory']);
+      expect(await reasons({ ...record, validFrom: '2020-01-01', expiresAt: '2020-12-31' })).toEqual(['rights_expired']);
+      expect(await reasons({ ...record, validFrom: '2099-01-01' })).toEqual(['rights_not_yet_valid']);
+      expect(await reasons({ ...record, territories: ['LA', 'TH'] }, { ...station, country: 'LA' })).toBeUndefined();
+
+      // A revoked record no longer counts; the view shows the same blocker before anyone tries to publish.
+      const sid = (await create('editor')).body.id;
+      const [rec] = (await http().get(`/v1/admin/stations/${sid}/rights`).set(as('editor'))).body.records;
+      await revoke(sid, rec.id).expect(200);
+      const view = (await http().get(`/v1/admin/stations/${sid}`).set(as('admin'))).body;
+      expect(view.publishBlockers).toEqual(['rights_missing']);
+      expect(view.rights).toMatchObject({ state: 'missing' });
+
+      // Changing the draft country away from the record's territory blocks the next publish.
+      const moved = (await create('editor')).body.id;
+      await patch('editor', moved, 1, { country: 'LA' }).expect(200);
+      expect((await publish('admin', moved, 2)).body.details.reasons).toEqual(['rights_territory']);
+    });
+
+    it('rejects the old inline rights fields on a station', async () => {
+      for (const field of ['rightsBasis', 'rightsReference', 'rightsExpiresAt']) {
+        const res = await create('editor', { ...station, [field]: null });
+        expect(res.status).toBe(400);
+        expect(res.body.details).toMatchObject({ field, reason: 'unknown_field' });
+      }
     });
 
     it('drops a station from the public catalog once its rights expire, without anyone acting', async () => {
-      const sid = (await create('editor', { ...station, name: 'Expiring FM', rightsExpiresAt: '2099-12-31' })).body.id;
+      const sid = (await create('editor', { ...station, name: 'Expiring FM' }, { ...record, expiresAt: '2099-12-31' })).body.id;
       await publish('admin', sid, 1).expect(200);
+      expect((await t.pool.query('SELECT rights_expires_at FROM radio_stations WHERE id = $1', [sid])).rows[0].rights_expires_at.toISOString()).toBe('2099-12-31T23:59:59.999Z');
       expect((await catalog('?limit=100')).body.stations.some((s: { id: string }) => s.id === sid)).toBe(true);
       // Simulate the date passing.
       await t.pool.query(`UPDATE radio_stations SET rights_expires_at = now() - interval '1 second' WHERE id = $1`, [sid]);
@@ -203,6 +244,131 @@ describe('station catalog', () => {
       const stale = await patch('admin', sid, 1, { name: 'B' });
       expect(stale.status).toBe(412);
       expect(stale.body.details.currentRevision).toBe(2);
+    });
+  });
+
+  describe('rights records', () => {
+    const inCatalog = async (sid: string) => (await catalog('?limit=100')).body.stations.some((s: { id: string }) => s.id === sid);
+
+    it('lets editors and admins read and change rights, nobody else', async () => {
+      const sid = (await create('editor')).body.id;
+      for (const res of [
+        await http().get(`/v1/admin/stations/${sid}/rights`).set(as('user')),
+        await addRights(sid, record, 'user'),
+        await http().get(`/v1/admin/stations/${sid}/history`).set(as('user')),
+      ]) {
+        expect(res.status).toBe(403);
+      }
+      expect((await http().get(`/v1/admin/stations/${sid}/rights`)).status).toBe(401);
+      expect((await addRights(sid, record, 'admin')).status).toBe(201);
+      expect((await http().get('/v1/admin/stations/0b9a4f8e-6c1d-4e2a-9f3b-1a2b3c4d5e6f/rights').set(as('editor'))).status).toBe(404);
+      expect((await addRights('0b9a4f8e-6c1d-4e2a-9f3b-1a2b3c4d5e6f')).status).toBe(404);
+    });
+
+    it('keeps evidence keys in the staff list only', async () => {
+      const sid = (await create('editor', station, null)).body.id;
+      const added = await addRights(sid, { ...record, evidenceRefs: ['rights/2026/contract-014.pdf', 'mail/thread-77'] });
+      expect(added.status).toBe(201);
+      expect(added.headers['cache-control']).toBe('no-store');
+      expect(added.body).toMatchObject({ holder: record.holder, territories: ['TH'], status: 'active', effectiveStatus: 'active', evidenceCount: 2 });
+      expect(added.body).not.toHaveProperty('evidenceRefs');
+      expect(added.body.createdBy).toBe('staff-editor');
+
+      const list = (await http().get(`/v1/admin/stations/${sid}/rights`).set(as('editor'))).body.records;
+      expect(list).toHaveLength(1);
+      expect(list[0].evidenceRefs).toEqual(['rights/2026/contract-014.pdf', 'mail/thread-77']);
+
+      const [audit] = (await t.pool.query(`SELECT changes FROM audit_events WHERE target_id = $1 AND action = 'rights.add'`, [sid])).rows;
+      expect(audit.changes).toMatchObject({ recordId: added.body.id, basis: 'owner_permission', territories: ['TH'], evidenceCount: 2 });
+      expect(JSON.stringify(audit.changes)).not.toMatch(/contract-014\.pdf|thread-77|Bangkok Jazz Co/);
+
+      await publish('admin', sid, 1).expect(200);
+      const raw = JSON.stringify((await catalog('?limit=100')).body);
+      expect(raw).not.toMatch(/contract-014|thread-77|Bangkok Jazz Co|evidence/);
+    });
+
+    it('takes a station out of the catalog as soon as its only record is revoked, and back when rights are added', async () => {
+      const sid = (await create('editor', { ...station, name: 'Revoked FM' })).body.id;
+      await publish('admin', sid, 1).expect(200);
+      expect(await inCatalog(sid)).toBe(true);
+      const [rec] = (await http().get(`/v1/admin/stations/${sid}/rights`).set(as('editor'))).body.records;
+
+      expect((await revoke(sid, rec.id, {})).status).toBe(400);
+      const revoked = await revoke(sid, rec.id);
+      expect(revoked.status).toBe(200);
+      expect(revoked.body).toMatchObject({ status: 'revoked', effectiveStatus: 'revoked', revokeReason: 'contract terminated by the owner', revokedBy: 'staff-editor' });
+      expect(await inCatalog(sid)).toBe(false);
+      expect((await revoke(sid, rec.id)).body.code).toBe('RIGHTS_ALREADY_REVOKED');
+
+      const [audit] = (await t.pool.query(`SELECT reason, changes FROM audit_events WHERE target_id = $1 AND action = 'rights.revoke'`, [sid])).rows;
+      expect(audit).toMatchObject({ reason: 'contract terminated by the owner', changes: { recordId: rec.id, hidden: true } });
+
+      // A new record covering the country brings the published snapshot back without a new publish.
+      await addRights(sid, { ...record, reference: 'CONTRACT-2026-099', expiresAt: '2099-06-30' }).expect(201);
+      expect(await inCatalog(sid)).toBe(true);
+      // Records for other territories, or not yet valid, do not.
+      const second = (await http().get(`/v1/admin/stations/${sid}/rights`).set(as('editor'))).body.records[0];
+      await addRights(sid, { ...record, territories: ['LA'] }).expect(201);
+      await addRights(sid, { ...record, validFrom: '2099-01-01' }).expect(201);
+      await revoke(sid, second.id).expect(200);
+      expect(await inCatalog(sid)).toBe(false);
+      const view = (await http().get(`/v1/admin/stations/${sid}`).set(as('editor'))).body;
+      expect(view.rights).toMatchObject({ state: 'not_yet_valid', expiresAt: null });
+    });
+
+    it('revokes only a record of the same station', async () => {
+      const a = (await create('editor')).body.id;
+      const b = (await create('editor')).body.id;
+      const [rec] = (await http().get(`/v1/admin/stations/${a}/rights`).set(as('editor'))).body.records;
+      expect((await revoke(b, rec.id)).status).toBe(404);
+      expect((await revoke(a, 'not-a-uuid')).body.details).toMatchObject({ field: 'recordId', reason: 'must_be_uuid' });
+    });
+
+    it.each([
+      ['missing holder', { holder: undefined }, 'holder', 'required'],
+      ['basis', { basis: 'trust_me' }, 'basis', 'value_not_allowed'],
+      ['empty territories', { territories: [] }, 'territories', 'length'],
+      ['lower-case territory', { territories: ['th'] }, 'territories', 'iso_3166_alpha2'],
+      ['date format', { validFrom: '01/01/2026' }, 'validFrom', 'date_yyyy_mm_dd'],
+      ['impossible date', { expiresAt: '2026-02-30' }, 'expiresAt', 'date_yyyy_mm_dd'],
+      ['expiry before start', { validFrom: '2026-06-01', expiresAt: '2026-05-31' }, 'expiresAt', 'before_valid_from'],
+      ['evidence url', { evidenceRefs: ['https://files.example.com/contract.pdf'] }, 'evidenceRefs', 'opaque_key'],
+      ['evidence traversal', { evidenceRefs: ['rights/../secrets'] }, 'evidenceRefs', 'opaque_key'],
+      ['too much evidence', { evidenceRefs: Array.from({ length: 11 }, (_, i) => `k${i}`) }, 'evidenceRefs', 'max_10'],
+      ['unknown field', { status: 'active' }, 'status', 'unknown_field'],
+    ])('rejects a record with %s', async (_label, override, field, reason) => {
+      const sid = (await create('editor', station, null)).body.id;
+      const res = await addRights(sid, JSON.parse(JSON.stringify({ ...record, ...override })));
+      expect(res.status).toBe(400);
+      expect(res.body.details).toMatchObject({ field, reason });
+    });
+  });
+
+  describe('history', () => {
+    it('lists station and rights changes newest first, in cursor pages', async () => {
+      const sid = (await create('editor', { ...station, name: 'History FM' })).body.id;
+      await patch('editor', sid, 1, { bitrateKbps: 64 }).expect(200);
+      await publish('admin', sid, 2, 'checked the contract').expect(200);
+      const [rec] = (await http().get(`/v1/admin/stations/${sid}/rights`).set(as('editor'))).body.records;
+      await revoke(sid, rec.id).expect(200);
+
+      const all = await http().get(`/v1/admin/stations/${sid}/history`).set(as('editor'));
+      expect(all.status).toBe(200);
+      expect(all.headers['cache-control']).toBe('no-store');
+      expect(all.body.nextCursor).toBeNull();
+      expect(all.body.events.map((e: { action: string }) => e.action)).toEqual(['rights.revoke', 'station.publish', 'station.update', 'rights.add', 'station.create']);
+      expect(all.body.events[1]).toMatchObject({ actorSubject: 'staff-admin', reason: 'checked the contract', revision: 2 });
+      expect(all.body.events[0]).toMatchObject({ actorSubject: 'staff-editor', reason: 'contract terminated by the owner', revision: null });
+      expect(JSON.stringify(all.body)).not.toContain('contract-014.pdf');
+
+      const first = (await http().get(`/v1/admin/stations/${sid}/history?limit=2`).set(as('admin'))).body;
+      expect(first.events.map((e: { action: string }) => e.action)).toEqual(['rights.revoke', 'station.publish']);
+      const second = (await http().get(`/v1/admin/stations/${sid}/history?limit=2&cursor=${first.nextCursor}`).set(as('admin'))).body;
+      expect(second.events.map((e: { action: string }) => e.action)).toEqual(['station.update', 'rights.add']);
+
+      expect((await http().get(`/v1/admin/stations/${sid}/history?limit=101`).set(as('admin'))).status).toBe(400);
+      expect((await http().get(`/v1/admin/stations/${sid}/history?cursor=bad!`).set(as('admin'))).status).toBe(400);
+      expect((await http().get('/v1/admin/stations/0b9a4f8e-6c1d-4e2a-9f3b-1a2b3c4d5e6f/history').set(as('admin'))).status).toBe(404);
     });
   });
 
@@ -234,8 +400,6 @@ describe('station catalog', () => {
       ['codec', { codec: 'flac' }, 'codec', 'value_not_allowed'],
       ['genres', { genres: ['a b'] }, 'genres', 'slug'],
       ['bitrate', { bitrateKbps: 1000 }, 'bitrateKbps', 'out_of_range'],
-      ['rights basis', { rightsBasis: 'trust_me' }, 'rightsBasis', 'value_not_allowed'],
-      ['expiry date', { rightsExpiresAt: '31/12/2026' }, 'rightsExpiresAt', 'date_yyyy_mm_dd'],
       ['unknown field', { createdBy: 'someone' }, 'createdBy', 'unknown_field'],
     ])('rejects %s', async (_label, override, field, reason) => {
       const res = await create('editor', { ...station, ...override });
@@ -285,9 +449,9 @@ describe('station catalog', () => {
       const rows = (
         await t.pool.query(`SELECT actor, action, reason, changes FROM audit_events WHERE target_id = $1 ORDER BY id`, [sid])
       ).rows;
-      expect(rows.map((r) => r.action)).toEqual(['station.create', 'station.publish']);
+      expect(rows.map((r) => r.action)).toEqual(['station.create', 'rights.add', 'station.publish']);
       expect(rows[0].actor).toMatch(/^user:[0-9a-f-]{36}$/);
-      expect(rows[1]).toMatchObject({ reason: 'checked contract CONTRACT-2026-014', changes: { revision: 1, previousPublishedRevision: null } });
+      expect(rows[2]).toMatchObject({ reason: 'checked contract CONTRACT-2026-014', changes: { revision: 1, previousPublishedRevision: null } });
 
       const roles = (await t.pool.query(`SELECT actor, action FROM audit_events WHERE action LIKE 'staff_role.%'`)).rows;
       expect(roles).toContainEqual({ actor: 'operator:tar', action: 'staff_role.revoke' });

@@ -187,7 +187,7 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/AdminStation' } } }
         '403': { description: ROLE_REQUIRED, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { $ref: '#/components/responses/Error' }
-        '409': { description: 'PUBLISH_BLOCKED, details.reasons from own_change, already_published, rights_basis_missing, rights_reference_missing, rights_expired', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'PUBLISH_BLOCKED, details.reasons from own_change, already_published, rights_missing, rights_territory, rights_not_yet_valid, rights_expired', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '412': { $ref: '#/components/responses/Error' }
         '428': { $ref: '#/components/responses/Error' }
   /v1/admin/stations/{stationId}/disable:
@@ -209,6 +209,64 @@ paths:
       responses:
         '200': { description: Enabled, content: { application/json: { schema: { $ref: '#/components/schemas/AdminStation' } } } }
         '403': { description: ROLE_REQUIRED, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/admin/stations/{stationId}/rights:
+    parameters:
+      - { $ref: '#/components/parameters/StationId' }
+    get:
+      summary: The station's rights records, newest first, with private evidence keys (catalog_editor, admin)
+      responses:
+        '200': { description: Records, content: { application/json: { schema: { type: object, required: [records], properties: { records: { type: array, items: { $ref: '#/components/schemas/RightsRecord' } } } } } } }
+        '404': { $ref: '#/components/responses/Error' }
+    post:
+      summary: Add a rights record; the publish gate and the public catalog follow it at once (catalog_editor, admin). Audited as rights.add
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/NewRightsRecord' } } } }
+      responses:
+        '201': { description: Added, without evidenceRefs, content: { application/json: { schema: { $ref: '#/components/schemas/RightsRecord' } } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/admin/stations/{stationId}/rights/{recordId}/revoke:
+    parameters:
+      - { $ref: '#/components/parameters/StationId' }
+      - { name: recordId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Revoke a rights record with a reason (catalog_editor, admin). Without another covering record the station leaves the public catalog at once. Audited as rights.revoke
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reason' } } } }
+      responses:
+        '200': { description: Revoked, content: { application/json: { schema: { $ref: '#/components/schemas/RightsRecord' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { description: RIGHTS_ALREADY_REVOKED, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/admin/stations/{stationId}/history:
+    parameters:
+      - { $ref: '#/components/parameters/StationId' }
+      - { name: cursor, in: query, schema: { type: string } }
+      - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+    get:
+      summary: Version history from the audit trail (station.* and rights.*), newest first (catalog_editor, admin)
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events, nextCursor]
+                properties:
+                  nextCursor: { type: string, nullable: true }
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, occurredAt, action, actor, actorSubject, reason, revision, changes]
+                      properties:
+                        id: { type: string }
+                        occurredAt: { type: string, format: date-time }
+                        action: { type: string }
+                        actor: { type: string }
+                        actorSubject: { type: string, nullable: true }
+                        reason: { type: string, nullable: true }
+                        revision: { type: integer, nullable: true }
+                        changes: { type: object }
         '404': { $ref: '#/components/responses/Error' }
 security:
   - bearer: []
@@ -294,9 +352,6 @@ components:
         streamUrl: { type: string, format: uri, maxLength: 2048, description: 'https only, port 443, public host name; never fetched by the API' }
         codec: { type: string, enum: [mp3, aac, hls] }
         bitrateKbps: { type: integer, minimum: 8, maximum: 512, nullable: true }
-        rightsBasis: { type: string, enum: [owner_permission, broadcaster_terms, licensed_aggregator, owned_demo], nullable: true }
-        rightsReference: { type: string, maxLength: 200, nullable: true, description: Where the evidence is kept, not the evidence }
-        rightsExpiresAt: { type: string, format: date, nullable: true }
     StationPatch:
       type: object
       additionalProperties: false
@@ -321,6 +376,48 @@ components:
         disabledAt: { type: string, format: date-time, nullable: true }
         updatedAt: { type: string, format: date-time }
         publishBlockers: { type: array, items: { type: string }, description: Why the caller could not publish now; empty when they can }
+        rights:
+          type: object
+          required: [state, expiresAt, reference, liveUntil]
+          properties:
+            state: { type: string, enum: [current, missing, territory, not_yet_valid, expired], description: "The draft country's rights from the station's records" }
+            expiresAt: { type: string, format: date, nullable: true }
+            reference: { type: string, nullable: true }
+            liveUntil: { type: string, format: date-time, nullable: true, description: Until when the public catalog may serve the published station; null means no end }
+    NewRightsRecord:
+      type: object
+      additionalProperties: false
+      required: [holder, basis, reference, territories]
+      properties:
+        holder: { type: string, minLength: 1, maxLength: 200 }
+        basis: { type: string, enum: [owner_permission, broadcaster_terms, licensed_aggregator, owned_demo] }
+        reference: { type: string, minLength: 1, maxLength: 200, description: Where the evidence is kept, not the evidence }
+        territories: { type: array, minItems: 1, maxItems: 250, items: { type: string, pattern: '^[A-Z]{2}$' } }
+        validFrom: { type: string, format: date, description: Defaults to today (UTC) }
+        expiresAt: { type: string, format: date, nullable: true, description: Valid through this whole day (UTC) }
+        evidenceRefs: { type: array, maxItems: 10, items: { type: string, maxLength: 200 }, description: Opaque private storage keys, never URLs }
+    RightsRecord:
+      type: object
+      required: [id, holder, basis, reference, territories, validFrom, expiresAt, status, effectiveStatus, evidenceCount, createdBy, createdAt, updatedBy, updatedAt, revokedBy, revokedAt, revokeReason]
+      properties:
+        id: { type: string, format: uuid }
+        holder: { type: string }
+        basis: { type: string }
+        reference: { type: string }
+        territories: { type: array, items: { type: string } }
+        validFrom: { type: string, format: date }
+        expiresAt: { type: string, format: date, nullable: true }
+        status: { type: string, enum: [active, revoked] }
+        effectiveStatus: { type: string, enum: [active, scheduled, expired, revoked] }
+        evidenceCount: { type: integer }
+        evidenceRefs: { type: array, items: { type: string }, description: Only in GET .../rights }
+        createdBy: { type: string, nullable: true, description: OIDC subject; null for records back-filled by migration 024 }
+        createdAt: { type: string, format: date-time }
+        updatedBy: { type: string, nullable: true }
+        updatedAt: { type: string, format: date-time }
+        revokedBy: { type: string, nullable: true }
+        revokedAt: { type: string, format: date-time, nullable: true }
+        revokeReason: { type: string, nullable: true }
     PublicStation:
       type: object
       required: [id, revision, name, country, language, genres, streamUrl, codec, bitrateKbps]

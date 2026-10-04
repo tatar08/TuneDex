@@ -36,8 +36,6 @@ test('an editor drafts a station and a different admin publishes it', async ({ b
   await editor.getByLabel('ชื่อสถานี').fill('Bangkok Jazz 24');
   await editor.getByLabel('แนวเพลง').fill('jazz');
   await editor.getByLabel('ลิงก์สตรีม').fill('https://10.0.0.1/live.mp3');
-  await editor.getByLabel('ที่มาของสิทธิ์').selectOption('owner_permission');
-  await editor.getByLabel('เลขอ้างอิงหลักฐาน').fill('CONTRACT-2026-014');
   await editor.getByRole('button', { name: 'สร้างร่าง' }).click();
   // The API's URL rule shows up next to the field, in Thai.
   await expect(editor.locator('.adm-alert')).toContainText('ใช้ชื่อโดเมน ห้ามใช้เลข IP');
@@ -45,6 +43,18 @@ test('an editor drafts a station and a different admin publishes it', async ({ b
   await editor.getByRole('button', { name: 'สร้างร่าง' }).click();
   await expect(editor).toHaveURL(/\/admin\/stations\/[0-9a-f-]{36}$/);
   await expect(editor.getByText('ร่าง revision 1')).toBeVisible();
+  // Rights are records on the station page now: none yet blocks publishing; the editor adds one.
+  await expect(editor.getByText('ยังไม่มีหลักฐานสิทธิ์ที่ใช้งานอยู่')).toBeVisible();
+  await editor.getByText('เพิ่มหลักฐานสิทธิ์', { exact: true }).click();
+  const addRights = editor.getByRole('form', { name: 'เพิ่มหลักฐานสิทธิ์' });
+  await addRights.getByLabel('เจ้าของสิทธิ์').fill('Bangkok Jazz Co., Ltd.');
+  await addRights.getByLabel('ที่มาของสิทธิ์').selectOption('owner_permission');
+  await addRights.getByLabel('เลขอ้างอิงหลักฐาน').fill('CONTRACT-2026-014');
+  await addRights.getByLabel(/รหัสไฟล์หลักฐาน/).fill('rights/2026/contract-014.pdf');
+  await addRights.getByRole('button', { name: 'เพิ่มหลักฐาน' }).click();
+  await expect(editor.getByText('เพิ่มหลักฐานสิทธิ์แล้ว มีผลทันที')).toBeVisible();
+  await expect(editor.getByText('ยังไม่มีหลักฐานสิทธิ์ที่ใช้งานอยู่')).toHaveCount(0);
+  await expect(editor.getByRole('region', { name: 'ประวัติเวอร์ชัน' })).toContainText('เพิ่มหลักฐานสิทธิ์สถานี');
   await expect(editor.getByText('ต้องเป็นแอดมินจึงจะเผยแพร่ได้')).toBeVisible();
   await expect(editor.getByText('คุณแก้ร่างนี้เอง')).toBeVisible();
   const stationUrl = editor.url();
@@ -98,10 +108,13 @@ async function seed() {
     const s = await call('e2e-editor', '/v1/admin/stations', 'POST', {
       name, language, country, genres: [genre], codec: 'aac', bitrateKbps: 96,
       streamUrl: `https://stream.example.com/${genre}.aac`,
-      rightsBasis: state === 'draft' && !expires ? null : 'broadcaster_terms',
-      rightsReference: state === 'draft' && !expires ? null : `REF-${genre.toUpperCase()}`,
-      rightsExpiresAt: expires,
     });
+    // Rights are records now; the draft without an expiry date stays without one.
+    if (state !== 'draft' || expires) {
+      await call('e2e-editor', `/v1/admin/stations/${s.id}/rights`, 'POST', {
+        holder: `${name} owner`, basis: 'broadcaster_terms', reference: `REF-${genre.toUpperCase()}`, territories: [country], validFrom: '2026-01-01', expiresAt: expires,
+      });
+    }
     if (state === 'draft') continue;
     await call('e2e-admin', `/v1/admin/stations/${s.id}/publish`, 'POST', { reason: 'seed' }, 1);
     if (state === 'disable') await call('e2e-admin', `/v1/admin/stations/${s.id}/disable`, 'POST', { reason: 'seed' });
