@@ -109,4 +109,15 @@ describe('Idempotency-Key on mutations (Doc 17)', () => {
     expect(rows).toHaveLength(0);
   });
 
+
+  it('requires a key on POST /v1/me/exports and DELETE /v1/me (Doc 17)', async () => {
+    const auth = { Authorization: `Bearer ${await id.token('idem-required', { authTime: Math.floor(Date.now() / 1000) })}` };
+    for (const call of [() => http().post('/v1/me/exports'), () => http().delete('/v1/me')]) {
+      const res = await call().set(auth);
+      expect(res.status).toBe(428);
+      expect(res.body).toMatchObject({ code: 'IDEMPOTENCY_KEY_REQUIRED', details: { header: 'Idempotency-Key' } });
+    }
+    // The older deletion path keeps working without one, for app builds made before the key.
+    await http().get('/v1/me/settings').set(auth).expect(200);
+  });
 });

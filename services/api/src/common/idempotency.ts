@@ -8,6 +8,11 @@ import { ApiError, DependencyUnavailableError } from './api-error';
 import { StructuredLogger } from './logger';
 
 const MUTATIONS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+/**
+ * Doc 17: these must carry an Idempotency-Key (428 otherwise). `DELETE /v1/me/account` stays optional for app
+ * builds made before the key existed; `DELETE /v1/me` is the Doc 17 path and new, so it requires one.
+ */
+const REQUIRED = new Set(['POST /v1/me/exports', 'DELETE /v1/me']);
 const KEY_PATTERN = /^[A-Za-z0-9_.:-]{8,128}$/;
 /** Doc 17: at least 24 hours. */
 export const IDEMPOTENCY_TTL_HOURS = 24;
@@ -54,6 +59,9 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const req = http.getRequest<Request>();
     const res = http.getResponse<Response>();
     const header = req.header('idempotency-key');
+    if (header === undefined && req.actor && REQUIRED.has(`${req.method} ${req.path.replace(/\/$/, '')}`)) {
+      throw new ApiError(HttpStatus.PRECONDITION_REQUIRED, 'IDEMPOTENCY_KEY_REQUIRED', { header: 'Idempotency-Key' });
+    }
     if (header === undefined || !req.actor || !MUTATIONS.has(req.method)) return next.handle();
     if (!KEY_PATTERN.test(header)) throw new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', { field: 'Idempotency-Key' });
 

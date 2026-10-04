@@ -6,6 +6,7 @@ export type ErrorCode =
   | 'VALIDATION_FAILED'
   | 'NOT_FOUND'
   | 'EXPORT_NOT_READY'
+  | 'IDEMPOTENCY_KEY_REQUIRED'
   | 'PRECONDITION_REQUIRED'
   | 'REVISION_MISMATCH'
   | 'PAYLOAD_TOO_LARGE'
@@ -37,6 +38,7 @@ export const MESSAGE_KEYS: Record<ErrorCode, string> = {
   VALIDATION_FAILED: 'errors.request.invalid',
   NOT_FOUND: 'errors.request.notFound',
   EXPORT_NOT_READY: 'errors.export.notReady',
+  IDEMPOTENCY_KEY_REQUIRED: 'errors.request.idempotencyKeyRequired',
   PRECONDITION_REQUIRED: 'errors.request.ifMatchRequired',
   REVISION_MISMATCH: 'errors.settings.revisionMismatch',
   PAYLOAD_TOO_LARGE: 'errors.request.tooLarge',

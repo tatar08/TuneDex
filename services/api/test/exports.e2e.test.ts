@@ -22,12 +22,12 @@ describe('account exports as jobs (Doc 17 POST /me/exports)', () => {
   });
 
   it('needs a recent sign-in, builds the export, and hands out a 15-minute link that works without signing in', async () => {
-    const stale = await http().post('/v1/me/exports').set(await bearer('exp-alice', now() - 301));
+    const stale = await http().post('/v1/me/exports').set('Idempotency-Key', crypto.randomUUID()).set(await bearer('exp-alice', now() - 301));
     expect(stale.status).toBe(401);
     expect(stale.body.code).toBe('REAUTH_REQUIRED');
 
     const alice = await bearer('exp-alice', now());
-    const started = await http().post('/v1/me/exports').set(alice).expect(202);
+    const started = await http().post('/v1/me/exports').set('Idempotency-Key', crypto.randomUUID()).set(alice).expect(202);
     expect(started.body).toMatchObject({ id: expect.any(String), status: 'pending', readyAt: null });
 
     await t.app.get(AccountExportsService).processQueue();
@@ -59,7 +59,7 @@ describe('account exports as jobs (Doc 17 POST /me/exports)', () => {
 
   it('keeps exports private, and removes expired links and exports', async () => {
     const bob = await bearer('exp-bob', now());
-    const job = await http().post('/v1/me/exports').set(bob).expect(202);
+    const job = await http().post('/v1/me/exports').set('Idempotency-Key', crypto.randomUUID()).set(bob).expect(202);
     await t.app.get(AccountExportsService).processQueue();
     // Another account cannot see it, and malformed ids look the same.
     await http().get(`/v1/me/exports/${job.body.id}`).set(await bearer('exp-mallory')).expect(404);
@@ -83,7 +83,7 @@ describe('account exports as jobs (Doc 17 POST /me/exports)', () => {
     const spy = jest.spyOn(t.app.get(AccountService), 'export').mockRejectedValue(new Error('boom'));
     let job: request.Response;
     try {
-      job = await http().post('/v1/me/exports').set(carol).expect(202);
+      job = await http().post('/v1/me/exports').set('Idempotency-Key', crypto.randomUUID()).set(carol).expect(202);
       await service.processQueue();
       // Not due again until the backoff ends: 1, 5, 15, then 60 minutes.
       const waits: number[] = [];
@@ -107,7 +107,7 @@ describe('account exports as jobs (Doc 17 POST /me/exports)', () => {
     expect(res.body.status).toBe('failed');
     expect((await http().post(`/v1/me/exports/${job.body.id}/link`).set(carol)).body).toMatchObject({ code: 'EXPORT_NOT_READY', details: { status: 'failed' } });
     // A new request starts over.
-    const retry = await http().post('/v1/me/exports').set(carol).expect(202);
+    const retry = await http().post('/v1/me/exports').set('Idempotency-Key', crypto.randomUUID()).set(carol).expect(202);
     expect(retry.body.id).not.toBe(job.body.id);
   });
 
@@ -117,13 +117,13 @@ describe('account exports as jobs (Doc 17 POST /me/exports)', () => {
     const { rows: [user] } = await t.pool.query(`SELECT id FROM users WHERE oidc_subject = 'exp-erin'`);
     // Claimed by another instance just now, so this one leaves it alone.
     const { rows: [pending] } = await t.pool.query(`INSERT INTO account_exports (user_id, claimed_at) VALUES ($1, now()) RETURNING id`, [user.id]);
-    const res = await http().post('/v1/me/exports').set(erin).expect(202);
+    const res = await http().post('/v1/me/exports').set('Idempotency-Key', crypto.randomUUID()).set(erin).expect(202);
     expect(res.body).toMatchObject({ id: pending.id, status: 'pending' });
   });
 
   it('deletes exports with the account', async () => {
     const dan = await bearer('exp-dan', now());
-    await http().post('/v1/me/exports').set(dan).expect(202);
+    await http().post('/v1/me/exports').set('Idempotency-Key', crypto.randomUUID()).set(dan).expect(202);
     await t.app.get(AccountExportsService).processQueue();
     await http().delete('/v1/me/account').set(dan).expect(202);
     await t.app.get(AccountService).processQueue();

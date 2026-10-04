@@ -79,7 +79,7 @@ export function PrivacyView({
     setExportStarting(true);
     setExportProblem(null);
     try {
-      const res = await fetch('/bff/account/exports', { method: 'POST', headers: { 'x-csrf-token': csrfToken } });
+      const res = await fetch('/bff/account/exports', { method: 'POST', headers: { 'x-csrf-token': csrfToken, 'idempotency-key': crypto.randomUUID() } });
       if (res.status === 202) {
         setExportJob((await res.json()) as ExportJob);
         return;

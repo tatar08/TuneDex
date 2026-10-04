@@ -1008,7 +1008,10 @@ export function createBff(deps: BffDeps) {
         const ctx = await sessionFromCookie(req.headers.get('cookie'));
         if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
         if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
-        const upstream = await callApi(ctx, '/v1/me/exports', { method: 'POST' }, requestId);
+        // One key per click: the page sends it, so a retried click is the same request (Doc 17 requires one here).
+        const sent = req.headers.get('idempotency-key');
+        const key = sent && /^[A-Za-z0-9_.:-]{8,128}$/.test(sent) ? sent : randomUUID();
+        const upstream = await callApi(ctx, '/v1/me/exports', { method: 'POST', headers: { 'idempotency-key': key } }, requestId);
         if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
         if (upstream.status !== 202) return passthrough(upstream, requestId);
         return json(202, exportView(await upstream.json()), requestId);

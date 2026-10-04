@@ -82,7 +82,7 @@ describe('account export and deletion', () => {
     await seed('acct-stale');
     const res = await http().delete('/v1/me/account').set(await bearer('acct-stale', now() - 301));
     expect(res.status).toBe(401);
-    expect((await http().delete('/v1/me').set(await bearer('acct-stale', now() - 301))).body.code).toBe('REAUTH_REQUIRED');
+    expect((await http().delete('/v1/me').set('Idempotency-Key', crypto.randomUUID()).set(await bearer('acct-stale', now() - 301))).body.code).toBe('REAUTH_REQUIRED');
     expect(res.body).toMatchObject({ code: 'REAUTH_REQUIRED', details: { maxAgeSeconds: 300 } });
     await http().get('/v1/me/settings').set(await bearer('acct-stale')).expect(200);
   });
@@ -104,7 +104,7 @@ describe('account export and deletion', () => {
     expect(blocked.body.code).toBe('ACCOUNT_DELETING');
     await http().delete('/v1/me/account').set(fresh).expect(403);
     // DELETE /v1/me is the Doc 17 path for the same request.
-    await http().delete('/v1/me').set(fresh).expect(403);
+    await http().delete('/v1/me').set('Idempotency-Key', crypto.randomUUID()).set(fresh).expect(403);
 
     await t.app.get(AccountService).processQueue();
     const status = await http().get(`/v1/account-deletions/${res.body.ticket}`).expect(200);
