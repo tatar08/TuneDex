@@ -110,6 +110,10 @@ export function SettingsForm({
     <main className="shell">
       <div className="nav">
         <span className="brand">{t.appName}</span>
+        <a href="/app/settings" aria-current="page">
+          {t.navSettings}
+        </a>
+        <a href="/app/privacy">{t.navPrivacy}</a>
         <form method="post" action="/auth/logout">
           <input type="hidden" name="csrf" value={csrfToken} />
           <button type="submit">{t.signOut}</button>

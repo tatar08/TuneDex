@@ -14,6 +14,8 @@ NestJS + PostgreSQL backend. This folder started as COL-01 from [Doc 19](../../D
 | `PUT /v1/me/devices/{deviceId}` | The phone app's check-in: registers the device on first call, then records platform, OS major, app build and the settings revision it has applied |
 | `DELETE /v1/me/devices/{deviceId}/session` | Revokes a device. Needs a sign-in within the last 5 minutes (`auth_time`), else 401 `REAUTH_REQUIRED` |
 | `GET /v1/me/staff` | The caller's current staff roles (empty for customers), so the console knows which pages to show |
+| `POST /v1/diagnostics/batches` | Signed-in user, from one of their registered, non-revoked devices. Opt-in upload: `consent: true`, `batchId`, `deviceId` and 1-100 events in the Doc 07 schema (allowlisted names and fields only; unknown fields are refused). Up to 128 KiB, 10 batches a minute per device. Retries are safe: a repeated `batchId` returns the first result and repeated `eventId`s are skipped |
+| `GET /v1/me/diagnostics`, `GET /v1/me/diagnostics/{id}`, `DELETE /v1/me/diagnostics/{id}` | The owner's own reports (summary, full events, delete). Reports are deleted after 7 days |
 | `GET /v1/catalog/radio?cursor=&limit=` | Public, no sign-in. Published, enabled stations with current rights; opaque cursor, `limit` ≤100, weak ETag and `If-None-Match` → 304, `Cache-Control: public, max-age=300` |
 | `GET /v1/admin/stations`, `GET /v1/admin/stations/{id}` | `catalog_editor` or `admin`. Draft, published snapshot, status, stream `health` (`unknown`/`ok`/`failing`/`suspect`, per region) and the reasons the caller could not publish right now |
 | `POST /v1/admin/stations`, `PATCH /v1/admin/stations/{id}` | `catalog_editor` or `admin`. Edits the draft only; PATCH needs `If-Match` |
@@ -59,8 +61,8 @@ npm run typecheck
 
 ## Migrations
 
-`001_users_and_account_preferences.sql` creates `users` (OIDC subject, status, no password) and `account_preferences` (owner, schema version, revision, JSON value). `002_devices.sql` creates `devices` keyed by (owner, device id). `003_staff_stations_audit.sql` creates `staff_roles`, `radio_stations` and the append-only `audit_events`. `004_operational_logs.sql` creates `operational_logs`. `005_station_health.sql` creates `station_health`. `006_rate_limits.sql` creates `rate_limit_counters`. Migrations are forward-only and serialized with an advisory lock; to undo, add a new migration.
+`001_users_and_account_preferences.sql` creates `users` (OIDC subject, status, no password) and `account_preferences` (owner, schema version, revision, JSON value). `002_devices.sql` creates `devices` keyed by (owner, device id). `003_staff_stations_audit.sql` creates `staff_roles`, `radio_stations` and the append-only `audit_events`. `004_operational_logs.sql` creates `operational_logs`. `005_station_health.sql` creates `station_health`. `006_rate_limits.sql` creates `rate_limit_counters`. `007_client_diagnostics.sql` creates `diagnostic_reports` and `diagnostic_events`. Migrations are forward-only and serialized with an advisory lock; to undo, add a new migration.
 
 ## Not in this slice
 
-CSRF/BFF (COL-03), per-device preference overrides, invalidating a revoked device's refresh token at the IdP (needs the Keycloak admin API), recent-MFA checks and staff session limits for privileged actions, client diagnostics upload (`POST /diagnostics/batches`), log export and multiple stream variants per station, audit outbox, metrics/traces, Dockerfile and CI. Shared OpenAPI, root scripts and CI belong to COL-00.
+CSRF/BFF (COL-03), per-device preference overrides, invalidating a revoked device's refresh token at the IdP (needs the Keycloak admin API), recent-MFA checks and staff session limits for privileged actions, support-role access to diagnostics, log export and multiple stream variants per station, audit outbox, metrics/traces, Dockerfile and CI. Shared OpenAPI, root scripts and CI belong to COL-00.

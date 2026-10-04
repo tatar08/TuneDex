@@ -93,3 +93,36 @@ test('sign in, save by keyboard, resolve a conflict, sign out', async ({ browser
   await page.goto(`${base}/app/settings`);
   await expect(page).toHaveURL(/\/login/);
 });
+
+test('the privacy page lists the account’s diagnostic reports and deletes one', async ({ browser }) => {
+  const token = await idp.accessTokenFor('e2e-dana');
+  const call = (path: string, method: string, body: object) =>
+    fetch(`${api.url}${path}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const device = crypto.randomUUID();
+  expect((await call(`/v1/me/devices/${device}`, 'PUT', { platform: 'ios', osMajor: 18, appBuild: '1.0.0' })).status).toBe(200);
+  const ev = (eventName: string) => ({
+    eventId: crypto.randomUUID(), eventName, schemaVersion: 1, monotonicMs: 5000, sessionRandomId: 'sess_e2e_0001',
+    networkClass: 'wifi', appBuild: '1.0.0', osMajor: 18, deviceClass: 'phone',
+  });
+  for (const events of [[ev('playback_stall'), ev('playback_recovered')], [ev('app_error')]]) {
+    expect((await call('/v1/diagnostics/batches', 'POST', { batchId: crypto.randomUUID(), deviceId: device, consent: true, events })).status).toBe(200);
+  }
+
+  idp.setUser('e2e-dana');
+  const page = await (await browser.newContext()).newPage();
+  await page.goto(`${base}/auth/login?returnTo=/app/settings`);
+  await page.getByRole('link', { name: 'ความเป็นส่วนตัว' }).click();
+  await expect(page).toHaveURL(`${base}/app/privacy`);
+  await expect(page.getByRole('heading', { name: 'ความเป็นส่วนตัว' })).toBeVisible();
+  const reports = page.getByTestId('report');
+  await expect(reports).toHaveCount(2);
+  await expect(reports.first()).toContainText('iPhone · 1 เหตุการณ์');
+  await expect(page.getByText('กลับมาเล่นได้ ×1 · เสียงสะดุด ×1')).toBeVisible();
+  await expect(page.getByText('ระบบลบรายงานเองเมื่อครบ 7 วัน หรือคุณลบเองได้ทันที')).toBeVisible();
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/privacy.png`, fullPage: true });
+
+  await reports.first().getByRole('button', { name: 'ลบรายงานนี้' }).click();
+  await expect(reports).toHaveCount(1);
+  await page.reload();
+  await expect(page.getByTestId('report')).toHaveCount(1);
+});

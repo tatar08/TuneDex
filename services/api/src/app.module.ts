@@ -1,6 +1,7 @@
 import { DynamicModule, INestApplication, Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { json } from 'express';
 import type { JWTVerifyGetKey } from 'jose';
 import type { Pool } from 'pg';
 import { AdminAuditController, AuditSearchService } from './audit/audit-search';
@@ -12,6 +13,7 @@ import { requestContext } from './common/request-context';
 import { APP_CONFIG, AppConfig } from './config';
 import { Database, PG_POOL } from './db/database';
 import { DevicesController } from './devices/devices.controller';
+import { DiagnosticsService, DiagnosticsUploadController, LIMITS as DIAGNOSTIC_LIMITS, MyDiagnosticsController } from './diagnostics/diagnostics';
 import { DevicesService } from './devices/devices.service';
 import { HealthController } from './health/health.controller';
 import { PgLogStore } from './logs/log-store';
@@ -39,7 +41,7 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController],
+      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },
@@ -54,6 +56,7 @@ export class AppModule {
         UsersService,
         SettingsService,
         DevicesService,
+        DiagnosticsService,
         StaffService,
         StationsService,
         StationHealthService,
@@ -73,6 +76,8 @@ export function configureApp(app: NestExpressApplication): INestApplication {
   // Only our own proxies' X-Forwarded-For is believed; 0 means the socket address.
   app.set('trust proxy', app.get<AppConfig>(APP_CONFIG).rateLimit.trustProxyHops);
   app.use(requestContext(logger));
+  // Diagnostic batches may be up to 128 KiB (Doc 17); every other body stays at 16 KiB. Registered first, so it wins for that path.
+  app.use('/v1/diagnostics/batches', json({ limit: DIAGNOSTIC_LIMITS.batchBytes }));
   app.useBodyParser('json', { limit: '16kb' });
   app.useGlobalFilters(new ErrorEnvelopeFilter(logger));
   return app;

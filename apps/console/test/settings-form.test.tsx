@@ -43,6 +43,8 @@ describe('SettingsForm', () => {
     const user = userEvent.setup();
     render(<SettingsForm initial={view(0)} devices={[]} csrfToken="csrf-1" />);
 
+    await user.tab(); // settings link
+    await user.tab(); // privacy link
     await user.tab(); // sign-out button
     await user.tab(); // theme radio group
     expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'ตามระบบ' }));
