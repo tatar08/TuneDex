@@ -4,7 +4,9 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { createContext, Suspense, useContext, useEffect, useState } from 'react';
 import { canSeeAudit, canSeeConfig, canSeeLogs, canSeeStations, canSeeUsers, CatalogSummary, Mode, MODE_COOKIE, ROLE_LABELS, THEME_COOKIE, THEMES, ThemeId } from '@/lib/admin';
+import { Translate, translator } from '@/lib/admin-i18n';
 import type { StaffRole } from '@/lib/bff';
+import type { Lang } from '@/lib/i18n';
 
 interface AdminContextValue {
   theme: ThemeId;
@@ -13,6 +15,8 @@ interface AdminContextValue {
   csrfToken: string;
   canEdit: boolean;
   isAdmin: boolean;
+  lang: Lang;
+  t: Translate;
 }
 
 const AdminContext = createContext<AdminContextValue | null>(null);
@@ -21,6 +25,8 @@ export function useAdmin(): AdminContextValue {
   if (!v) throw new Error('useAdmin outside AdminShell');
   return v;
 }
+/** The staff console's translate function for the viewer's language (Thai unless they switched). */
+export const useT = (): Translate => useAdmin().t;
 
 const NAV = [
   { href: '/admin/overview', label: 'ภาพรวมระบบ', short: 'OV', icon: 'bolt', show: canSeeLogs },
@@ -125,8 +131,10 @@ export function AdminShell({
   summary,
   csrfToken,
   fontClass,
+  lang,
   children,
 }: {
+  lang: Lang;
   theme: ThemeId;
   mode: Mode;
   summary: CatalogSummary | null;
@@ -140,7 +148,8 @@ export function AdminShell({
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
   const isAdmin = roles.includes('admin');
-  const value: AdminContextValue = { theme, summary, roles, csrfToken, isAdmin, canEdit: isAdmin || roles.includes('catalog_editor') };
+  const t = translator(lang);
+  const value: AdminContextValue = { theme, summary, roles, csrfToken, isAdmin, canEdit: isAdmin || roles.includes('catalog_editor'), lang, t };
   const who = roles.map((r) => ROLE_LABELS[r]).join(', ');
   const nav = NAV.filter((n) => n.show(roles));
   const on = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
@@ -158,7 +167,15 @@ export function AdminShell({
     document.cookie = `${MODE_COOKIE}=${m}; Path=/admin; Max-Age=31536000; SameSite=Lax${secure}`;
   }
 
-  const picker = <ThemePicker theme={theme} onChange={changeTheme} />;
+  // The language switch sits with the theme picker in every layout; it comes back to the same page.
+  const picker = (
+    <>
+      <ThemePicker theme={theme} onChange={changeTheme} />
+      <a className="adm-link adm-lang" href={`/lang?to=${lang === 'th' ? 'en' : 'th'}&returnTo=${encodeURIComponent(pathname)}`} lang={lang === 'th' ? 'en' : 'th'}>
+        {lang === 'th' ? 'English' : 'ภาษาไทย'}
+      </a>
+    </>
+  );
   const links = nav.map((n) => (
     <Link key={n.href} href={n.href} className={on(n.href) ? 'on' : undefined} aria-current={on(n.href) ? 'page' : undefined}>
       {n.label}

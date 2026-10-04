@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { MODE_COOKIE, modeFrom, summarize, THEME_COOKIE, themeFrom } from '@/lib/admin';
+import { pageLang } from '@/lib/lang';
 import { getBff } from '@/lib/runtime';
 import { AdminShell } from './AdminShell';
 import { fontVariables } from './fonts';
@@ -59,6 +60,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       summary={summary}
       csrfToken={ctx.session.csrfToken}
       fontClass={fontVariables}
+      lang={await pageLang()}
     >
       {children}
     </AdminShell>
