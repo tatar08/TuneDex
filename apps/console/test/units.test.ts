@@ -12,6 +12,7 @@ const env = {
   OIDC_CLIENT_ID: 'c',
   OIDC_CLIENT_SECRET: 's',
   SESSION_SECRET: 'z'.repeat(32),
+  SESSION_DATABASE_URL: 'postgres://console@db/tunedeck',
 };
 
 describe('config', () => {
@@ -23,6 +24,11 @@ describe('config', () => {
     expect(() => loadConfig({ ...env, CONSOLE_BASE_URL: 'http://console.tunedeck.test' })).toThrow();
     expect(() => loadConfig({ ...env, SESSION_SECRET: 'short' })).toThrow();
     expect(() => loadConfig({ ...env, OIDC_ALGORITHMS: 'HS256' })).toThrow();
+  });
+  it('needs a shared session database outside localhost', () => {
+    expect(() => loadConfig({ ...env, SESSION_DATABASE_URL: '' })).toThrow('SESSION_DATABASE_URL');
+    expect(() => loadConfig({ ...env, SESSION_DATABASE_URL: 'redis://x' })).toThrow('SESSION_DATABASE_URL');
+    expect(loadConfig({ ...env, SESSION_DATABASE_URL: '', CONSOLE_BASE_URL: 'http://localhost:3200' }).sessionDatabaseUrl).toBeNull();
   });
 });
 

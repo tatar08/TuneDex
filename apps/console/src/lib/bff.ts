@@ -53,6 +53,21 @@ export interface DevicesView {
   devices: DeviceView[];
 }
 
+export interface DiagnosticReport {
+  id: string;
+  receivedAt: string;
+  expiresAt: string;
+  deviceId: string;
+  platform: 'ios' | 'android' | null;
+  eventCount: number;
+  events: { eventName: string; count: number }[];
+}
+
+export interface DiagnosticsView {
+  reports: DiagnosticReport[];
+  retentionDays: number;
+}
+
 export type StaffRole = 'support' | 'catalog_editor' | 'operator' | 'admin' | 'auditor';
 
 export interface StationDraft {
@@ -110,6 +125,7 @@ export interface HealthCheck {
   latencyMs: number | null;
 }
 
+/** Lower-case UUID: station ids and diagnostic report ids. */
 const STATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const STATION_ACTIONS = ['publish', 'disable', 'enable', 'check'] as const;
 export type StationAction = (typeof STATION_ACTIONS)[number];
@@ -271,6 +287,8 @@ export function createBff(deps: BffDeps) {
     const headers: Record<string, string> = {};
     const etag = upstream.headers.get('etag');
     if (etag) headers.etag = etag;
+    const retryAfter = upstream.headers.get('retry-after');
+    if (retryAfter && /^\d{1,3}$/.test(retryAfter)) headers['retry-after'] = retryAfter;
     const body = await upstream.text();
     return new Response(body, {
       status: upstream.status,
@@ -476,6 +494,26 @@ export function createBff(deps: BffDeps) {
       if (!res) return null;
       return res.ok ? { status: 200, view: (await res.json()) as DevicesView } : { status: res.status };
     },
+
+    /** Server-side read of the account's own diagnostic reports for /app/privacy. Null means sign in again. */
+    async loadDiagnostics(ctx: SessionContext): Promise<{ status: number; view?: DiagnosticsView } | null> {
+      const res = await callApi(ctx, '/v1/me/diagnostics', { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, view: (await res.json()) as DiagnosticsView } : { status: res.status };
+    },
+
+    /** DELETE /bff/diagnostics/{id}: the owner removes one of their own reports. */
+    deleteDiagnostic: (req: Request, id: string) =>
+      timed(req, '/bff/diagnostics/:id', async (requestId) => {
+        if (!STATION_ID.test(id)) return notFound(requestId);
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
+        const upstream = await callApi(ctx, `/v1/me/diagnostics/${id}`, { method: 'DELETE' }, requestId);
+        if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        if (upstream.status === 204) return new Response(null, { status: 204, headers: { 'cache-control': 'no-store', 'x-request-id': requestId } });
+        return passthrough(upstream, requestId);
+      }),
 
     /** GET /bff/devices */
     getDevices: (req: Request) =>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { formatLogTime, LOG_FIELD_LABELS, LOG_LEVELS, LOG_RANGES, logHref, LogSearch } from '@/lib/admin';
+import { formatLogTime, RATE_LIMITED, LOG_FIELD_LABELS, LOG_LEVELS, LOG_RANGES, logHref, LogSearch } from '@/lib/admin';
 import type { LogEntry, LogPage } from '@/lib/bff';
 import { Icon, useAdmin } from '../AdminShell';
 
@@ -39,7 +39,9 @@ function Problem({ status, badField }: { status: number; badField?: string }) {
         ? 'บัญชีนี้ไม่มีสิทธิ์ดูบันทึกระบบ (ต้องเป็นโอเปอเรเตอร์หรือแอดมิน)'
         : status === 400
           ? `ค่าที่กรอกไม่ถูกต้อง: ${badField ? (LOG_FIELD_LABELS[badField] ?? badField) : 'ตัวกรอง'}`
-          : 'โหลดบันทึกไม่ได้ในขณะนี้ ลองใหม่อีกครั้ง'}
+          : status === 429
+            ? RATE_LIMITED
+            : 'โหลดบันทึกไม่ได้ในขณะนี้ ลองใหม่อีกครั้ง'}
     </div>
   );
 }

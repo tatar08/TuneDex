@@ -11,6 +11,15 @@ export interface AppConfig {
     jwksUri: string;
     algorithms: string[];
   };
+  /** Per-minute request limits (Doc 17 initial limits). Off only in tests. */
+  rateLimit: {
+    enabled: boolean;
+    readsPerMinute: number;
+    writesPerMinute: number;
+    catalogPerMinutePerIp: number;
+    /** Express `trust proxy` hop count, so client addresses come from X-Forwarded-For set by our own proxy. */
+    trustProxyHops: number;
+  };
   /** Scheduled stream checks of published stations (Doc 17). Off unless STATION_CHECK_ENABLED=true. */
   stationCheck: {
     enabled: boolean;
@@ -59,7 +68,24 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       jwksUri: required(env, 'OIDC_JWKS_URI'),
       algorithms,
     },
+    rateLimit: loadRateLimit(env),
     stationCheck: loadStationCheck(env),
+  };
+}
+
+function wholeNumber(env: NodeJS.ProcessEnv, key: string, fallback: number, min: number, max: number): number {
+  const n = Number(env[key] ?? fallback);
+  if (!Number.isInteger(n) || n < min || n > max) throw new Error(`${key} must be a whole number from ${min} to ${max}`);
+  return n;
+}
+
+function loadRateLimit(env: NodeJS.ProcessEnv): AppConfig['rateLimit'] {
+  return {
+    enabled: true,
+    readsPerMinute: wholeNumber(env, 'RATE_LIMIT_READS_PER_MIN', 120, 1, 100_000),
+    writesPerMinute: wholeNumber(env, 'RATE_LIMIT_WRITES_PER_MIN', 30, 1, 100_000),
+    catalogPerMinutePerIp: wholeNumber(env, 'RATE_LIMIT_CATALOG_PER_MIN', 60, 1, 100_000),
+    trustProxyHops: wholeNumber(env, 'TRUST_PROXY_HOPS', 0, 0, 5),
   };
 }
 

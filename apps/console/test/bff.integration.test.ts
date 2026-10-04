@@ -23,6 +23,7 @@ function config(): ConsoleConfig {
     secureCookies: false,
     sessionIdleMs: 12 * 3600_000,
     sessionAbsoluteMs: 7 * 24 * 3600_000,
+    sessionDatabaseUrl: null,
   };
 }
 

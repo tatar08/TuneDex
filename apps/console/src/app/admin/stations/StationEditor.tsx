@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { BLOCKER_LABELS, FIELD_LABELS, formatDateTime, REASON_LABELS, RIGHTS_BASIS_LABELS, STATUS_LABELS } from '@/lib/admin';
+import { RATE_LIMITED, BLOCKER_LABELS, FIELD_LABELS, formatDateTime, REASON_LABELS, RIGHTS_BASIS_LABELS, STATUS_LABELS } from '@/lib/admin';
 import type { AdminStation, HealthCheck, StationDraft } from '@/lib/bff';
 import { useAdmin } from '../AdminShell';
 import { HealthPanel } from './HealthPanel';
@@ -109,6 +109,7 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
       setProblem({ kind: 'message', text: (d.reasons as string[]).map((r) => BLOCKER_LABELS[r] ?? r).join(' · ') });
     else if (res.status === 401) setProblem({ kind: 'message', text: 'หมดเวลาเข้าใช้งาน กรุณาเข้าสู่ระบบอีกครั้ง' });
     else if (res.status === 403) setProblem({ kind: 'message', text: 'บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้' });
+    else if (res.status === 429) setProblem({ kind: 'message', text: `${RATE_LIMITED} ยังไม่ได้บันทึก` });
     else setProblem({ kind: 'message', text: 'ระบบไม่พร้อมใช้งานชั่วคราว ยังไม่ได้บันทึก' });
   }
 

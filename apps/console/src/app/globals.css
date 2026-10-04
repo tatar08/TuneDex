@@ -22,6 +22,8 @@ a { color: inherit; }
 .shell { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; }
 .nav { display: flex; align-items: baseline; gap: 24px; font-size: 14px; }
 .nav .brand { font-weight: 600; margin-right: auto; }
+.nav a { color: inherit; text-underline-offset: 4px; }
+.nav a[aria-current='page'] { font-weight: 600; text-decoration: none; }
 .nav button { all: unset; cursor: pointer; text-decoration: underline; text-underline-offset: 4px; }
 .nav button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 h1 { font-weight: 300; font-size: 32px; margin: 48px 0 4px; letter-spacing: -0.01em; }

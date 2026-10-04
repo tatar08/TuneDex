@@ -51,6 +51,7 @@ export function testConfig(databaseUrl: string): AppConfig {
     port: 0,
     databaseUrl,
     oidc: { issuer: ISSUER, audience: AUDIENCE, jwksUri: 'https://idp.test/unused', algorithms: ['RS256'] },
+    rateLimit: { enabled: false, readsPerMinute: 120, writesPerMinute: 30, catalogPerMinutePerIp: 60, trustProxyHops: 0 },
     stationCheck: { enabled: false, intervalMinutes: 15, region: 'test-region' },
   };
 }
@@ -80,11 +81,11 @@ export async function createTestDatabase(): Promise<{ url: string; drop: () => P
   };
 }
 
-export async function createTestApp(databaseUrl: string, keyResolver: JWTVerifyGetKey, extra: Pick<AppDeps, 'probeDeps'> = {}) {
+export async function createTestApp(databaseUrl: string, keyResolver: JWTVerifyGetKey, extra: Pick<AppDeps, 'probeDeps'> & { config?: Partial<AppConfig> } = {}) {
   const pool = createPool(databaseUrl);
   const logs: string[] = [];
   const moduleRef = await Test.createTestingModule({
-    imports: [AppModule.forRoot({ config: testConfig(databaseUrl), pool, keyResolver, logWriter: (l) => logs.push(l), ...extra })],
+    imports: [AppModule.forRoot({ config: { ...testConfig(databaseUrl), ...extra.config }, pool, keyResolver, logWriter: (l) => logs.push(l), probeDeps: extra.probeDeps })],
   }).compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false, bodyParser: false });
   configureApp(app);

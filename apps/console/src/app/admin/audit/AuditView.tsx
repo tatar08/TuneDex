@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   actionFamily,
   actionLabel,
+  RATE_LIMITED,
   actorKey,
   actorName,
   AUDIT_FAMILIES,
@@ -67,7 +68,9 @@ function Problem({ status, badField }: { status: number; badField?: string }) {
         ? 'บัญชีนี้ไม่มีสิทธิ์ดูประวัติการแก้ไข (ต้องเป็นผู้ตรวจสอบหรือแอดมิน)'
         : status === 400
           ? `ค่าที่กรอกไม่ถูกต้อง: ${badField ? (AUDIT_FIELD_LABELS[badField] ?? badField) : 'ตัวกรอง'}`
-          : 'โหลดประวัติไม่ได้ในขณะนี้ ลองใหม่อีกครั้ง'}
+          : status === 429
+            ? RATE_LIMITED
+            : 'โหลดประวัติไม่ได้ในขณะนี้ ลองใหม่อีกครั้ง'}
     </div>
   );
 }
