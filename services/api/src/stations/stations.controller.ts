@@ -6,9 +6,10 @@ import { ApiError } from '../common/api-error';
 import { decodeCursor, parseLimit } from '../common/pagination';
 import { parseIfMatch } from '../settings/settings.schema';
 import { RequireRoles, StaffGuard } from '../staff/staff';
+import { parseRightsRecord, RightsRecordView } from './rights';
 import { parseNewStation, parsePublish, parseReason, parseStationId, parseStationPatch } from './stations.schema';
 import { HealthCheck, StationHealth, StationHealthService } from './station-health';
-import { AdminStationView, StationActor, StationsService } from './stations.service';
+import { AdminStationView, HistoryEntry, StationActor, StationsService } from './stations.service';
 
 const actorOf = (req: Request): StationActor => ({ userId: req.actor!.userId, roles: req.actor!.roles ?? [], requestId: req.requestId });
 
@@ -59,6 +60,52 @@ export class AdminStationsController {
   async check(@Req() req: Request, @Param('id') id: string, @Res({ passthrough: true }) res: Response): Promise<HealthCheck> {
     res.setHeader('Cache-Control', 'no-store');
     return this.health.checkNow(actorOf(req), parseStationId(id));
+  }
+
+  /** The station's rights records, newest first, with private evidence keys (staff only, never in the catalog). */
+  @Get(':id/rights')
+  async rights(@Param('id') id: string, @Res({ passthrough: true }) res: Response): Promise<{ records: RightsRecordView[] }> {
+    res.setHeader('Cache-Control', 'no-store');
+    return { records: await this.stations.listRights(parseStationId(id)) };
+  }
+
+  /** Adds a rights record; the publish gate and the public catalog follow it at once. Audited as rights.add. */
+  @Post(':id/rights')
+  @HttpCode(HttpStatus.CREATED)
+  async addRights(@Req() req: Request, @Param('id') id: string, @Body() body: unknown, @Res({ passthrough: true }) res: Response): Promise<RightsRecordView> {
+    res.setHeader('Cache-Control', 'no-store');
+    const stationId = parseStationId(id);
+    return this.stations.addRights(actorOf(req), stationId, parseRightsRecord(body));
+  }
+
+  /** Revokes a rights record with `{ reason }`. Audited as rights.revoke. */
+  @Post(':id/rights/:recordId/revoke')
+  @HttpCode(HttpStatus.OK)
+  async revokeRights(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('recordId') recordId: string,
+    @Body() body: unknown,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<RightsRecordView> {
+    res.setHeader('Cache-Control', 'no-store');
+    const stationId = parseStationId(id);
+    const record = parseStationId(recordId, 'recordId');
+    return this.stations.revokeRights(actorOf(req), stationId, record, parseReason(body));
+  }
+
+  /** Version history: the station's station.* and rights.* audit events, newest first, in cursor pages (50, max 100). */
+  @Get(':id/history')
+  async history(
+    @Param('id') id: string,
+    @Query('cursor') cursor: unknown,
+    @Query('limit') limit: unknown,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ events: HistoryEntry[]; nextCursor: string | null }> {
+    res.setHeader('Cache-Control', 'no-store');
+    const stationId = parseStationId(id);
+    const after = decodeCursor(cursor, 1);
+    return this.stations.history(stationId, after ? after[0] : null, parseLimit(limit));
   }
 
   @Post()

@@ -219,13 +219,13 @@ export function MinimalDashboard({ stations, filter, query }: { stations: AdminS
                   <li key={s.id}>
                     <div className="fv-pot-row">
                       <Link href={href(s)}>{s.draft.name}</Link>
-                      <b>{formatDate(s.draft.rightsExpiresAt)}</b>
+                      <b>{formatDate(s.rights.expiresAt)}</b>
                     </div>
                     <div className="fv-bar" aria-hidden="true">
                       <i style={{ width: `${Math.max(0, Math.min(100, (days / RIGHTS_WINDOW_DAYS) * 100))}%` }} className={days <= 14 ? 'hot' : undefined} />
                     </div>
                     <div className="fv-pot-row small">
-                      <span>{s.draft.rightsReference ?? 'ไม่มีเลขอ้างอิง'}</span>
+                      <span>{s.rights.reference ?? 'ไม่มีเลขอ้างอิง'}</span>
                       <span className={days <= 14 ? 'hot' : undefined}>{days < 0 ? 'หมดแล้ว' : `เหลือ ${days} วัน`}</span>
                     </div>
                   </li>

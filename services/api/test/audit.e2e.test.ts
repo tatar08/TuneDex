@@ -12,9 +12,6 @@ const station = {
   streamUrl: 'https://stream.example.com/audit.mp3',
   codec: 'mp3',
   bitrateKbps: 128,
-  rightsBasis: 'owner_permission',
-  rightsReference: 'REF-AUDIT',
-  rightsExpiresAt: null,
 };
 
 describe('audit trail search', () => {
@@ -46,6 +43,8 @@ describe('audit trail search', () => {
     const created = await http().post('/v1/admin/stations').set(as('editor')).send(station);
     expect(created.status).toBe(201);
     stationId = created.body.id;
+    const rights = { holder: 'Audit Media', basis: 'owner_permission', reference: 'REF-AUDIT', territories: ['TH'], evidenceRefs: ['rights/audit-letter.pdf'] };
+    expect((await http().post(`/v1/admin/stations/${stationId}/rights`).set(as('editor')).send(rights)).status).toBe(201);
     const pub = await http().post(`/v1/admin/stations/${stationId}/publish`).set(as('admin')).set('If-Match', '"1"').send({ reason: 'checked rights letter' });
     expect(pub.status).toBe(200);
   });
@@ -65,7 +64,10 @@ describe('audit trail search', () => {
     const res = await search('auditor');
     expect(res.headers['cache-control']).toBe('no-store');
     const actions = res.body.events.map((e: { action: string }) => e.action);
-    expect(actions.slice(0, 2)).toEqual(['station.publish', 'station.create']);
+    expect(actions.slice(0, 3)).toEqual(['station.publish', 'rights.add', 'station.create']);
+    // Rights changes are in the trail, but never the private evidence keys.
+    expect(res.body.events[1]).toMatchObject({ actorSubject: 'ed-1', targetId: stationId, changes: { reference: 'REF-AUDIT', territories: ['TH'], evidenceCount: 1 } });
+    expect(JSON.stringify(res.body)).not.toContain('audit-letter.pdf');
     expect(actions.filter((a: string) => a.startsWith('staff_role.'))).toHaveLength(4);
     const publish = res.body.events[0];
     expect(publish).toMatchObject({ actorSubject: 'adm-1', targetLabel: 'Audit FM', targetType: 'station', targetId: stationId, reason: 'checked rights letter', changes: { revision: 1 } });
@@ -75,11 +77,11 @@ describe('audit trail search', () => {
 
   it('filters by actor subject, action family, target and pages', async () => {
     const mine = await search('admin', { actor: 'ed-1' });
-    expect(mine.body.events.map((e: { action: string }) => e.action)).toEqual(['station.create']);
+    expect(mine.body.events.map((e: { action: string }) => e.action)).toEqual(['rights.add', 'station.create']);
     const ops = await search('admin', { actor: 'operator:tar', action: 'staff_role' });
     expect(ops.body.events).toHaveLength(4);
     const target = await search('admin', { targetType: 'station', targetId: stationId });
-    expect(target.body.events).toHaveLength(2);
+    expect(target.body.events).toHaveLength(3);
     const first = await search('admin', { limit: '2' });
     expect(first.body.events).toHaveLength(2);
     const next = await search('admin', { limit: '2', cursor: first.body.nextCursor });

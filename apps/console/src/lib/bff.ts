@@ -122,9 +122,48 @@ export interface StationDraft {
   streamUrl: string;
   codec: 'mp3' | 'aac' | 'hls';
   bitrateKbps: number | null;
-  rightsBasis: string | null;
-  rightsReference: string | null;
-  rightsExpiresAt: string | null;
+}
+
+export type RightsState = 'current' | 'missing' | 'territory' | 'not_yet_valid' | 'expired';
+
+/** The draft country's rights from the station's rights records, and until when the apps may see the station. */
+export interface StationRights {
+  state: RightsState;
+  expiresAt: string | null;
+  reference: string | null;
+  /** End of the public catalog's rights window (ISO time); null means no end. Only meaningful once published. */
+  liveUntil: string | null;
+}
+
+/** One rights record (GET /v1/admin/stations/{id}/rights). Evidence keys are private storage keys, staff-only. */
+export interface RightsRecord {
+  id: string;
+  holder: string;
+  basis: string;
+  reference: string;
+  territories: string[];
+  validFrom: string;
+  expiresAt: string | null;
+  status: 'active' | 'revoked';
+  effectiveStatus: 'active' | 'scheduled' | 'expired' | 'revoked';
+  evidenceCount: number;
+  evidenceRefs?: string[];
+  createdBy: string | null;
+  createdAt: string;
+  revokedBy: string | null;
+  revokedAt: string | null;
+  revokeReason: string | null;
+}
+
+/** One entry of a station's version history (station.* and rights.* audit events). */
+export interface StationHistoryEntry {
+  id: string;
+  occurredAt: string;
+  action: string;
+  actor: string;
+  actorSubject: string | null;
+  reason: string | null;
+  revision: number | null;
 }
 
 export interface AdminStation {
@@ -138,6 +177,7 @@ export interface AdminStation {
   disabledAt: string | null;
   updatedAt: string;
   publishBlockers: string[];
+  rights: StationRights;
   health: StationHealth;
 }
 
@@ -781,6 +821,33 @@ export function createBff(deps: BffDeps) {
           ? adminProxy(req, requestId, `/v1/admin/stations/${id}/${action}`, true)
           : notFound(requestId),
       ),
+
+    /** GET/POST /bff/admin/stations/{id}/rights */
+    stationRights: (req: Request, id: string) =>
+      timed(req, '/bff/admin/stations/:id/rights', (requestId) =>
+        STATION_ID.test(id) ? adminProxy(req, requestId, `/v1/admin/stations/${id}/rights`, req.method === 'POST') : Promise.resolve(notFound(requestId)),
+      ),
+
+    /** POST /bff/admin/stations/{id}/rights/{recordId}/revoke with `{ reason }` */
+    stationRightsRevoke: (req: Request, id: string, recordId: string) =>
+      timed(req, '/bff/admin/stations/:id/rights/:recordId/revoke', (requestId) =>
+        STATION_ID.test(id) && STATION_ID.test(recordId)
+          ? adminProxy(req, requestId, `/v1/admin/stations/${id}/rights/${recordId}/revoke`, true)
+          : Promise.resolve(notFound(requestId)),
+      ),
+
+    /** GET /bff/admin/stations/{id}/history?cursor=&limit= (only those two, checked before they reach the API path) */
+    stationHistory: (req: Request, id: string) =>
+      timed(req, '/bff/admin/stations/:id/history', (requestId) => {
+        if (!STATION_ID.test(id)) return Promise.resolve(notFound(requestId));
+        const incoming = new URL(req.url).searchParams;
+        const qs = new URLSearchParams();
+        const cursor = incoming.get('cursor');
+        const limit = incoming.get('limit');
+        if (cursor && /^[A-Za-z0-9_-]{1,1024}$/.test(cursor)) qs.set('cursor', cursor);
+        if (limit && /^\d{1,3}$/.test(limit)) qs.set('limit', limit);
+        return adminProxy(req, requestId, `/v1/admin/stations/${id}/history${qs.size ? `?${qs}` : ''}`, false);
+      }),
 
     /**
      * GET /auth/login — starts authorization code + PKCE; the destination is limited to /app/ paths.

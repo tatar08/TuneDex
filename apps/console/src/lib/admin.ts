@@ -1,4 +1,4 @@
-import type { AdminStation, AuditEvent, HealthState, StaffRole, StationHealth } from './bff';
+import type { AdminStation, AuditEvent, HealthState, RightsRecord, RightsState, StaffRole, StationHealth } from './bff';
 
 /** The five staff console themes Tar approved on 2026-10-03; each keeps its own layout. Minimal is the default. */
 export const THEMES = [
@@ -43,9 +43,27 @@ export const BLOCKER_LABELS: Record<string, string> = {
   admin_role_required: 'ต้องเป็นแอดมินจึงจะเผยแพร่ได้',
   own_change: 'คุณแก้ร่างนี้เอง ต้องให้แอดมินคนอื่นเป็นผู้เผยแพร่',
   already_published: 'เวอร์ชันนี้เผยแพร่อยู่แล้ว',
-  rights_basis_missing: 'ยังไม่ได้ระบุที่มาของสิทธิ์',
-  rights_reference_missing: 'ยังไม่มีเลขอ้างอิงหลักฐานสิทธิ์',
+  rights_missing: 'ยังไม่มีหลักฐานสิทธิ์ที่ใช้งานอยู่',
+  rights_territory: 'หลักฐานสิทธิ์ไม่ครอบคลุมประเทศของสถานี',
+  rights_not_yet_valid: 'หลักฐานสิทธิ์ยังไม่ถึงวันเริ่มใช้',
   rights_expired: 'สิทธิ์หมดอายุแล้ว',
+};
+
+/** The station's rights at a glance (AdminStation.rights.state). */
+export const RIGHTS_STATE_LABELS: Record<RightsState, string> = {
+  current: 'มีสิทธิ์ใช้งานอยู่',
+  missing: 'ยังไม่มีข้อมูลสิทธิ์',
+  territory: 'สิทธิ์ไม่ครอบคลุมประเทศนี้',
+  not_yet_valid: 'สิทธิ์ยังไม่เริ่ม',
+  expired: 'สิทธิ์หมดอายุแล้ว',
+};
+
+/** One rights record's status; "expired" and "scheduled" come from the dates. */
+export const RIGHTS_STATUS_LABELS: Record<RightsRecord['effectiveStatus'], string> = {
+  active: 'ใช้งานอยู่',
+  scheduled: 'ยังไม่ถึงวันเริ่ม',
+  expired: 'หมดอายุ',
+  revoked: 'เพิกถอนแล้ว',
 };
 
 export const RIGHTS_BASIS_LABELS: Record<string, string> = {
@@ -63,10 +81,19 @@ export const FIELD_LABELS: Record<string, string> = {
   streamUrl: 'ลิงก์สตรีม',
   codec: 'รูปแบบเสียง',
   bitrateKbps: 'บิตเรต (kbps)',
-  rightsBasis: 'ที่มาของสิทธิ์',
-  rightsReference: 'เลขอ้างอิงหลักฐาน',
-  rightsExpiresAt: 'สิทธิ์หมดอายุ',
   reason: 'เหตุผล',
+};
+
+/** Fields of a rights record (the add form and API validation errors). */
+export const RIGHTS_FIELD_LABELS: Record<string, string> = {
+  holder: 'เจ้าของสิทธิ์',
+  basis: 'ที่มาของสิทธิ์',
+  reference: 'เลขอ้างอิงหลักฐาน',
+  territories: 'ประเทศที่ครอบคลุม',
+  validFrom: 'เริ่มใช้',
+  expiresAt: 'สิทธิ์หมดอายุ',
+  evidenceRefs: 'รหัสไฟล์หลักฐาน',
+  reason: 'เหตุผลที่เพิกถอน',
 };
 
 export const REASON_LABELS: Record<string, string> = {
@@ -88,6 +115,10 @@ export const REASON_LABELS: Record<string, string> = {
   out_of_range: 'ค่าเกินช่วงที่รับได้ (8–512)',
   date_yyyy_mm_dd: 'วันที่ไม่ถูกต้อง',
   too_short: 'สั้นเกินไป อธิบายอย่างน้อย 20 ตัวอักษร',
+  before_valid_from: 'วันหมดอายุต้องไม่ก่อนวันเริ่มใช้',
+  opaque_key: 'ใช้รหัสไฟล์ในที่เก็บส่วนตัว ห้ามใส่ลิงก์',
+  max_10: 'ไม่เกิน 10 รายการ',
+  unknown_field: 'ช่องนี้ไม่รองรับแล้ว',
 };
 
 const dateFmt = new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeZone: 'Asia/Bangkok' });
@@ -96,14 +127,19 @@ const dateTimeFmt = new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', time
 export const formatDate = (iso: string | null) => (iso ? dateFmt.format(new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso)) : '');
 export const formatDateTime = (iso: string | null) => (iso ? dateTimeFmt.format(new Date(iso)) : '');
 
-/** Rights end within 30 days (or already ended): worth flagging in lists. */
+/** Rights end within 30 days (or already ended), or no record allows the station: worth flagging in lists. */
 export function rightsSoon(s: AdminStation, now = Date.now()): boolean {
-  const end = s.draft.rightsExpiresAt;
+  if (s.rights.state !== 'current') return true;
+  const end = s.rights.expiresAt;
   return !!end && Date.parse(`${end}T23:59:59Z`) - now < 30 * 86_400_000;
 }
 
 export const rightsLine = (s: AdminStation) =>
-  s.draft.rightsExpiresAt ? `สิทธิ์ถึง ${formatDate(s.draft.rightsExpiresAt)}` : s.draft.rightsBasis ? 'สิทธิ์ไม่มีวันหมดอายุ' : 'ยังไม่มีข้อมูลสิทธิ์';
+  s.rights.state !== 'current'
+    ? RIGHTS_STATE_LABELS[s.rights.state]
+    : s.rights.expiresAt
+      ? `สิทธิ์ถึง ${formatDate(s.rights.expiresAt)}`
+      : 'สิทธิ์ไม่มีวันหมดอายุ';
 
 const LANGUAGE_NAMES: Record<string, string> = { th: 'ไทย', en: 'อังกฤษ', ja: 'ญี่ปุ่น', zh: 'จีน', ko: 'เกาหลี', lo: 'ลาว', my: 'พม่า', km: 'เขมร' };
 export const languageName = (code: string) => LANGUAGE_NAMES[code] ?? code.toUpperCase();
@@ -127,11 +163,11 @@ export function countByStatus(stations: AdminStation[]): Record<StatusFilter, nu
   return out;
 }
 
-/** What the apps can see right now: published, enabled, and the published rights have not ended. */
+/** What the apps can see right now: published, enabled, and a rights record still covers the published station. */
 export function visibleInApps(s: AdminStation, now = Date.now()): boolean {
   if (!s.published || s.disabledAt) return false;
-  const end = s.published.rightsExpiresAt;
-  return !end || Date.parse(`${end}T23:59:59Z`) >= now;
+  const end = s.rights.liveUntil;
+  return !end || Date.parse(end) > now;
 }
 
 export interface CatalogSummary {
@@ -147,9 +183,9 @@ export function summarize(stations: AdminStation[]): CatalogSummary {
   return { total: c.all, visible: stations.filter((s) => visibleInApps(s)).length, pending: c.changes_pending, drafts: c.draft, disabled: c.disabled };
 }
 
-/** Days until the rights end (negative once ended), or null when there is no end date. */
+/** Days until the rights end (negative once ended), or null when there is no end date or no record. */
 export function rightsDaysLeft(s: AdminStation, now = Date.now()): number | null {
-  const end = s.draft.rightsExpiresAt;
+  const end = s.rights.state === 'current' || s.rights.state === 'expired' ? s.rights.expiresAt : null;
   return end ? Math.ceil((Date.parse(`${end}T23:59:59Z`) - now) / 86_400_000) : null;
 }
 
@@ -277,6 +313,8 @@ export const ACTION_LABELS: Record<string, string> = {
   'station.disable': 'ปิดสถานี',
   'station.enable': 'เปิดสถานีอีกครั้ง',
   'station.check': 'ตรวจสตรีม',
+  'rights.add': 'เพิ่มหลักฐานสิทธิ์สถานี',
+  'rights.revoke': 'เพิกถอนสิทธิ์สถานี',
   'staff_role.grant': 'ให้สิทธิ์ทีมงาน',
   'staff_role.revoke': 'ถอนสิทธิ์ทีมงาน',
   'logs.search': 'ค้นบันทึกระบบ',
@@ -305,6 +343,7 @@ export const actionFamily = (a: string) => a.split('.')[0];
 export const AUDIT_FAMILIES = [
   { id: '', label: 'ทุกการกระทำ' },
   { id: 'station', label: 'สถานี' },
+  { id: 'rights', label: 'สิทธิ์สถานี' },
   { id: 'staff_role', label: 'สิทธิ์ทีมงาน' },
   { id: 'logs', label: 'การค้นบันทึก' },
   { id: 'audit', label: 'การดูประวัติ' },
