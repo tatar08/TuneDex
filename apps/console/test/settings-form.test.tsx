@@ -150,6 +150,8 @@ describe('SettingsForm', () => {
       lastSeenAt: '2026-10-03T17:30:00.000Z',
       lastSyncedAt: null,
       revokedAt: null,
+      overrides: {},
+      preferencesRevision: 0,
       ...extra,
     });
 

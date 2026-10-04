@@ -201,7 +201,7 @@ describe('devices through the BFF and the real API', () => {
     const cookie = await signIn('bff-devices');
     const empty = await devices(cookie);
     expect(empty.status).toBe(200);
-    expect(await empty.json()).toEqual({ settingsRevision: 0, devices: [] });
+    expect(await empty.json()).toEqual({ settingsRevision: 0, devices: [], serverObservedAt: expect.any(String) });
 
     const phone = await idp.accessTokenFor('bff-devices');
     const put = await fetch(`${api.url}/v1/me/devices/0b9a4f8e-6c1d-4e2a-9f3b-1a2b3c4d5e6f`, {
@@ -213,7 +213,7 @@ describe('devices through the BFF and the real API', () => {
 
     const listed = await (await devices(cookie)).json();
     expect(listed.devices).toHaveLength(1);
-    expect(listed.devices[0]).toMatchObject({ platform: 'android', appliedSettingsRevision: 0 });
+    expect(listed.devices[0]).toMatchObject({ platform: 'android', appliedSettingsRevision: 0, overrides: {}, preferencesRevision: 0 });
     expect((await (await devices(await signIn('bff-devices-other'))).json()).devices).toEqual([]);
   });
 

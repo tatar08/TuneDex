@@ -48,6 +48,18 @@ export interface DeviceView {
   /** When the phone last finished a sync; null if it never synced. */
   lastSyncedAt: string | null;
   revokedAt: string | null;
+  /** Settings this device sets differently from the account; {} follows the account. */
+  overrides: Partial<SettingsView['settings']>;
+  preferencesRevision: number;
+}
+
+export interface DevicePreferencesView {
+  deviceId: string;
+  revision: number;
+  overrides: Partial<SettingsView['settings']>;
+  effective: SettingsView['settings'];
+  accountRevision: number;
+  updatedAt: string | null;
 }
 
 /** A live favorite from GET /v1/me/favorites; `revision` is what a change must name to apply. */
@@ -80,6 +92,7 @@ export type SyncResult =
 
 export interface DevicesView {
   settingsRevision: number;
+  serverObservedAt?: string;
   devices: DeviceView[];
 }
 
@@ -614,6 +627,12 @@ export function createBff(deps: BffDeps) {
     supportReports: (req: Request, userId: string) =>
       timed(req, '/bff/admin/users/:id/diagnostics', (requestId) =>
         DEVICE_ID.test(userId) ? adminProxy(req, requestId, `/v1/admin/users/${userId}/diagnostics`, false) : Promise.resolve(notFound(requestId)),
+      ),
+
+    /** GET or PUT /bff/devices/{id}/preferences: one device's overrides (PUT forwards If-Match). */
+    devicePreferences: (req: Request, id: string) =>
+      timed(req, '/bff/devices/:id/preferences', (requestId) =>
+        DEVICE_ID.test(id) ? adminProxy(req, requestId, `/v1/me/devices/${id}/preferences`, req.method === 'PUT') : Promise.resolve(notFound(requestId)),
       ),
 
     /** GET /bff/support-access: the accesses this customer has given support. */

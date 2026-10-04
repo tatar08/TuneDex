@@ -332,3 +332,37 @@ test('the overview shows each phone’s last sync, and favorites picked on the w
   await expect(page.getByText('สถานีโปรด 1 สถานี')).toBeVisible();
   if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/overview.png`, fullPage: true });
 });
+
+test('one device keeps its own theme, previewed on the settings page and reset from the devices page', async ({ browser }) => {
+  const token = await idp.accessTokenFor('e2e-hana');
+  const car = crypto.randomUUID();
+  expect(
+    (await fetch(`${api.url}/v1/me/devices/${car}`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'android', osMajor: 15, appBuild: '1.0.0+42', appliedSettingsRevision: 0 }),
+    })).status,
+  ).toBe(200);
+
+  idp.setUser('e2e-hana');
+  const page = await (await browser.newContext()).newPage();
+  await page.goto(`${base}/auth/login?returnTo=/app/settings`);
+  const device = page.getByTestId('device');
+  await device.getByText('ค่าเฉพาะเครื่องนี้').click();
+  await device.getByLabel('ธีมของแอป').selectOption('dark');
+  await expect(device.getByTestId('effective')).toHaveText('เครื่องนี้จะใช้: มืด · ไทย · อนุญาต');
+  await device.getByRole('button', { name: 'บันทึกค่าเฉพาะเครื่อง' }).click();
+  await expect(device.getByRole('button', { name: 'กลับไปใช้ตามบัญชี' })).toBeVisible();
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/device-overrides.png`, fullPage: true });
+
+  // The phone reads what it should apply.
+  const prefs = await (await fetch(`${api.url}/v1/me/devices/${car}/preferences`, { headers: { authorization: `Bearer ${token}` } })).json();
+  expect(prefs).toMatchObject({ overrides: { theme: 'dark' }, effective: { theme: 'dark' } });
+
+  await page.goto(`${base}/app/devices`);
+  await expect(page.getByText('มีค่าเฉพาะเครื่อง')).toBeVisible();
+  await page.getByRole('button', { name: 'กลับไปใช้ตามบัญชี' }).click();
+  await expect(page.getByText('มีค่าเฉพาะเครื่อง')).toHaveCount(0);
+  const after = await (await fetch(`${api.url}/v1/me/devices/${car}/preferences`, { headers: { authorization: `Bearer ${token}` } })).json();
+  expect(after.overrides).toEqual({});
+});

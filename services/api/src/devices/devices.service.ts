@@ -4,6 +4,7 @@ import { StructuredLogger } from '../common/logger';
 import { writeAudit } from '../audit/audit';
 import { ApiError } from '../common/api-error';
 import { Database } from '../db/database';
+import { normalizeOverrides, Overrides } from './device-preferences';
 import { DeviceReport, MAX_ACTIVE_DEVICES } from './devices.schema';
 
 export interface DeviceView {
@@ -17,6 +18,10 @@ export interface DeviceView {
   /** When the device last finished a sync push or pull; null if it never synced. */
   lastSyncedAt: string | null;
   revokedAt: string | null;
+  /** Settings this device sets differently from the account (Doc 17 device_preferences); {} follows the account. */
+  overrides: Overrides;
+  /** The device's own preferences revision, 0 until first set. */
+  preferencesRevision: number;
 }
 
 interface Row {
@@ -28,9 +33,13 @@ interface Row {
   last_seen_at: Date;
   last_synced_at: Date | null;
   revoked_at: Date | null;
+  pref_value: unknown;
+  pref_revision: string | null;
 }
 
-const COLUMNS = 'id, platform, os_major, app_build, applied_settings_revision, last_seen_at, last_synced_at, revoked_at';
+const COLUMNS = `id, platform, os_major, app_build, applied_settings_revision, last_seen_at, last_synced_at, revoked_at,
+  (SELECT p.value FROM device_preferences p WHERE p.user_id = devices.user_id AND p.device_id = devices.id) AS pref_value,
+  (SELECT p.revision FROM device_preferences p WHERE p.user_id = devices.user_id AND p.device_id = devices.id) AS pref_revision`;
 
 const toView = (r: Row): DeviceView => ({
   id: r.id,
@@ -41,6 +50,8 @@ const toView = (r: Row): DeviceView => ({
   lastSeenAt: r.last_seen_at.toISOString(),
   lastSyncedAt: r.last_synced_at ? r.last_synced_at.toISOString() : null,
   revokedAt: r.revoked_at ? r.revoked_at.toISOString() : null,
+  overrides: normalizeOverrides(r.pref_value),
+  preferencesRevision: Number(r.pref_revision ?? 0),
 });
 
 /** A failed Keycloak session end is retried this often, for devices signed out in the last 30 days. */
@@ -89,12 +100,13 @@ export class DevicesService implements OnApplicationBootstrap, OnApplicationShut
     }
   }
 
-  async list(ownerId: string): Promise<{ settingsRevision: number; devices: DeviceView[] }> {
+  /** `serverObservedAt` (Doc 17): the server's clock when the list was read, to compare last-seen times against. */
+  async list(ownerId: string): Promise<{ settingsRevision: number; serverObservedAt: string; devices: DeviceView[] }> {
     const [devices, settings] = await Promise.all([
       this.db.query<Row>(`SELECT ${COLUMNS} FROM devices WHERE user_id = $1 ORDER BY revoked_at NULLS FIRST, last_seen_at DESC`, [ownerId]),
       this.db.query<{ revision: string }>('SELECT revision FROM account_preferences WHERE owner_id = $1', [ownerId]),
     ]);
-    return { settingsRevision: Number(settings[0]?.revision ?? 0), devices: devices.map(toView) };
+    return { settingsRevision: Number(settings[0]?.revision ?? 0), serverObservedAt: new Date().toISOString(), devices: devices.map(toView) };
   }
 
   /**

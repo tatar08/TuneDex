@@ -23,6 +23,7 @@ import { requestContext } from './common/request-context';
 import { APP_CONFIG, AppConfig } from './config';
 import { Database, PG_POOL } from './db/database';
 import { DevicesController } from './devices/devices.controller';
+import { DevicePreferencesController, DevicePreferencesService } from './devices/device-preferences';
 import { AdminSupportDiagnosticsController, MySupportAccessController, SupportAccessService } from './diagnostics/support-access';
 import { DiagnosticsService, DiagnosticsUploadController, LIMITS as DIAGNOSTIC_LIMITS, MyDiagnosticsController } from './diagnostics/diagnostics';
 import { DevicesService } from './devices/devices.service';
@@ -63,7 +64,7 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, MyExportsController, ExportDownloadController, AdminOverviewController, AdminMetricsController, AdminJobsController, AdminUsersController, AdminSupportDiagnosticsController, MySupportAccessController, AdminConfigController, PublicConfigController, SyncController, FavoritesController, BillingController],
+      controllers: [HealthController, SettingsController, DevicesController, DevicePreferencesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, MyExportsController, ExportDownloadController, AdminOverviewController, AdminMetricsController, AdminJobsController, AdminUsersController, AdminSupportDiagnosticsController, MySupportAccessController, AdminConfigController, PublicConfigController, SyncController, FavoritesController, BillingController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },
@@ -78,6 +79,7 @@ export class AppModule {
         UsersService,
         SettingsService,
         DevicesService,
+        DevicePreferencesService,
         DiagnosticsService,
         AccountService,
         IdpUsersService,
