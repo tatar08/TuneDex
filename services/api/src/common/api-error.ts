@@ -22,6 +22,7 @@ export type ErrorCode =
   | 'SYNC_RESET_REQUIRED'
   | 'PURCHASE_INVALID'
   | 'PURCHASE_CONFLICT'
+  | 'MFA_REQUIRED'
   | 'INTERNAL';
 
 export const MESSAGE_KEYS: Record<ErrorCode, string> = {
@@ -46,6 +47,7 @@ export const MESSAGE_KEYS: Record<ErrorCode, string> = {
   SYNC_RESET_REQUIRED: 'errors.sync.resetRequired',
   PURCHASE_INVALID: 'errors.billing.invalid',
   PURCHASE_CONFLICT: 'errors.billing.ownedByAnotherAccount',
+  MFA_REQUIRED: 'errors.auth.mfaRequired',
   INTERNAL: 'errors.service.internal',
 };
 

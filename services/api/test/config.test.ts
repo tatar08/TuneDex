@@ -73,7 +73,7 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, CONFIG_SIGNING_KEY: 'not a key' })).toThrow('CONFIG_SIGNING_KEY');
     const idp = { KEYCLOAK_ADMIN_CLIENT_ID: 'a', KEYCLOAK_ADMIN_CLIENT_SECRET: 'b' };
     expect(() => loadConfig({ ...base, ...idp, APP_ENV: 'staging' })).toThrow('CONFIG_SIGNING_KEY');
-    expect(loadConfig({ ...base, ...idp, APP_ENV: 'staging', CONFIG_SIGNING_KEY: pem }).configSigningKey).toBe(pem);
+    expect(loadConfig({ ...base, ...idp, APP_ENV: 'staging', CONFIG_SIGNING_KEY: pem, STAFF_MFA_ACR: '2' }).configSigningKey).toBe(pem);
   });
 
   it('keeps billing off per store until it is configured, then requires everything that store needs', () => {
@@ -94,5 +94,15 @@ describe('loadConfig', () => {
       GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT: 'rtdn@p.iam.gserviceaccount.com',
     }).billing.google;
     expect(google).toMatchObject({ packageName: 'app.tunedeck', serviceAccount: { clientEmail: 'a@b' } });
+  });
+
+  it('requires the MFA acr values outside dev, and removes old audit records unless told not to', () => {
+    expect(loadConfig(base).staffMfaAcr).toBeNull();
+    expect(loadConfig({ ...base, STAFF_MFA_ACR: '2, gold' }).staffMfaAcr).toEqual(['2', 'gold']);
+    const pem = '-----BEGIN PRIVATE KEY-----\\nx\\n-----END PRIVATE KEY-----';
+    const staging = { ...base, APP_ENV: 'staging', KEYCLOAK_ADMIN_CLIENT_ID: 'a', KEYCLOAK_ADMIN_CLIENT_SECRET: 'b', CONFIG_SIGNING_KEY: pem };
+    expect(() => loadConfig(staging)).toThrow('STAFF_MFA_ACR');
+    expect(loadConfig(base).auditRetentionEnabled).toBe(true);
+    expect(loadConfig({ ...base, AUDIT_RETENTION_ENABLED: 'false' }).auditRetentionEnabled).toBe(false);
   });
 });

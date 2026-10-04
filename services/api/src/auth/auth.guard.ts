@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import { errors, jwtVerify, JWTVerifyGetKey } from 'jose';
 import { ApiError, DependencyUnavailableError } from '../common/api-error';
 import { APP_CONFIG, AppConfig } from '../config';
+import { Database } from '../db/database';
 import { EmailClaim, emailClaim, UsersService } from '../users/users.service';
 
 /** Resolves signing keys for token verification (remote JWKS at runtime, a local key set in tests). */
@@ -31,6 +32,7 @@ export class AuthGuard implements CanActivate {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(KEY_RESOLVER) private readonly keys: JWTVerifyGetKey,
     private readonly users: UsersService,
+    private readonly db: Database,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -43,6 +45,8 @@ export class AuthGuard implements CanActivate {
     let authTime: number | undefined;
     let issuedAt: number | undefined;
     let email: EmailClaim | undefined;
+    let sid: string | undefined;
+    let acr: string | undefined;
     try {
       const { payload } = await jwtVerify(match[1], this.keys, {
         issuer: this.config.oidc.issuer,
@@ -55,6 +59,8 @@ export class AuthGuard implements CanActivate {
       authTime = typeof payload.auth_time === 'number' ? payload.auth_time : undefined;
       issuedAt = typeof payload.iat === 'number' ? payload.iat : undefined;
       email = emailClaim(payload);
+      sid = typeof payload.sid === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(payload.sid) ? payload.sid : undefined;
+      acr = typeof payload.acr === 'string' ? payload.acr : undefined;
     } catch (err) {
       if (TOKEN_ERRORS.some((E) => err instanceof E)) {
         throw new ApiError(HttpStatus.UNAUTHORIZED, 'AUTH_REQUIRED');
@@ -68,7 +74,14 @@ export class AuthGuard implements CanActivate {
     if (!user) throw new ApiError(HttpStatus.FORBIDDEN, 'ACCOUNT_DELETING');
     if (user.status === 'deleting') throw new ApiError(HttpStatus.FORBIDDEN, 'ACCOUNT_DELETING');
     if (user.status !== 'active') throw new ApiError(HttpStatus.FORBIDDEN, 'AUTH_FORBIDDEN');
-    req.actor = { userId: user.id, authTime };
+    // A phone signed out from the web: its Keycloak session is refused here even if Keycloak still refreshes it.
+    if (sid) {
+      const revoked = await this.db.query('SELECT 1 FROM devices WHERE user_id = $1 AND idp_session_id = $2 AND revoked_at IS NOT NULL LIMIT 1', [user.id, sid]);
+      if (revoked.length > 0) throw new ApiError(HttpStatus.FORBIDDEN, 'DEVICE_REVOKED');
+    }
+    const mfaRequired = this.config.staffMfaAcr !== null;
+    const mfaAt = mfaRequired && acr !== undefined && this.config.staffMfaAcr!.includes(acr) ? authTime : undefined;
+    req.actor = { userId: user.id, authTime, sid, mfaAt, mfaRequired };
     return true;
   }
 }

@@ -7,6 +7,7 @@ import { RATE_LIMITED, BLOCKER_LABELS, FIELD_LABELS, formatDateTime, REASON_LABE
 import type { AdminStation, HealthCheck, StationDraft } from '@/lib/bff';
 import { useAdmin } from '../AdminShell';
 import { HealthPanel } from './HealthPanel';
+import { isMfaRequired, MfaLink, MFA_NEEDED } from '../MfaPrompt';
 
 type Form = Record<keyof StationDraft, string>;
 const FIELDS = Object.keys(FIELD_LABELS).filter((k) => k !== 'reason') as (keyof StationDraft)[];
@@ -56,7 +57,7 @@ function toDraft(f: Form): StationDraft {
 const display = (k: keyof StationDraft, v: unknown) =>
   v === null || v === undefined || v === '' ? '—' : k === 'rightsBasis' ? RIGHTS_BASIS_LABELS[v as string] ?? String(v) : Array.isArray(v) ? v.join(', ') : String(v);
 
-type Problem = { kind: 'field'; field: string; reason: string } | { kind: 'conflict'; revision: number } | { kind: 'message'; text: string };
+type Problem = { kind: 'field'; field: string; reason: string } | { kind: 'conflict'; revision: number } | { kind: 'message'; text: string } | { kind: 'mfa' };
 
 export function StationEditor({ station: initial, history = [] }: { station?: AdminStation; history?: HealthCheck[] }) {
   const { csrfToken, canEdit, isAdmin } = useAdmin();
@@ -107,6 +108,7 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
     else if (res.status === 412) setProblem({ kind: 'conflict', revision: d.currentRevision });
     else if (res.status === 409 && body.code === 'PUBLISH_BLOCKED')
       setProblem({ kind: 'message', text: (d.reasons as string[]).map((r) => BLOCKER_LABELS[r] ?? r).join(' · ') });
+    else if (isMfaRequired(res.status, body)) setProblem({ kind: 'mfa' });
     else if (res.status === 401) setProblem({ kind: 'message', text: 'หมดเวลาเข้าใช้งาน กรุณาเข้าสู่ระบบอีกครั้ง' });
     else if (res.status === 403) setProblem({ kind: 'message', text: 'บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้' });
     else if (res.status === 429) setProblem({ kind: 'message', text: `${RATE_LIMITED} ยังไม่ได้บันทึก` });
@@ -195,6 +197,11 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
           )}
           {problem.kind === 'field' && `${FIELD_LABELS[problem.field] ?? problem.field}: ${REASON_LABELS[problem.reason] ?? problem.reason}`}
           {problem.kind === 'message' && problem.text}
+          {problem.kind === 'mfa' && (
+            <>
+              {MFA_NEEDED} <MfaLink />
+            </>
+          )}
         </div>
       )}
       <p className={notice ? 'adm-ok' : 'sr-only'} role="status">

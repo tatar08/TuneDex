@@ -25,7 +25,7 @@ export class DevicesController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<DeviceView> {
     res.setHeader('Cache-Control', 'no-store');
-    return this.devices.report(req.actor!.userId, parseDeviceId(deviceId), parseDeviceReport(body));
+    return this.devices.report(req.actor!.userId, parseDeviceId(deviceId), parseDeviceReport(body), req.actor!.sid);
   }
 
   /** Signs a device out of the account. Requires the user to have signed in within the last 5 minutes. */

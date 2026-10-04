@@ -10,7 +10,7 @@ export type IdpDeleteResult = 'deleted' | 'already_gone' | 'not_configured';
 /** A failed call to the identity provider. Carries the HTTP status only, never a body or token. */
 export class IdpError extends Error {
   override name = 'IdpError';
-  constructor(readonly step: 'token' | 'delete', readonly status: number) {
+  constructor(readonly step: 'token' | 'delete' | 'session', readonly status: number) {
     super(`identity provider ${step} failed (${status})`);
   }
 }
@@ -32,15 +32,33 @@ export class IdpUsersService {
   async deleteUser(subject: string): Promise<IdpDeleteResult> {
     const admin = this.config.idpAdmin;
     if (!admin) return 'not_configured';
-    const res = await this.http(`${admin.adminBase}/users/${encodeURIComponent(subject)}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${await this.accessToken()}` },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (res.status === 401) this.token = null; // revoked or rotated: fetch a new one on the next attempt
+    const res = await this.adminDelete(`${admin.adminBase}/users/${encodeURIComponent(subject)}`);
     if (res.status === 404) return 'already_gone';
     if (!res.ok) throw new IdpError('delete', res.status);
     return 'deleted';
+  }
+
+  /**
+   * Ends one Keycloak session (online and offline), so the signed-out phone's refresh token stops working at
+   * Keycloak too. A session that is already gone counts as ended.
+   */
+  async endSession(sid: string): Promise<'ended' | 'not_configured'> {
+    const admin = this.config.idpAdmin;
+    if (!admin) return 'not_configured';
+    for (const offline of [false, true]) {
+      const res = await this.adminDelete(`${admin.adminBase}/sessions/${encodeURIComponent(sid)}${offline ? '?isOffline=true' : ''}`);
+      if (!res.ok && res.status !== 404) throw new IdpError('session', res.status);
+    }
+    return 'ended';
+  }
+
+  /** A cached token Keycloak no longer accepts (revoked, keys rotated, server rebuilt) is replaced and the call retried once. */
+  private async adminDelete(url: string): Promise<Response> {
+    for (let attempt = 0; ; attempt++) {
+      const res = await this.http(url, { method: 'DELETE', headers: { Authorization: `Bearer ${await this.accessToken()}` }, signal: AbortSignal.timeout(10_000) });
+      if (res.status !== 401 || attempt > 0) return res;
+      this.token = null;
+    }
   }
 
   private async accessToken(): Promise<string> {

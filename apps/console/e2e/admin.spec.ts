@@ -250,6 +250,19 @@ test('auditors read who changed what; reading is recorded', async ({ browser }) 
   await expect(editor.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูประวัติการแก้ไข');
 });
 
+test('when the API asks for recent MFA, the export offers a sign-in with MFA that returns here', async ({ browser }) => {
+  const aud = await signInAs(browser, 'e2e-auditor', '/admin/audit');
+  // The e2e API runs as dev without STAFF_MFA_ACR, so the MFA answer is staged at the browser.
+  await aud.route('**/bff/admin/audit/export**', (r) =>
+    r.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ code: 'MFA_REQUIRED', details: { maxAgeSeconds: 300 } }) }),
+  );
+  await aud.getByRole('button', { name: 'ส่งออก CSV' }).first().click();
+  await aud.getByLabel('เหตุผลในการส่งออก (จะถูกบันทึกไว้)').fill('quarterly review of changes');
+  await aud.getByRole('button', { name: 'ดาวน์โหลด CSV' }).click();
+  await expect(aud.locator('.au-export-err')).toContainText('MFA ภายใน 5 นาที');
+  await expect(aud.getByRole('link', { name: 'ยืนยัน MFA แล้วกลับมาหน้านี้' })).toHaveAttribute('href', `/auth/login?mfa=1&returnTo=${encodeURIComponent('/admin/audit')}`);
+});
+
 test('the audit page has its own layout in each theme', async ({ browser }) => {
   const page = await signInAs(browser, 'e2e-admin', '/admin/audit');
   const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');

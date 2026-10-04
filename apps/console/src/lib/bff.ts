@@ -406,7 +406,8 @@ export function createBff(deps: BffDeps) {
       });
       if (res.status !== 401) return res;
       // A step-up demand is not an expired token: hand it back without refreshing or ending the session.
-      if ((await res.clone().json().catch(() => null))?.code === 'REAUTH_REQUIRED') return res;
+      const code = (await res.clone().json().catch(() => null))?.code;
+      if (code === 'REAUTH_REQUIRED' || code === 'MFA_REQUIRED') return res;
     }
     await store.delete(ctx.id);
     return null;
@@ -634,13 +635,15 @@ export function createBff(deps: BffDeps) {
 
     /**
      * GET /auth/login — starts authorization code + PKCE; the destination is limited to /app/ paths.
-     * `reauth=1` makes the provider ask for credentials again, for actions that need a recent sign-in.
+     * `reauth=1` makes the provider ask for credentials again, for actions that need a recent sign-in;
+     * `mfa=1` also asks for the MFA level, for staff actions the API guards with a recent-MFA check.
      */
     login: (req: Request) =>
       timed(req, '/auth/login', async () => {
         const params = new URL(req.url).searchParams;
         const returnTo = safeReturnTo(params.get('returnTo'));
-        const reauth = params.get('reauth') === '1';
+        const mfa = params.get('mfa') === '1';
+        const reauth = mfa || params.get('reauth') === '1';
         const tx = {
           state: randomToken(),
           nonce: randomToken(),
@@ -649,7 +652,7 @@ export function createBff(deps: BffDeps) {
           exp: Date.now() + LOGIN_TX_SECONDS * 1000,
           ...(reauth ? { reauthSince: Math.floor(Date.now() / 1000) } : {}),
         };
-        const url = await oidc.authorizeUrl({ ...tx, reauth });
+        const url = await oidc.authorizeUrl({ ...tx, reauth, mfa });
         return redirect(url, 302, [
           serializeCookie(names.tx, sealTransaction(tx, config.sessionSecret), { secure, maxAgeSeconds: LOGIN_TX_SECONDS }),
         ]);
