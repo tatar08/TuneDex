@@ -157,6 +157,8 @@ export const canSeeStations = (roles: StaffRole[]) => roles.includes('catalog_ed
 export const canSeeLogs = (roles: StaffRole[]) => roles.includes('operator') || roles.includes('admin');
 export const canSeeAudit = (roles: StaffRole[]) => roles.includes('auditor') || roles.includes('admin');
 export const canSeeUsers = (roles: StaffRole[]) => roles.includes('support') || roles.includes('admin');
+/** Operators can look at the app configuration; only admins draft, publish or roll it back. */
+export const canSeeConfig = (roles: StaffRole[]) => roles.includes('operator') || roles.includes('admin');
 
 export const LOG_RANGES = [
   { id: '15m', label: '15 นาทีล่าสุด', ms: 15 * 60_000 },
@@ -276,6 +278,9 @@ export const ACTION_LABELS: Record<string, string> = {
   'account.deleted': 'ลบข้อมูลบัญชีเสร็จ',
   'job.retry': 'สั่งงานเบื้องหลังซ้ำ',
   'user.lookup': 'เปิดดูข้อมูลผู้ใช้',
+  'config.update': 'แก้ร่างตั้งค่าแอป',
+  'config.publish': 'เผยแพร่ตั้งค่าแอป',
+  'config.rollback': 'ย้อนตั้งค่าแอป',
 };
 export const actionLabel = (a: string) => ACTION_LABELS[a] ?? a;
 /** Family used for colors and the action filter. */
@@ -286,6 +291,7 @@ export const AUDIT_FAMILIES = [
   { id: 'staff_role', label: 'สิทธิ์ทีมงาน' },
   { id: 'logs', label: 'การค้นบันทึก' },
   { id: 'audit', label: 'การดูประวัติ' },
+  { id: 'config', label: 'ตั้งค่าแอป' },
 ] as const;
 
 export const AUDIT_FIELD_LABELS: Record<string, string> = {

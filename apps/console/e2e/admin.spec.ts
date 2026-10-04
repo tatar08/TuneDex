@@ -10,6 +10,7 @@ test.beforeAll(async () => {
   stack.api.staff('grant', 'e2e-ops', 'operator', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-auditor', 'auditor', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-support', 'support', '--by', 'e2e', '--reason', 'test');
+  stack.api.staff('grant', 'e2e-admin2', 'admin', '--by', 'e2e', '--reason', 'test');
 });
 
 test.afterAll(async () => {
@@ -462,3 +463,54 @@ test('support looks up a customer by email or device id with a reason, in every 
   await ops.goto(`${stack.base}/admin/users`);
   await expect(ops.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูข้อมูลผู้ใช้');
 });
+
+test('an admin drafts the app config, a second admin publishes it signed, in every theme', async ({ browser }) => {
+  const author = await signInAs(browser, 'e2e-admin', '/admin/config');
+  await expect(author.getByText('ยังไม่เคยเผยแพร่ แอปใช้ค่าเริ่มต้นของแอปเอง').first()).toBeVisible();
+  await author.getByLabel('build ขั้นต่ำ iOS').fill('42');
+  await author.getByLabel('นำเข้าเพลย์ลิสต์ M3U/EPG').uncheck();
+  await author.getByRole('button', { name: 'บันทึกร่าง' }).click();
+  await expect(author.getByText('บันทึกร่างแล้ว')).toBeVisible();
+  await expect(author.getByText('คุณแก้ร่างนี้เอง ต้องให้แอดมินอีกคนตรวจและเผยแพร่')).toBeVisible();
+  await expect(author.getByText('build ขั้นต่ำ iOS, นำเข้าเพลย์ลิสต์').first()).toBeVisible();
+
+  const reviewer = await signInAs(browser, 'e2e-admin2', '/admin/config');
+  await reviewer.locator('#cf-reason').fill('build 41 ล่มตอนนำเข้า บังคับ 42 และปิดนำเข้าชั่วคราว');
+  await reviewer.getByLabel('ใช้ได้นาน').selectOption('14');
+  if (SHOTS) await reviewer.screenshot({ path: `${SHOTS}/config-publish.png`, fullPage: true });
+  await reviewer.getByRole('button', { name: 'เผยแพร่ร่าง r1' }).click();
+  await expect(reviewer.getByText('เผยแพร่แล้ว')).toBeVisible();
+  await expect(reviewer.getByText('แอปใช้ รุ่น 1').first()).toBeVisible();
+
+  // What the apps get: release 1, signed (the JWS payload carries the same document).
+  const served = await (await fetch(`${stack.api.url}/v1/config`)).json();
+  expect(served).toMatchObject({ release: 1, config: { minSupportedBuild: { ios: 42, android: null }, features: { playlistImport: false } } });
+  expect(served.jws.split('.')).toHaveLength(3);
+
+  const picker = reviewer.getByLabel('เลือกธีมหน้าทีมงาน');
+  const layouts: Record<string, string> = {
+    'control-room': '.t-control-room .cr-page.cf .cf-cols .cf-form',
+    'broadcast-rack': '.t-broadcast-rack .br-page.cf .cf-rack .cf-form',
+    'daylight-bento': '.t-daylight-bento .cf-bento .cf-b-draft .cf-form',
+    workbench: '.t-workbench .split .det .cf-form',
+    minimal: '.t-minimal .fv-dash.cf .cf-cols .cf-form',
+  };
+  for (const [theme, selector] of Object.entries(layouts)) {
+    await picker.selectOption(theme);
+    await expect(reviewer.locator(selector)).toBeVisible();
+    await expect(reviewer.getByText('รุ่น 1').first()).toBeVisible();
+    if (SHOTS) await reviewer.screenshot({ path: `${SHOTS}/config-${theme}.png`, fullPage: true });
+  }
+
+  // Operators can look but not change anything.
+  const ops = await signInAs(browser, 'e2e-ops', '/admin/config');
+  await expect(ops.getByText('ดูได้อย่างเดียว เฉพาะแอดมินแก้ไขได้')).toBeVisible();
+  await expect(ops.getByLabel('build ขั้นต่ำ iOS')).toBeDisabled();
+  await expect(ops.getByRole('button', { name: /ย้อนไปใช้รุ่น/ })).toHaveCount(0);
+  const editor = await signInAs(browser, 'e2e-editor', '/admin/stations');
+  await expect(editor.getByRole('link', { name: 'ตั้งค่าแอป' })).toHaveCount(0);
+
+  const audit = (await stack.api.sql(`SELECT action FROM audit_events WHERE target_type = 'config' ORDER BY id`)) as { rows: { action: string }[] };
+  expect(audit.rows.map((r) => r.action)).toEqual(['config.update', 'config.publish']);
+});
+
