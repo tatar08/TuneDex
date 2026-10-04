@@ -39,13 +39,14 @@ const NAV = [
 ] as const;
 
 function ThemePicker({ theme, onChange }: { theme: ThemeId; onChange: (t: ThemeId) => void }) {
+  const t = useT();
   return (
     <label className="adm-theme">
-      <span>ธีม</span>
-      <select value={theme} onChange={(e) => onChange(e.target.value as ThemeId)} aria-label="เลือกธีมหน้าทีมงาน">
-        {THEMES.map((t) => (
-          <option key={t.id} value={t.id}>
-            {t.label}
+      <span>{t('ธีม')}</span>
+      <select value={theme} onChange={(e) => onChange(e.target.value as ThemeId)} aria-label={t('เลือกธีมหน้าทีมงาน')}>
+        {THEMES.map((th) => (
+          <option key={th.id} value={th.id}>
+            {th.label}
           </option>
         ))}
       </select>
@@ -54,16 +55,18 @@ function ThemePicker({ theme, onChange }: { theme: ThemeId; onChange: (t: ThemeI
 }
 
 function SignOut({ csrfToken, className }: { csrfToken: string; className?: string }) {
+  const t = useT();
   return (
     <form method="post" action="/auth/logout" className={className}>
       <input type="hidden" name="csrf" value={csrfToken} />
-      <button type="submit" className="adm-link">ออกจากระบบ</button>
+      <button type="submit" className="adm-link">{t('ออกจากระบบ')}</button>
     </form>
   );
 }
 
 /** Live Thailand-time clock for the Broadcast Rack display. */
 function Vfd() {
+  const t = useT();
   const [now, setNow] = useState<string>('');
   useEffect(() => {
     const fmt = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Bangkok', hour12: false });
@@ -73,7 +76,7 @@ function Vfd() {
     return () => clearInterval(id);
   }, []);
   return (
-    <span className="vfd" aria-label="เวลาประเทศไทย">
+    <span className="vfd" aria-label={t('เวลาประเทศไทย')}>
       BKK {now || '--:--:--'}
     </span>
   );
@@ -106,6 +109,7 @@ export function Icon({ name, className }: { name: keyof typeof ICONS; className?
 
 /** Sidebar search: filters the station list by name. */
 function SideSearch() {
+  const t = useT();
   const router = useRouter();
   const params = useSearchParams();
   const [q, setQ] = useState(params.get('q') ?? '');
@@ -119,7 +123,7 @@ function SideSearch() {
       }}
     >
       <Icon name="search" />
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาสถานี…" aria-label="ค้นหาสถานี" />
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('ค้นหาสถานี…')} aria-label={t('ค้นหาสถานี')} />
     </form>
   );
 }
@@ -150,15 +154,15 @@ export function AdminShell({
   const isAdmin = roles.includes('admin');
   const t = translator(lang);
   const value: AdminContextValue = { theme, summary, roles, csrfToken, isAdmin, canEdit: isAdmin || roles.includes('catalog_editor'), lang, t };
-  const who = roles.map((r) => ROLE_LABELS[r]).join(', ');
+  const who = roles.map((r) => t(ROLE_LABELS[r])).join(', ');
   const nav = NAV.filter((n) => n.show(roles));
   const on = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
-  function changeTheme(t: ThemeId) {
-    setTheme(t);
+  function changeTheme(next: ThemeId) {
+    setTheme(next);
     // A per-viewer display preference, not a secret: readable cookie scoped to /admin.
     const secure = location.protocol === 'https:' ? '; Secure' : '';
-    document.cookie = `${THEME_COOKIE}=${t}; Path=/admin; Max-Age=31536000; SameSite=Lax${secure}`;
+    document.cookie = `${THEME_COOKIE}=${next}; Path=/admin; Max-Age=31536000; SameSite=Lax${secure}`;
   }
 
   function changeMode(m: Mode) {
@@ -178,7 +182,7 @@ export function AdminShell({
   );
   const links = nav.map((n) => (
     <Link key={n.href} href={n.href} className={on(n.href) ? 'on' : undefined} aria-current={on(n.href) ? 'page' : undefined}>
-      {n.label}
+      {t(n.label)}
     </Link>
   ));
 
@@ -191,17 +195,17 @@ export function AdminShell({
             <div className="logo">
               TuneDeck <span>· console</span>
             </div>
-            <nav className="grp" aria-label="เมนู">
+            <nav className="grp" aria-label={t('เมนู')}>
               <h6>Console</h6>
               {links}
             </nav>
-            <nav className="grp" aria-label="บัญชี">
+            <nav className="grp" aria-label={t('บัญชี')}>
               <h6>Account</h6>
-              <a href="/app/settings">การตั้งค่าของฉัน</a>
+              <a href="/app/settings">{t('การตั้งค่าของฉัน')}</a>
             </nav>
             <div className="me">
               <b>{who}</b>
-              <span>หมดเวลาเมื่อไม่ใช้งาน 30 นาที</span>
+              <span>{t('หมดเวลาเมื่อไม่ใช้งาน 30 นาที')}</span>
               {picker}
               <SignOut csrfToken={csrfToken} />
             </div>
@@ -217,9 +221,9 @@ export function AdminShell({
             <span className="brand">
               TUNE<span>DECK</span>
             </span>
-            <nav className="bands" aria-label="เมนู">
+            <nav className="bands" aria-label={t('เมนู')}>
               {links}
-              <a href="/app/settings">ตั้งค่าของฉัน</a>
+              <a href="/app/settings">{t('ตั้งค่าของฉัน')}</a>
             </nav>
             <Vfd />
             <span className="who">
@@ -240,9 +244,9 @@ export function AdminShell({
               <i aria-hidden="true" />
               TuneDeck
             </span>
-            <nav aria-label="เมนู">
+            <nav aria-label={t('เมนู')}>
               {links}
-              <a href="/app/settings">ตั้งค่าของฉัน</a>
+              <a href="/app/settings">{t('ตั้งค่าของฉัน')}</a>
             </nav>
             <span className="av">
               {picker}
@@ -258,16 +262,16 @@ export function AdminShell({
     case 'workbench':
       chrome = (
         <>
-          <nav className="rail" aria-label="เมนู">
+          <nav className="rail" aria-label={t('เมนู')}>
             <span className="lg" aria-hidden="true">
               T
             </span>
             {nav.map((n) => (
-              <Link key={n.href} href={n.href} className={on(n.href) ? 'on' : undefined} title={n.label} aria-label={n.label} aria-current={on(n.href) ? 'page' : undefined}>
+              <Link key={n.href} href={n.href} className={on(n.href) ? 'on' : undefined} title={t(n.label)} aria-label={t(n.label)} aria-current={on(n.href) ? 'page' : undefined}>
                 {n.short}
               </Link>
             ))}
-            <a href="/app/settings" title="ตั้งค่าของฉัน" aria-label="ตั้งค่าของฉัน">
+            <a href="/app/settings" title={t('ตั้งค่าของฉัน')} aria-label={t('ตั้งค่าของฉัน')}>
               ME
             </a>
           </nav>
@@ -286,7 +290,7 @@ export function AdminShell({
       chrome = (
         <>
           <aside className={`fv-side${collapsed ? ' collapsed' : ''}`}>
-            <button type="button" className="fv-collapse" onClick={() => setCollapsed((c) => !c)} aria-label={collapsed ? 'ขยายเมนู' : 'ยุบเมนู'} aria-expanded={!collapsed}>
+            <button type="button" className="fv-collapse" onClick={() => setCollapsed((c) => !c)} aria-label={collapsed ? t('ขยายเมนู') : t('ยุบเมนู')} aria-expanded={!collapsed}>
               <Icon name="chevron" />
             </button>
             <div className="fv-side-top">
@@ -302,28 +306,28 @@ export function AdminShell({
               <Suspense>
                 <SideSearch />
               </Suspense>
-              <nav className="fv-menu" aria-label="เมนู">
-                <span className="fv-section">เมนู</span>
+              <nav className="fv-menu" aria-label={t('เมนู')}>
+                <span className="fv-section">{t('เมนู')}</span>
                 {nav.map((n) => (
-                  <Link key={n.href} href={n.href} className={on(n.href) ? 'on' : undefined} aria-current={on(n.href) ? 'page' : undefined} title={n.label}>
+                  <Link key={n.href} href={n.href} className={on(n.href) ? 'on' : undefined} aria-current={on(n.href) ? 'page' : undefined} title={t(n.label)}>
                     <Icon name={n.icon} />
-                    <span className="fv-text">{n.label}</span>
+                    <span className="fv-text">{t(n.label)}</span>
                     {n.href === '/admin/stations' && summary && summary.pending > 0 && (
-                      <span className="fv-badge" aria-label={`รอตรวจ ${summary.pending}`}>
+                      <span className="fv-badge" aria-label={t('รอตรวจ {0}', summary.pending)}>
                         {summary.pending}
                       </span>
                     )}
                   </Link>
                 ))}
-                <a href="/app/settings" title="ตั้งค่าของฉัน">
+                <a href="/app/settings" title={t('ตั้งค่าของฉัน')}>
                   <Icon name="me" />
-                  <span className="fv-text">ตั้งค่าของฉัน</span>
+                  <span className="fv-text">{t('ตั้งค่าของฉัน')}</span>
                 </a>
               </nav>
             </div>
             <div className="fv-side-foot">
               <div className="fv-text">{picker}</div>
-              <div className="fv-mode" role="group" aria-label="โหมดสี">
+              <div className="fv-mode" role="group" aria-label={t('โหมดสี')}>
                 <button type="button" className={mode === 'light' ? 'on' : undefined} aria-pressed={mode === 'light'} onClick={() => changeMode('light')} title="Light">
                   <Icon name="sun" />
                   <span className="fv-text">Light</span>
@@ -339,11 +343,11 @@ export function AdminShell({
                 </span>
                 <span className="fv-text">
                   <b>{who}</b>
-                  <small>หมดเวลาเมื่อไม่ใช้งาน 30 นาที</small>
+                  <small>{t('หมดเวลาเมื่อไม่ใช้งาน 30 นาที')}</small>
                 </span>
                 <form method="post" action="/auth/logout">
                   <input type="hidden" name="csrf" value={csrfToken} />
-                  <button type="submit" className="fv-out" aria-label="ออกจากระบบ" title="ออกจากระบบ">
+                  <button type="submit" className="fv-out" aria-label={t('ออกจากระบบ')} title={t('ออกจากระบบ')}>
                     <Icon name="logout" />
                   </button>
                 </form>
@@ -359,21 +363,21 @@ export function AdminShell({
                 <div>
                   <h1>
                     TuneDeck Console{' '}
-                    {summary ? <span className="fv-live">เชื่อมต่อ API แล้ว</span> : canSeeStations(roles) && <span className="fv-live off">โหลดข้อมูลสรุปไม่ได้</span>}
+                    {summary ? <span className="fv-live">{t('เชื่อมต่อ API แล้ว')}</span> : canSeeStations(roles) && <span className="fv-live off">{t('โหลดข้อมูลสรุปไม่ได้')}</span>}
                   </h1>
-                  <p>จัดการแค็ตตาล็อกสถานีวิทยุที่แอปจะเห็น</p>
+                  <p>{t('จัดการแค็ตตาล็อกสถานีวิทยุที่แอปจะเห็น')}</p>
                 </div>
               </div>
               {summary && (
                 <div className="fv-tele">
                   <div>
-                    <small>แอปเห็นอยู่</small>
-                    <b>{summary.visible} สถานี</b>
+                    <small>{t('แอปเห็นอยู่')}</small>
+                    <b>{t('{0} สถานี', summary.visible)}</b>
                   </div>
                   <i aria-hidden="true" />
                   <div className="due">
-                    <small>รอตรวจ</small>
-                    <b>{summary.pending} สถานี</b>
+                    <small>{t('รอตรวจ')}</small>
+                    <b>{t('{0} สถานี', summary.pending)}</b>
                   </div>
                 </div>
               )}

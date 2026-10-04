@@ -21,11 +21,12 @@ import {
   subtitle,
 } from '@/lib/admin';
 import type { AdminStation } from '@/lib/bff';
-import { useAdmin } from '../AdminShell';
+import { useAdmin, useT } from '../AdminShell';
 import { MinimalDashboard } from './MinimalDashboard';
 
 const href = (s: AdminStation) => `/admin/stations/${s.id}`;
 const filterHref = (f: StatusFilter) => (f === 'all' ? '/admin/stations' : `/admin/stations?status=${f}`);
+/** Thai key; shown with t(). */
 const actionLabel = (s: AdminStation) => (s.status === 'changes_pending' || s.status === 'draft' ? 'ตรวจ' : 'แก้ไข');
 
 /** Stable, decorative card color from the station id (Daylight Bento). */
@@ -37,11 +38,12 @@ function artColor(id: string): string {
 }
 
 function Filters({ filter, counts, className }: { filter: StatusFilter; counts: Record<StatusFilter, number>; className: string }) {
+  const t = useT();
   return (
-    <nav className={className} aria-label="กรองตามสถานะ">
+    <nav className={className} aria-label={t('กรองตามสถานะ')}>
       {STATUS_FILTERS.map((f) => (
         <Link key={f} href={filterHref(f)} className={f === filter ? 'on' : undefined} aria-current={f === filter ? 'true' : undefined}>
-          {FILTER_LABELS[f]} {counts[f]}
+          {t(FILTER_LABELS[f])} {counts[f]}
         </Link>
       ))}
     </nav>
@@ -49,26 +51,28 @@ function Filters({ filter, counts, className }: { filter: StatusFilter; counts: 
 }
 
 function Empty({ filter }: { filter: StatusFilter }) {
-  return <p className="adm-empty">{filter === 'all' ? 'ยังไม่มีสถานี' : `ไม่มีสถานีที่${FILTER_LABELS[filter]}`}</p>;
+  const t = useT();
+  return <p className="adm-empty">{filter === 'all' ? t('ยังไม่มีสถานี') : t('ไม่มีสถานีที่{0}', t(FILTER_LABELS[filter]))}</p>;
 }
 
 /** Stream health for live stations; drafts and disabled stations show a dash. */
 function Health({ s, className = 'hl-line' }: { s: AdminStation; className?: string }) {
+  const t = useT();
   if (!isLive(s)) return <span className={`${className} dim`}>—</span>;
   const h = healthOf(s);
   return (
-    <span className={`${className} ${h.state}`} title={healthLine(h)}>
+    <span className={`${className} ${h.state}`} title={healthLine(h, t)}>
       <i className={`hl-dot ${h.state}`} aria-hidden="true" />
-      {HEALTH_LABELS[h.state]}
+      {t(HEALTH_LABELS[h.state])}
     </span>
   );
 }
 
 function NewButton({ className }: { className: string }) {
-  const { canEdit } = useAdmin();
+  const { canEdit, t } = useAdmin();
   return canEdit ? (
     <Link href="/admin/stations/new" className={className}>
-      + เพิ่มสถานี
+      {t('+ เพิ่มสถานี')}
     </Link>
   ) : null;
 }
@@ -86,6 +90,7 @@ export function WorkbenchSplit({
   children?: React.ReactNode;
 }) {
   const router = useRouter();
+  const { t, lang } = useAdmin();
   const [query, setQuery] = useState('');
   const counts = useMemo(() => countByStatus(stations), [stations]);
   const shown = stations
@@ -114,12 +119,12 @@ export function WorkbenchSplit({
 
   return (
     <div className="split">
-      <section className="list" aria-label="รายการสถานี">
+      <section className="list" aria-label={t('รายการสถานี')}>
         <div className="lh">
           <h3>
-            สถานีวิทยุ <span>{shown.length}</span>
+            {t('สถานีวิทยุ')} <span>{shown.length}</span>
           </h3>
-          <input className="cmd" placeholder="ค้นหาชื่อสถานี" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="ค้นหาชื่อสถานี" />
+          <input className="cmd" placeholder={t('ค้นหาชื่อสถานี')} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t('ค้นหาชื่อสถานี')} />
           <Filters filter={filter} counts={counts} className="tabs" />
           <NewButton className="btn" />
         </div>
@@ -135,7 +140,7 @@ export function WorkbenchSplit({
                 </Link>
                 <span className="r">r{s.revision}</span>
                 <small>
-                  {STATUS_LABELS[s.status]} · {subtitle(s)} · <span className={rightsSoon(s) ? 'wr' : undefined}>{rightsLine(s)}</span>
+                  {t(STATUS_LABELS[s.status])} · {subtitle(s, t)} · <span className={rightsSoon(s) ? 'wr' : undefined}>{rightsLine(s, t, lang)}</span>
                   {isLive(s) && (
                     <>
                       {' · '}
@@ -148,20 +153,20 @@ export function WorkbenchSplit({
           </ul>
         )}
         <p className="foot">
-          <kbd>j</kbd> <kbd>k</kbd> เลื่อน · <kbd>Enter</kbd> เปิด
+          <kbd>j</kbd> <kbd>k</kbd> {t('เลื่อน')} · <kbd>Enter</kbd> {t('เปิด')}
         </p>
       </section>
-      <section className="det">{children ?? <p className="adm-empty">เลือกสถานีจากรายการทางซ้าย</p>}</section>
+      <section className="det">{children ?? <p className="adm-empty">{t('เลือกสถานีจากรายการทางซ้าย')}</p>}</section>
     </div>
   );
 }
 
 export function StationsView({ stations, filter, query: initialQuery = '' }: { stations: AdminStation[]; filter: StatusFilter; query?: string }) {
-  const { theme } = useAdmin();
+  const { theme, t, lang } = useAdmin();
   const [query, setQuery] = useState('');
   const counts = useMemo(() => countByStatus(stations), [stations]);
   const shown = stations.filter((s) => filter === 'all' || s.status === filter);
-  const summary = `${counts.all} สถานี · เผยแพร่ ${counts.published} · รอตรวจ ${counts.changes_pending} · ร่าง ${counts.draft}`;
+  const summary = t('{0} สถานี · เผยแพร่ {1} · รอตรวจ {2} · ร่าง {3}', counts.all, counts.published, counts.changes_pending, counts.draft);
 
   if (theme === 'workbench') return <WorkbenchSplit stations={stations} filter={filter} />;
 
@@ -170,7 +175,7 @@ export function StationsView({ stations, filter, query: initialQuery = '' }: { s
       <div className="cr-page">
         <div className="top">
           <div className="crumb">
-            Catalog<b>สถานีวิทยุ</b>
+            Catalog<b>{t('สถานีวิทยุ')}</b>
           </div>
           <Filters filter={filter} counts={counts} className="seg" />
           <NewButton className="btn" />
@@ -182,15 +187,15 @@ export function StationsView({ stations, filter, query: initialQuery = '' }: { s
             <table>
               <thead>
                 <tr>
-                  <th scope="col">สถานี</th>
-                  <th scope="col">ภาษา / แนว</th>
-                  <th scope="col">สถานะ</th>
-                  <th scope="col">สิทธิ์</th>
-                  <th scope="col">สตรีม</th>
+                  <th scope="col">{t('สถานี')}</th>
+                  <th scope="col">{t('ภาษา / แนว')}</th>
+                  <th scope="col">{t('สถานะ')}</th>
+                  <th scope="col">{t('สิทธิ์')}</th>
+                  <th scope="col">{t('สตรีม')}</th>
                   <th scope="col">Rev</th>
-                  <th scope="col">แก้ไขล่าสุด</th>
+                  <th scope="col">{t('แก้ไขล่าสุด')}</th>
                   <th scope="col">
-                    <span className="sr-only">การทำงาน</span>
+                    <span className="sr-only">{t('การทำงาน')}</span>
                   </th>
                 </tr>
               </thead>
@@ -203,17 +208,17 @@ export function StationsView({ stations, filter, query: initialQuery = '' }: { s
                       </Link>{' '}
                       <span className="mo dim">{s.draft.country}</span>
                     </td>
-                    <td>{subtitle(s)}</td>
+                    <td>{subtitle(s, t)}</td>
                     <td>
-                      <span className={`tag ${s.status}`}>{STATUS_LABELS[s.status]}</span>
+                      <span className={`tag ${s.status}`}>{t(STATUS_LABELS[s.status])}</span>
                     </td>
-                    <td className={rightsSoon(s) ? 'wr' : undefined}>{rightsLine(s)}</td>
-                    <td>{isLive(s) ? <span className={`tag hl-${healthOf(s).state}`} title={healthLine(healthOf(s))}>{HEALTH_LABELS[healthOf(s).state]}</span> : <span className="dim">—</span>}</td>
+                    <td className={rightsSoon(s) ? 'wr' : undefined}>{rightsLine(s, t, lang)}</td>
+                    <td>{isLive(s) ? <span className={`tag hl-${healthOf(s).state}`} title={healthLine(healthOf(s), t)}>{t(HEALTH_LABELS[healthOf(s).state])}</span> : <span className="dim">—</span>}</td>
                     <td className="mo">r{s.revision}</td>
-                    <td className="mo">{formatDateTime(s.updatedAt)}</td>
+                    <td className="mo">{formatDateTime(s.updatedAt, lang)}</td>
                     <td>
-                      <Link href={href(s)} aria-label={`${actionLabel(s)} ${s.draft.name}`}>
-                        {actionLabel(s)} →
+                      <Link href={href(s)} aria-label={`${t(actionLabel(s))} ${s.draft.name}`}>
+                        {t(actionLabel(s))} →
                       </Link>
                     </td>
                   </tr>
@@ -231,7 +236,7 @@ export function StationsView({ stations, filter, query: initialQuery = '' }: { s
     return (
       <div className="br-page">
         <div className="ttl">
-          <h3>สถานีวิทยุ · Presets</h3>
+          <h3>{t('สถานีวิทยุ · Presets')}</h3>
           <span>{summary}</span>
           <NewButton className="btn" />
         </div>
@@ -247,12 +252,12 @@ export function StationsView({ stations, filter, query: initialQuery = '' }: { s
                   <span>r{s.revision}</span>
                 </span>
                 <b>{s.draft.name}</b>
-                <small>{subtitle(s)}</small>
+                <small>{subtitle(s, t)}</small>
                 <span className="st">
                   <i className={`lamp ${s.status}`} aria-hidden="true" />
-                  {STATUS_LABELS[s.status]}
+                  {t(STATUS_LABELS[s.status])}
                 </span>
-                <small className={rightsSoon(s) ? 'wr' : undefined}>{rightsLine(s)}</small>
+                <small className={rightsSoon(s) ? 'wr' : undefined}>{rightsLine(s, t, lang)}</small>
                 <span className="sig">
                   SIG <Health s={s} className="hl-sig" />
                 </span>
@@ -270,13 +275,13 @@ export function StationsView({ stations, filter, query: initialQuery = '' }: { s
       <div className="db-page">
         <div className="hello">
           <div>
-            <h3>สถานีวิทยุ</h3>
+            <h3>{t('สถานีวิทยุ')}</h3>
             <p>{summary}</p>
           </div>
           <NewButton className="btn" />
         </div>
         <div className="search">
-          <input className="in" placeholder="ค้นหาชื่อสถานี" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="ค้นหาชื่อสถานี" />
+          <input className="in" placeholder={t('ค้นหาชื่อสถานี')} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t('ค้นหาชื่อสถานี')} />
           <Filters filter={filter} counts={counts} className="chips" />
         </div>
         {found.length === 0 ? (
@@ -289,10 +294,10 @@ export function StationsView({ stations, filter, query: initialQuery = '' }: { s
                   {initials(s.draft.name)}
                 </span>
                 <b>{s.draft.name}</b>
-                <small>{subtitle(s)}</small>
+                <small>{subtitle(s, t)}</small>
                 <span className="ft">
-                  <span className={`pill ${s.status}`}>{STATUS_LABELS[s.status]}</span>
-                  <span className={rightsSoon(s) ? 'wr' : undefined}>{rightsLine(s)}</span>
+                  <span className={`pill ${s.status}`}>{t(STATUS_LABELS[s.status])}</span>
+                  <span className={rightsSoon(s) ? 'wr' : undefined}>{rightsLine(s, t, lang)}</span>
                 </span>
                 {isLive(s) && <Health s={s} className="hl-chip" />}
               </Link>
