@@ -60,6 +60,8 @@ export class RateLimitInterceptor implements NestInterceptor {
         : { bucket: `user:${req.actor.userId}:write`, limit: limits.writesPerMinute };
     }
     if (req.path.startsWith('/v1/catalog/')) return { bucket: `ip:${addressKey(req.ip)}:catalog`, limit: limits.catalogPerMinutePerIp };
+    // Deletion progress is public (the account can no longer sign in); tickets are unguessable, but cap guessing anyway.
+    if (req.path.startsWith('/v1/account-deletions/')) return { bucket: `ip:${addressKey(req.ip)}:deletion`, limit: limits.catalogPerMinutePerIp };
     return null;
   }
 

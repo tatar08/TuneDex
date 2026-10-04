@@ -6,8 +6,8 @@ import { PrivacyView } from './PrivacyView';
 
 export const dynamic = 'force-dynamic';
 
-/** Doc 17 /app/privacy: the account's own diagnostic reports, with delete. */
-export default async function PrivacyPage() {
+/** Doc 17 /app/privacy: the account's own diagnostic reports, a data export and account deletion. */
+export default async function PrivacyPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const bff = getBff();
   const jar = await cookies();
   const hadCookie = jar.has(bff.names.session);
@@ -20,11 +20,15 @@ export default async function PrivacyPage() {
   ]);
   if (settings === null || diagnostics === null) redirect('/login?expired=1');
   const lang: Lang = 'view' in settings && settings.view?.settings.language === 'en' ? 'en' : 'th';
+  const sp = await searchParams;
   return (
     <PrivacyView
       lang={lang}
       csrfToken={ctx.session.csrfToken}
       view={'view' in diagnostics && diagnostics.view ? diagnostics.view : null}
+      // Back from a re-authentication started by "delete this account".
+      pendingDelete={sp.delete === '1'}
+      reauthFailed={sp.reauth === 'failed'}
     />
   );
 }

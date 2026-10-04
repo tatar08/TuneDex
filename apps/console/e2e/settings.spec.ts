@@ -183,3 +183,53 @@ test('signing a phone out from the web asks for a fresh sign-in first', async ({
   await expect(page.getByTestId('revoked-device')).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'ยืนยัน ออกจากระบบ' })).toHaveCount(0);
 });
+
+test('download my data, then delete the account after a fresh sign-in', async ({ browser }) => {
+  const phone = await idp.accessTokenFor('e2e-fern');
+  const device = crypto.randomUUID();
+  const checkIn = () =>
+    fetch(`${api.url}/v1/me/devices/${device}`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${phone}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'ios', osMajor: 18, appBuild: '1.0.0+42', appliedSettingsRevision: 0 }),
+    });
+  expect((await checkIn()).status).toBe(200);
+
+  idp.setUser('e2e-fern');
+  const first = await (await browser.newContext()).newPage();
+  await first.goto(`${base}/auth/login`);
+  await first.close();
+  idp.ageSignIn(600);
+  const context = await browser.newContext({ acceptDownloads: true });
+  const page = await context.newPage();
+  await page.goto(`${base}/auth/login?returnTo=/app/privacy`);
+  await expect(page.getByRole('heading', { name: 'ความเป็นส่วนตัว' })).toBeVisible();
+
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: 'ดาวน์โหลดข้อมูลของฉัน' }).click()]);
+  expect(download.suggestedFilename()).toMatch(/^tunedeck-export-\d{4}-\d{2}-\d{2}\.json$/);
+  const exported = JSON.parse(await (await import('node:fs/promises')).readFile((await download.path())!, 'utf8'));
+  expect(exported.devices.map((d: { id: string }) => d.id)).toEqual([device]);
+
+  await page.getByRole('button', { name: 'ลบบัญชีนี้' }).click();
+  const yes = page.getByRole('button', { name: 'ยืนยัน ลบบัญชี' });
+  await expect(yes).toBeDisabled();
+  await expect(page.getByRole('checkbox', { name: 'ฉันเข้าใจว่าลบแล้วกู้คืนไม่ได้' })).toBeFocused();
+  await page.keyboard.press('Space');
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/delete-confirm.png`, fullPage: true });
+  await yes.click();
+
+  const alert = page.getByRole('alert').filter({ hasText: 'ยืนยันตัวตน' });
+  await expect(alert).toContainText('ก่อนลบบัญชี');
+  await alert.getByRole('link', { name: 'ยืนยันตัวตน' }).click();
+  await expect(page).toHaveURL(`${base}/app/privacy`);
+  await page.getByRole('checkbox', { name: 'ฉันเข้าใจว่าลบแล้วกู้คืนไม่ได้' }).check();
+  await page.getByRole('button', { name: 'ยืนยัน ลบบัญชี' }).click();
+
+  await expect(page).toHaveURL(new RegExp(`${base}/account-deleted\\?lang=th#[A-Za-z0-9_-]{43}$`));
+  await expect(page.getByTestId('deletion-status')).toContainText('ลบข้อมูลของบัญชีเสร็จแล้วเมื่อ');
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/delete-done.png`, fullPage: true });
+  expect(await context.cookies()).toEqual([]);
+  expect((await checkIn()).status).toBe(403);
+  await page.goto(`${base}/app/privacy`);
+  await expect(page).toHaveURL(/\/login/);
+});

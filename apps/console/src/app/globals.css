@@ -57,3 +57,6 @@ a.btn { display: inline-block; text-decoration: none; }
 .device-name { font-weight: 500; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (max-width: 560px) { fieldset { grid-template-columns: 1fr; } }
+.confirm-delete { display: grid; gap: 12px; margin-top: 8px; }
+.confirm-delete label { display: flex; gap: 8px; align-items: center; }
+.confirm-delete .row { display: flex; gap: 10px; flex-wrap: wrap; }

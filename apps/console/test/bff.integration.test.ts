@@ -479,3 +479,51 @@ describe('device sign-out with re-authentication', () => {
     expect((await revoke('td_session=missing', 'x')).status).toBe(401);
   });
 });
+
+describe('account export and deletion', () => {
+  const del = (cookie: string, csrf?: string) =>
+    bff.deleteAccount(new Request(`${BASE}/bff/account`, { method: 'DELETE', headers: { cookie, origin: BASE, ...(csrf ? { 'x-csrf-token': csrf } : {}) } }));
+
+  it('downloads the export as an attachment', async () => {
+    const cookie = await signIn('acct-web-export');
+    const res = await bff.exportAccount(new Request(`${BASE}/bff/account/export`, { headers: { cookie } }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-disposition')).toMatch(/^attachment; filename="tunedeck-export-[\d-]+\.json"$/);
+    expect((await res.json()).format).toBe('tunedeck-account-export');
+  });
+
+  it('needs CSRF and a fresh sign-in, then ends the web session and hands back a ticket', async () => {
+    await signIn('acct-web-delete');
+    idp.ageSignIn(600);
+    const stale = await signIn('acct-web-delete');
+    expect((await del(stale)).status).toBe(403);
+    const first = await del(stale, await csrfFor(stale));
+    expect(first.status).toBe(401);
+    expect((await first.json()).code).toBe('REAUTH_REQUIRED');
+    expect(await bff.sessionFromCookie(stale)).not.toBeNull();
+
+    const start = await bff.login(new Request(`${BASE}/auth/login?reauth=1&returnTo=${encodeURIComponent('/app/privacy?delete=1')}`));
+    const atIdp = await fetch(start.headers.get('location')!, { redirect: 'manual' });
+    const cb = await bff.callback(new Request(atIdp.headers.get('location')!, { headers: { cookie: `${stale}; td_login=${cookieValue(start, 'td_login')}` } }));
+    expect(cb.headers.get('location')).toBe('/app/privacy?delete=1');
+    const fresh = `td_session=${cookieValue(cb, 'td_session')}`;
+
+    const res = await del(fresh, await csrfFor(fresh));
+    expect(res.status).toBe(202);
+    const { ticket, status } = await res.json();
+    expect(status).toBe('deleting');
+    expect(setCookies(res).some((c) => c.startsWith('td_session=;'))).toBe(true);
+    expect(await bff.sessionFromCookie(fresh)).toBeNull();
+
+    // Progress needs no session; the purge runs right after the request.
+    let body: { status: string } = { status: 'deleting' };
+    for (let i = 0; i < 50 && body.status === 'deleting'; i++) {
+      const s = await bff.deletionStatus(new Request(`${BASE}/bff/account-deletions/${ticket}`), ticket);
+      expect(s.status).toBe(200);
+      body = await s.json();
+      if (body.status === 'deleting') await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(body.status).toBe('completed');
+    expect((await bff.deletionStatus(new Request(`${BASE}/bff/account-deletions/x`), 'x')).status).toBe(404);
+  });
+});

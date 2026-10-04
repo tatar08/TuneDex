@@ -127,6 +127,8 @@ export interface HealthCheck {
 
 /** Lower-case UUID: station ids and diagnostic report ids. */
 const STATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** Deletion tickets: 32 random bytes, base64url. */
+const DELETION_TICKET = /^[A-Za-z0-9_-]{43}$/;
 /** Device ids are UUIDs the phone app generates (any case; the API lower-cases them). */
 const DEVICE_ID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const STATION_ACTIONS = ['publish', 'disable', 'enable', 'check'] as const;
@@ -560,6 +562,55 @@ export function createBff(deps: BffDeps) {
         if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
         const upstream = await callApi(ctx, `/v1/me/devices/${id}/session`, { method: 'DELETE' }, requestId);
         if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        return passthrough(upstream, requestId);
+      }),
+
+    /** GET /bff/account/export: the account's own data as a JSON download (Doc 17). */
+    exportAccount: (req: Request) =>
+      timed(req, '/bff/account/export', async (requestId) => {
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        const upstream = await callApi(ctx, '/v1/me/export', { method: 'GET' }, requestId);
+        if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        if (!upstream.ok) return passthrough(upstream, requestId);
+        const disposition = upstream.headers.get('content-disposition') ?? '';
+        return new Response(await upstream.text(), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'cache-control': 'no-store',
+            'x-request-id': requestId,
+            'content-disposition': /^attachment; filename="[\w.-]{1,64}"$/.test(disposition) ? disposition : 'attachment; filename="tunedeck-export.json"',
+          },
+        });
+      }),
+
+    /**
+     * DELETE /bff/account: asks the API to delete the account (needs a recent sign-in, like device sign-out).
+     * On 202 the web session ends here too and the browser gets the ticket to follow progress with.
+     */
+    deleteAccount: (req: Request) =>
+      timed(req, '/bff/account', async (requestId) => {
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
+        const upstream = await callApi(ctx, '/v1/me/account', { method: 'DELETE' }, requestId);
+        if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        if (upstream.status !== 202) return passthrough(upstream, requestId);
+        const { ticket, status } = (await upstream.json()) as { ticket: string; status: string };
+        await store.delete(ctx.id);
+        return json(202, { ticket, status }, requestId, { 'set-cookie': clearCookie(names.session, secure) });
+      }),
+
+    /** GET /bff/account-deletions/{ticket}: deletion progress. No session: the account can no longer sign in. */
+    deletionStatus: (req: Request, ticket: string) =>
+      timed(req, '/bff/account-deletions/:ticket', async (requestId) => {
+        if (!DELETION_TICKET.test(ticket)) return notFound(requestId);
+        const upstream = await fetchImpl(`${config.apiBaseUrl}/v1/account-deletions/${ticket}`, {
+          headers: { accept: 'application/json', 'x-request-id': requestId },
+          signal: AbortSignal.timeout(10_000),
+          redirect: 'error',
+        });
         return passthrough(upstream, requestId);
       }),
 

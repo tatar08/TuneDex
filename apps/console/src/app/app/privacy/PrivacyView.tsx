@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { DiagnosticReport, DiagnosticsView } from '@/lib/bff';
 import { Lang, strings } from '@/lib/i18n';
 import { AppNav } from '../AppNav';
@@ -8,13 +8,63 @@ import { AppNav } from '../AppNav';
 const when = (lang: Lang) =>
   new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-export function PrivacyView({ lang, csrfToken, view }: { lang: Lang; csrfToken: string; view: DiagnosticsView | null }) {
+export function PrivacyView({
+  lang,
+  csrfToken,
+  view,
+  pendingDelete = false,
+  reauthFailed = false,
+}: {
+  lang: Lang;
+  csrfToken: string;
+  view: DiagnosticsView | null;
+  /** The user chose "delete this account" before being sent to re-authenticate. */
+  pendingDelete?: boolean;
+  reauthFailed?: boolean;
+}) {
   const t = strings(lang);
   const [reports, setReports] = useState<DiagnosticReport[]>(view?.reports ?? []);
   const [busy, setBusy] = useState<string | null>(null);
   const [announce, setAnnounce] = useState('');
   const [problem, setProblem] = useState('');
+  const [confirmingDelete, setConfirmingDelete] = useState(pendingDelete || reauthFailed);
+  const [understood, setUnderstood] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteProblem, setDeleteProblem] = useState<'reauth' | 'reauthFailed' | 'expired' | 'rateLimited' | 'unavailable' | null>(
+    reauthFailed ? 'reauthFailed' : null,
+  );
+  const checkRef = useRef<HTMLInputElement>(null);
   const fmt = when(lang);
+
+  useEffect(() => {
+    // Drop ?delete= and ?reauth= so a reload does not reopen the confirmation.
+    if (pendingDelete || reauthFailed) window.history.replaceState(null, '', '/app/privacy');
+  }, [pendingDelete, reauthFailed]);
+  useEffect(() => {
+    if (confirmingDelete) checkRef.current?.focus();
+  }, [confirmingDelete]);
+
+  async function deleteAccount() {
+    setDeleting(true);
+    setDeleteProblem(null);
+    try {
+      const res = await fetch('/bff/account', { method: 'DELETE', headers: { 'x-csrf-token': csrfToken } });
+      if (res.status === 202) {
+        const { ticket } = (await res.json()) as { ticket: string };
+        // The ticket goes in the fragment, so it never reaches a server log.
+        window.location.assign(`/account-deleted?lang=${lang}#${ticket}`);
+        return;
+      }
+      const body = (await res.json().catch(() => ({}))) as { code?: string };
+      if (res.status === 401 && body.code === 'REAUTH_REQUIRED') setDeleteProblem('reauth');
+      else if (res.status === 401) setDeleteProblem('expired');
+      else setDeleteProblem(res.status === 429 ? 'rateLimited' : 'unavailable');
+      setDeleting(false);
+    } catch {
+      setDeleteProblem('unavailable');
+      setDeleting(false);
+    }
+  }
 
   async function remove(id: string) {
     setBusy(id);
@@ -63,6 +113,56 @@ export function PrivacyView({ lang, csrfToken, view }: { lang: Lang; csrfToken: 
               </li>
             ))}
           </ul>
+        )}
+      </section>
+      <section className="device" aria-labelledby="export-title">
+        <h2 id="export-title">{t.exportTitle}</h2>
+        <p className="status">{t.exportText}</p>
+        <p>
+          <a className="btn secondary" href="/bff/account/export" download>
+            {t.exportGo}
+          </a>
+        </p>
+      </section>
+
+      <section className="device" aria-labelledby="delete-title">
+        <h2 id="delete-title">{t.deleteTitle}</h2>
+        <p className="status">{t.deleteText}</p>
+        {deleteProblem && (
+          <div role="alert" className="notice error">
+            {deleteProblem === 'reauth' && <p>{t.deleteReauth}</p>}
+            {deleteProblem === 'reauthFailed' && <p>{t.reauthFailed}</p>}
+            {deleteProblem === 'expired' && <p>{t.expired}</p>}
+            {deleteProblem === 'rateLimited' && <p>{t.rateLimited}</p>}
+            {deleteProblem === 'unavailable' && <p>{t.unavailable}</p>}
+            {(deleteProblem === 'reauth' || deleteProblem === 'reauthFailed') && (
+              <a className="btn" href={`/auth/login?reauth=1&returnTo=${encodeURIComponent('/app/privacy?delete=1')}`}>
+                {t.reauthGo}
+              </a>
+            )}
+          </div>
+        )}
+        {confirmingDelete ? (
+          <div className="confirm-delete" role="group" aria-label={t.deleteTitle}>
+            <label>
+              <input type="checkbox" ref={checkRef} checked={understood} onChange={(e) => setUnderstood(e.target.checked)} />
+              {t.deleteConfirmCheck}
+            </label>
+            <div className="row">
+              <button type="button" className="btn danger" disabled={!understood || deleting} onClick={deleteAccount}>
+                {deleting ? t.deleting : t.deleteConfirmYes}
+              </button>
+              <button type="button" className="btn secondary" disabled={deleting} onClick={() => setConfirmingDelete(false)}>
+                {t.deleteCancel}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p>
+            <button type="button" className="btn secondary" onClick={() => setConfirmingDelete(true)}>
+              {t.deleteGo}
+            </button>
+          </p>
         )}
       </section>
       <p className="sr-only" aria-live="polite">

@@ -16,6 +16,7 @@ export type ErrorCode =
   | 'PUBLISH_BLOCKED'
   | 'CHECK_TOO_SOON'
   | 'API_RATE_LIMITED'
+  | 'ACCOUNT_DELETING'
   | 'INTERNAL';
 
 export const MESSAGE_KEYS: Record<ErrorCode, string> = {
@@ -34,6 +35,7 @@ export const MESSAGE_KEYS: Record<ErrorCode, string> = {
   PUBLISH_BLOCKED: 'errors.stations.publishBlocked',
   CHECK_TOO_SOON: 'errors.stations.checkTooSoon',
   API_RATE_LIMITED: 'errors.request.rateLimited',
+  ACCOUNT_DELETING: 'errors.account.deleting',
   INTERNAL: 'errors.service.internal',
 };
 
