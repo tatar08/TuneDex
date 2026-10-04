@@ -160,12 +160,12 @@ export const canSeeUsers = (roles: StaffRole[]) => roles.includes('support') || 
 /** Operators can look at the app configuration; only admins draft, publish or roll it back. */
 export const canSeeConfig = (roles: StaffRole[]) => roles.includes('operator') || roles.includes('admin');
 
+/** Doc 17: one log query covers at most 24 hours (older lines: move the window with a page link). */
 export const LOG_RANGES = [
   { id: '15m', label: '15 นาทีล่าสุด', ms: 15 * 60_000 },
   { id: '1h', label: '1 ชั่วโมงล่าสุด', ms: 3_600_000 },
   { id: '6h', label: '6 ชั่วโมงล่าสุด', ms: 6 * 3_600_000 },
   { id: '24h', label: '24 ชั่วโมงล่าสุด', ms: 24 * 3_600_000 },
-  { id: '7d', label: '7 วันล่าสุด', ms: 7 * 24 * 3_600_000 },
 ] as const;
 export type LogRangeId = (typeof LOG_RANGES)[number]['id'];
 
@@ -182,6 +182,8 @@ export const LOG_FIELD_LABELS: Record<string, string> = {
   build: 'build',
   eventCode: 'รหัสเหตุการณ์',
   requestId: 'requestId',
+  traceId: 'traceId',
+  errorCode: 'รหัสข้อผิดพลาด',
   status: 'HTTP status',
   cursor: 'หน้าถัดไป',
 };
@@ -192,6 +194,8 @@ export interface LogSearch {
   status: string;
   eventCode: string;
   requestId: string;
+  traceId: string;
+  errorCode: string;
   build: string;
   /** Fixed end of the window while paging, so newer lines do not shift the pages. */
   to: string;
@@ -210,6 +214,8 @@ export function logSearchFrom(sp: Record<string, string | string[] | undefined>)
     status: pick(sp.status, 3),
     eventCode: pick(sp.eventCode, 64).toUpperCase(),
     requestId: pick(sp.requestId, 64),
+    traceId: pick(sp.traceId, 32).toLowerCase(),
+    errorCode: pick(sp.errorCode, 64),
     build: pick(sp.build, 64),
     to: pick(sp.to, 40),
     cursor: pick(sp.cursor, 120),
@@ -227,6 +233,8 @@ export function logApiParams(s: LogSearch, now = Date.now()) {
     status: s.status,
     eventCode: s.eventCode,
     requestId: s.requestId,
+    traceId: s.traceId,
+    errorCode: s.errorCode,
     build: s.build,
     cursor: s.cursor,
     limit: '50',
@@ -270,6 +278,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'staff_role.grant': 'ให้สิทธิ์ทีมงาน',
   'staff_role.revoke': 'ถอนสิทธิ์ทีมงาน',
   'logs.search': 'ค้นบันทึกระบบ',
+  'logs.export': 'ส่งออกบันทึกระบบ',
   'audit.search': 'ดูประวัติการแก้ไข',
   'device.revoke': 'ผู้ใช้ออกจากระบบอุปกรณ์',
   'audit.export': 'ส่งออกประวัติ',

@@ -24,6 +24,8 @@ function config(): ConsoleConfig {
     sessionIdleMs: 12 * 3600_000,
     sessionAbsoluteMs: 7 * 24 * 3600_000,
     sessionDatabaseUrl: null,
+    environment: 'dev',
+    build: 'console-test',
   };
 }
 
@@ -429,7 +431,99 @@ describe('upstream failures and logging', () => {
     for (const secret of idp.issued) expect(raw).not.toContain(secret);
     expect(raw).not.toMatch(/td_session=|code=|Bearer /);
     const line = JSON.parse(logs[0]);
-    expect(Object.keys(line).sort()).toEqual(['durationMs', 'eventCode', 'method', 'requestId', 'route', 'service', 'severity', 'status', 'timestamp']);
+    expect(Object.keys(line).sort()).toEqual(['build', 'durationMs', 'environment', 'eventCode', 'method', 'requestId', 'route', 'service', 'severity', 'status', 'timestamp', 'traceId']);
+    expect(line).toMatchObject({ environment: 'dev', build: 'console-test', traceId: expect.stringMatching(/^[0-9a-f]{32}$/) });
+  });
+});
+
+describe('trace context through the BFF', () => {
+  const TRACE = '4bf92f3577b34da6a3ce929d0e0e4736';
+  const sent: string[] = [];
+  const lines: string[] = [];
+  let traced: Bff;
+
+  beforeAll(() => {
+    traced = createBff({
+      config: config(),
+      oidc: new OidcClient(config()),
+      store: new MemorySessionStore(12 * 3600_000, 7 * 24 * 3600_000, () => clock),
+      logWriter: (l) => lines.push(l),
+      fetchImpl: async (input, init) => {
+        if (String(input).startsWith(api.url)) sent.push(new Headers(init?.headers).get('traceparent') ?? '');
+        return fetch(input, init);
+      },
+    });
+  });
+
+  it('starts a trace per request, sends it to the API and finds the API line under the same trace id', async () => {
+    const cookie = await signIn('trace-user', traced);
+    sent.length = 0;
+    lines.length = 0;
+    expect((await traced.getSettings(new Request(`${BASE}/bff/settings`, { headers: { cookie } }))).status).toBe(200);
+    const line = JSON.parse(lines[lines.length - 1]);
+    expect(line).toMatchObject({ eventCode: 'BFF_REQUEST', route: '/bff/settings', traceId: expect.stringMatching(/^[0-9a-f]{32}$/) });
+    expect(sent.length).toBeGreaterThan(0);
+    for (const h of sent) expect(h).toMatch(new RegExp(`^00-${line.traceId}-[0-9a-f]{16}-01$`));
+    // The API keeps its request line under the same trace (written to the database within about a second).
+    let rows: { route: string }[] = [];
+    for (let i = 0; i < 40 && rows.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      rows = ((await api.sql(`SELECT route FROM operational_logs WHERE trace_id = '${line.traceId}'`)) as { rows: { route: string }[] }).rows;
+    }
+    expect(rows.map((r) => r.route)).toContain('/v1/me/settings');
+  });
+
+  it('continues a valid traceparent from the browser and ignores an invalid one', async () => {
+    const cookie = await signIn('trace-user-2', traced);
+    sent.length = 0;
+    lines.length = 0;
+    await traced.getSettings(new Request(`${BASE}/bff/settings`, { headers: { cookie, traceparent: `00-${TRACE}-00f067aa0ba902b7-01` } }));
+    expect(JSON.parse(lines[lines.length - 1]).traceId).toBe(TRACE);
+    expect(sent.every((h) => h.startsWith(`00-${TRACE}-`) && !h.includes('00f067aa0ba902b7'))).toBe(true);
+    lines.length = 0;
+    await traced.getSettings(new Request(`${BASE}/bff/settings`, { headers: { cookie, traceparent: `00-${'0'.repeat(32)}-00f067aa0ba902b7-01` } }));
+    expect(JSON.parse(lines[lines.length - 1]).traceId).not.toMatch(/^0+$/);
+  });
+});
+
+describe('log export through the BFF', () => {
+  const exportReq = (cookie: string, csrf: string, qs: string, body: unknown = { reason: 'incident review for ticket 42' }) =>
+    bff.logExport(
+      new Request(`${BASE}/bff/admin/logs/export?${qs}`, {
+        method: 'POST',
+        headers: { cookie, origin: BASE, 'x-csrf-token': csrf, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  beforeAll(() => {
+    api.staff('grant', 'bff-ops', 'operator', '--by', 'test', '--reason', 'test');
+  });
+
+  it('downloads the current search as CSV, forwarding only search fields, and the API records the reason', async () => {
+    const ops = await signIn('bff-ops');
+    const csrf = await csrfFor(ops);
+    const to = new Date();
+    const from = new Date(to.getTime() - 3600_000);
+    const qs = new URLSearchParams({ from: from.toISOString(), to: to.toISOString(), severity: 'INFO', traceId: 'a'.repeat(32), errorCode: 'X_FAILED', limit: '10', cursor: 'abc', other: 'drop' });
+    const res = await exportReq(ops, csrf, qs.toString());
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('text/csv; charset=utf-8');
+    expect(res.headers.get('content-disposition')).toMatch(/^attachment; filename="tunedeck-logs-\d{4}-\d{2}-\d{2}\.csv"$/);
+    expect((await res.text()).replace(/^\uFEFF/, '').split('\r\n')[0]).toContain('traceId');
+    const audit = (await api.sql(`SELECT reason, changes FROM audit_events WHERE action = 'logs.export' ORDER BY id DESC LIMIT 1`)) as { rows: { reason: string; changes: Record<string, unknown> }[] };
+    expect(audit.rows[0].reason).toBe('incident review for ticket 42');
+    expect(audit.rows[0].changes).toMatchObject({ traceId: 'a'.repeat(32), errorCode: 'X_FAILED', severity: ['INFO'], rows: 0 });
+  });
+
+  it('needs CSRF and passes the API refusals through', async () => {
+    const ops = await signIn('bff-ops');
+    expect((await exportReq(ops, 'wrong', '')).status).toBe(403);
+    const short = await exportReq(ops, await csrfFor(ops), '', { reason: 'short' });
+    expect(short.status).toBe(400);
+    expect((await short.json()).details.field).toBe('reason');
+    const customer = await signIn('bff-customer-logs');
+    expect((await exportReq(customer, await csrfFor(customer), '')).status).toBe(403);
   });
 });
 

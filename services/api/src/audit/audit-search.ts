@@ -213,7 +213,7 @@ const filtersOf = (q: AuditQuery) => ({
 const CSV_COLUMNS = ['id', 'occurredAt', 'actor', 'actorSubject', 'action', 'targetType', 'targetId', 'targetLabel', 'reason', 'changes', 'requestId'] as const;
 
 /** One CSV cell. Text a spreadsheet would run as a formula (= + - @, tab, CR) gets a leading apostrophe. */
-function cell(v: unknown): string {
+export function csvCell(v: unknown): string {
   let s = v === null || v === undefined ? '' : typeof v === 'string' ? v : JSON.stringify(v);
   if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\r\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
@@ -221,7 +221,7 @@ function cell(v: unknown): string {
 
 /** RFC 4180 CSV with a UTF-8 BOM so Excel shows Thai text correctly. */
 export function toCsv(rows: AuditRow[]): string {
-  const lines = [CSV_COLUMNS.join(','), ...rows.map((r) => CSV_COLUMNS.map((c) => cell(r[c])).join(','))];
+  const lines = [CSV_COLUMNS.join(','), ...rows.map((r) => CSV_COLUMNS.map((c) => csvCell(r[c])).join(','))];
   return `\uFEFF${lines.join('\r\n')}\r\n`;
 }
 

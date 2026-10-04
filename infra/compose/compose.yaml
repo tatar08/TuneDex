@@ -78,6 +78,8 @@ services:
       <<: *oidc
       CONSOLE_BASE_URL: http://localhost:3200
       API_BASE_URL: http://api:3100
+      APP_ENV: dev
+      BUILD_VERSION: local
       OIDC_CLIENT_ID: tunedeck-console
       OIDC_CLIENT_SECRET: ${CONSOLE_CLIENT_SECRET}
       OIDC_SCOPES: openid

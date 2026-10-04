@@ -1,7 +1,8 @@
 import request from 'supertest';
 import { Database } from '../src/db/database';
 import { PgLogStore } from '../src/logs/log-store';
-import { parseLogQuery } from '../src/logs/logs';
+import { parseTraceparent } from '../src/common/request-context';
+import { parseLogQuery, toCsv } from '../src/logs/logs';
 import { runStaffCli } from '../src/staff/staff-cli';
 import { createIdentity, createTestApp, createTestDatabase, TestIdentity } from './harness';
 
@@ -10,6 +11,8 @@ describe('operational logs', () => {
   let id: TestIdentity;
   let t: Awaited<ReturnType<typeof createTestApp>>;
   let tokens: Record<'operator' | 'admin' | 'editor' | 'user', string>;
+  /** The same database behind an app that demands staff MFA and counts rate limits. */
+  let mfaApp: Awaited<ReturnType<typeof createTestApp>>;
   const http = () => request(t.app.getHttpServer());
   const as = (who: keyof typeof tokens) => ({ Authorization: `Bearer ${tokens[who]}` });
   const staff = (...args: string[]) => runStaffCli(args, new Database(t.pool), () => undefined);
@@ -20,6 +23,9 @@ describe('operational logs', () => {
     db = await createTestDatabase();
     id = await createIdentity();
     t = await createTestApp(db.url, id.keyResolver);
+    mfaApp = await createTestApp(db.url, id.keyResolver, {
+      config: { staffMfaAcr: ['2'], rateLimit: { enabled: true, readsPerMinute: 120, writesPerMinute: 30, catalogPerMinutePerIp: 60, trustProxyHops: 0 } },
+    });
     tokens = {
       operator: await id.token('ops-1'),
       admin: await id.token('admin-1'),
@@ -31,6 +37,7 @@ describe('operational logs', () => {
     expect(await staff('grant', 'editor-1', 'catalog_editor', '--by', 'tar', '--reason', 'catalog')).toBe(0);
   });
   afterAll(async () => {
+    await mfaApp.close();
     await t.close();
     await db.drop();
   });
@@ -94,11 +101,17 @@ describe('operational logs', () => {
   it('rejects unbounded or malformed filters', async () => {
     const cases: Record<string, string>[] = [
       { from: '2026-01-01T00:00:00Z', to: '2026-01-20T00:00:00Z' },
+      // Doc 17: at most 24 hours per query.
+      { from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:01Z' },
       { from: '2026-01-02T00:00:00Z', to: '2026-01-01T00:00:00Z' },
       { severity: 'FATAL' },
       { service: 'billing' },
       { limit: '500' },
+      { limit: '101' },
       { limit: '0' },
+      { traceId: 'ABCDEF0123456789ABCDEF0123456789' },
+      { traceId: '0123' },
+      { errorCode: 'has space' },
       { requestId: "x' OR 1=1 --" },
       { eventCode: 'drop table' },
       { cursor: 'bm90LWEtY3Vyc29y' },
@@ -111,12 +124,162 @@ describe('operational logs', () => {
     }
   });
 
-  it('defaults to the last hour', () => {
+  it('defaults to the last hour and 50 lines, and allows a full day of up to 100 lines a page', async () => {
     const now = new Date('2026-10-03T12:00:00Z');
     const q = parseLogQuery({}, now);
     expect(q.to).toEqual(now);
     expect(q.from).toEqual(new Date('2026-10-03T11:00:00Z'));
     expect(q.limit).toBe(50);
+    const day = parseLogQuery({ from: '2026-10-02T12:00:00Z', to: '2026-10-03T12:00:00Z', limit: '100' }, now);
+    expect(day.limit).toBe(100);
+    const to = new Date();
+    const res = await search('operator', { from: new Date(to.getTime() - 24 * 3600_000).toISOString(), to: to.toISOString(), limit: '100' });
+    expect(res.status).toBe(200);
+  });
+
+  describe('trace context', () => {
+    const TRACE = '4bf92f3577b34da6a3ce929d0e0e4736';
+    const OTHER_TRACE = '5cf92f3577b34da6a3ce929d0e0e4736';
+    const PARENT = '00f067aa0ba902b7';
+
+    it('joins a valid inbound traceparent and answers with its own span in the same trace', async () => {
+      t.logs.mark();
+      const res = await http().get('/v1/me/settings').set('traceparent', `00-${TRACE}-${PARENT}-01`).set('X-Request-Id', 'req-traceparent-01');
+      const [, traceId, spanId, flags] = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/.exec(res.headers.traceparent)!;
+      expect([traceId, flags]).toEqual([TRACE, '01']);
+      expect(spanId).not.toBe(PARENT);
+      expect(t.logs.lines().find((l) => l.requestId === 'req-traceparent-01')).toMatchObject({ eventCode: 'HTTP_REQUEST', traceId: TRACE });
+      await flush();
+      const found = await search('operator', { traceId: TRACE });
+      expect(found.body.logs).toHaveLength(1);
+      expect(found.body.logs[0]).toMatchObject({ requestId: 'req-traceparent-01', traceId: TRACE });
+      const { rows } = await t.pool.query(`SELECT trace_id FROM operational_logs WHERE request_id = 'req-traceparent-01'`);
+      expect(rows[0].trace_id).toBe(TRACE);
+    });
+
+    it('starts a new trace when traceparent is missing or invalid', async () => {
+      const invalid = [
+        undefined,
+        'garbage',
+        `ff-${TRACE}-${PARENT}-01`,
+        `00-${'0'.repeat(32)}-${PARENT}-01`,
+        `00-${TRACE}-${'0'.repeat(16)}-01`,
+        `00-${TRACE.toUpperCase()}-${PARENT}-01`,
+        `00-${TRACE}-${PARENT}-01-extra`,
+      ];
+      const seen = new Set<string>();
+      for (const header of invalid) {
+        const req = http().get('/health/live');
+        const res = header === undefined ? await req : await req.set('traceparent', header);
+        const m = /^00-([0-9a-f]{32})-[0-9a-f]{16}-01$/.exec(res.headers.traceparent);
+        expect([header, m !== null && m[1] !== TRACE]).toEqual([header, true]);
+        seen.add(m![1]);
+      }
+      expect(seen.size).toBe(invalid.length);
+      // A later version is read by its version-00 fields.
+      expect(parseTraceparent(`01-${TRACE}-${PARENT}-00-future`)).toEqual({ traceId: TRACE, parentId: PARENT, flags: '00' });
+    });
+
+    it('puts the trace id on lines logged while serving the request, after the body is read', async () => {
+      const token = await id.token('trace-body');
+      await mfaApp.pool.query('ALTER TABLE rate_limit_counters RENAME TO rate_limit_counters_off');
+      try {
+        mfaApp.logs.mark();
+        await request(mfaApp.app.getHttpServer())
+          .patch('/v1/me/settings')
+          .set('Authorization', `Bearer ${token}`)
+          .set('If-Match', '"0"')
+          .set('traceparent', `00-${OTHER_TRACE}-${PARENT}-00`)
+          .send({ theme: 'dark' });
+        const lines = mfaApp.logs.lines();
+        expect(lines.find((l) => l.eventCode === 'RATE_LIMIT_UNAVAILABLE')).toMatchObject({ traceId: OTHER_TRACE });
+        expect(lines.find((l) => l.eventCode === 'HTTP_REQUEST')).toMatchObject({ traceId: OTHER_TRACE });
+      } finally {
+        await mfaApp.pool.query('ALTER TABLE rate_limit_counters_off RENAME TO rate_limit_counters');
+      }
+    });
+  });
+
+  it('filters by errorCode', async () => {
+    await t.pool.query(
+      `INSERT INTO operational_logs (logged_at, severity, service, environment, build, event_code, error_code)
+       VALUES (now() - interval '1 minute', 'WARN', 'api', 'dev', 'test', 'IDP_SESSION_END_FAILED', 'IDP_SESSION_FAILED'),
+              (now() - interval '1 minute', 'ERROR', 'api', 'dev', 'test', 'UNHANDLED_ERROR', '23505')`,
+    );
+    const res = await search('operator', { errorCode: 'IDP_SESSION_FAILED' });
+    expect(res.body.logs.map((l: { eventCode: string }) => l.eventCode)).toEqual(['IDP_SESSION_END_FAILED']);
+    expect((await search('operator', { errorCode: '23505' })).body.logs).toHaveLength(1);
+    const { rows } = await t.pool.query(`SELECT changes FROM audit_events WHERE action = 'logs.search' ORDER BY id DESC LIMIT 1`);
+    expect(rows[0].changes).toMatchObject({ errorCode: '23505' });
+  });
+
+  describe('export', () => {
+    const reason = { reason: 'Incident review for ticket 42' };
+    const exportAs = (who: keyof typeof tokens, body: object, q: Record<string, string> = {}) => http().post('/v1/admin/logs/export').query(q).set(as(who)).send(body);
+
+    it('downloads the search as CSV and audits the reason, filters and row count, not the lines', async () => {
+      await flush();
+      t.logs.mark();
+      const res = await exportAs('operator', reason, { status: '401', severity: 'WARN' });
+      expect(res.status).toBe(200);
+      expect(res.headers['cache-control']).toBe('no-store');
+      expect(res.headers['content-type']).toBe('text/csv; charset=utf-8');
+      expect(res.headers['content-disposition']).toMatch(/^attachment; filename="tunedeck-logs-\d{4}-\d{2}-\d{2}\.csv"$/);
+      const lines = res.text.replace(/^\uFEFF/, '').trim().split('\r\n');
+      expect(lines[0]).toBe('id,timestamp,severity,service,environment,build,eventCode,requestId,traceId,method,route,status,durationMs,actorId,errorName,errorCode');
+      expect(lines.length).toBeGreaterThan(5);
+      expect(lines.slice(1).every((l) => l.includes(',WARN,') && l.includes(',401,'))).toBe(true);
+      const { rows } = await t.pool.query(`SELECT actor, reason, changes FROM audit_events WHERE action = 'logs.export' ORDER BY id DESC LIMIT 1`);
+      const { rows: users } = await t.pool.query(`SELECT id FROM users WHERE oidc_subject = 'ops-1'`);
+      expect(rows[0]).toMatchObject({ actor: `user:${users[0].id}`, reason: reason.reason, changes: { status: 401, severity: ['WARN'], rows: lines.length - 1 } });
+      // Only the export request's own line is logged.
+      expect(t.logs.lines().map((l) => l.eventCode)).toEqual(['HTTP_REQUEST']);
+    });
+
+    it('needs the operator or admin role, a real reason and the same bounds as search', async () => {
+      expect((await http().post('/v1/admin/logs/export').send(reason)).status).toBe(401);
+      expect((await exportAs('editor', reason)).status).toBe(403);
+      expect((await exportAs('user', reason)).status).toBe(403);
+      expect((await exportAs('admin', reason)).status).toBe(200);
+      for (const body of [{}, { reason: 'short' }, { reason: 'x'.repeat(501) }, { reason: 'tab\there is not ok' }]) {
+        const res = await exportAs('admin', body);
+        expect([res.status, res.body.details?.field]).toEqual([400, 'reason']);
+      }
+      const long = await exportAs('admin', reason, { from: '2026-01-01T00:00:00Z', to: '2026-01-03T00:00:00Z' });
+      expect([long.status, long.body.details]).toEqual([400, { field: 'from', reason: 'window_too_long' }]);
+    });
+
+    it('refuses more than 10,000 lines so the search can be narrowed', async () => {
+      await t.pool.query(
+        `INSERT INTO operational_logs (logged_at, severity, service, environment, build, event_code)
+         SELECT now() - interval '2 minutes', 'INFO', 'api', 'dev', 'test', 'BULK_LINE' FROM generate_series(1, 10001)`,
+      );
+      const res = await exportAs('admin', reason, { eventCode: 'BULK_LINE' });
+      expect([res.status, res.body.details]).toEqual([400, { field: 'from', reason: 'too_many_rows' }]);
+      await t.pool.query(`DELETE FROM operational_logs WHERE event_code = 'BULK_LINE'`);
+    });
+
+    it('asks for MFA from the last 5 minutes', async () => {
+      const now = Math.floor(Date.now() / 1000);
+      const exp = async (o: { authTime?: number; acr?: string }) =>
+        request(mfaApp.app.getHttpServer()).post('/v1/admin/logs/export').set('Authorization', `Bearer ${await id.token('ops-1', o)}`).send(reason);
+      const plain = await exp({ authTime: now });
+      expect([plain.status, plain.body.code]).toEqual([401, 'MFA_REQUIRED']);
+      expect((await exp({ authTime: now - 600, acr: '2' })).body.code).toBe('MFA_REQUIRED');
+      expect((await exp({ authTime: now, acr: '2' })).status).toBe(200);
+      // Searching stays open without MFA.
+      expect((await request(mfaApp.app.getHttpServer()).get('/v1/admin/logs').set('Authorization', `Bearer ${await id.token('ops-1')}`)).status).toBe(200);
+    });
+
+    it('neutralises cells a spreadsheet would run as formulas', () => {
+      const csv = toCsv([
+        { id: '1', timestamp: '2026-10-04T00:00:00.000Z', severity: 'ERROR', service: 'api', environment: 'dev', build: '=1+1', eventCode: 'X', requestId: null, traceId: null, method: null, route: '/a,b', status: 500, durationMs: 3, actorId: null, errorName: '@SUM', errorCode: null },
+      ]);
+      const row = csv.split('\r\n')[1];
+      expect(row).toContain(`,'=1+1,`);
+      expect(row).toContain(`,"/a,b",`);
+      expect(row).toContain(`,'@SUM,`);
+    });
   });
 
   it('drops old lines after the retention period', async () => {

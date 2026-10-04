@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { ConsoleConfig } from './config';
 import {
   clearCookie,
@@ -10,7 +11,7 @@ import {
   sealTransaction,
   serializeCookie,
 } from './cookies';
-import { createLogger, LogWriter } from './log';
+import { createLogger, LogWriter, traceIdFrom } from './log';
 import { OidcClient, OidcError, randomToken, TokenSet } from './oidc';
 import type { Session, SessionStore } from './session';
 
@@ -217,6 +218,7 @@ export interface LogEntry {
   build: string;
   eventCode: string;
   requestId: string | null;
+  traceId: string | null;
   method: string | null;
   route: string | null;
   status: number | null;
@@ -359,7 +361,13 @@ export interface AuditPage {
 export const AUDIT_PARAMS = ['from', 'to', 'actor', 'action', 'targetType', 'targetId', 'requestId', 'includeReads', 'limit', 'cursor'] as const;
 
 /** Search fields the console forwards to GET /v1/admin/logs; anything else is dropped. The API validates values. */
-export const LOG_PARAMS = ['from', 'to', 'severity', 'service', 'build', 'eventCode', 'requestId', 'status', 'limit', 'cursor'] as const;
+export const LOG_PARAMS = ['from', 'to', 'severity', 'service', 'build', 'eventCode', 'requestId', 'traceId', 'errorCode', 'status', 'limit', 'cursor'] as const;
+
+/** The W3C trace of the BFF request being served; API calls made while serving it join that trace. */
+const traceScope = new AsyncLocalStorage<{ traceId: string }>();
+const newTraceId = () => randomBytes(16).toString('hex');
+/** `traceparent` for one API call: the current trace (a new one outside a BFF request) and a fresh span id. */
+const traceparent = () => `00-${traceScope.getStore()?.traceId ?? newTraceId()}-${randomBytes(8).toString('hex')}-01`;
 
 const LOGIN_TX_SECONDS = 600;
 /** Clock skew allowed between the IdP and the console when checking a re-authentication's auth_time. */
@@ -370,7 +378,7 @@ const MAX_BODY_BYTES = 16 * 1024;
 export function createBff(deps: BffDeps) {
   const { config, oidc, store } = deps;
   const fetchImpl = deps.fetchImpl ?? fetch;
-  const log = createLogger(deps.logWriter);
+  const log = createLogger(deps.logWriter, { environment: config.environment, build: config.build });
   const names = cookieNames(config.secureCookies);
   const secure = config.secureCookies;
 
@@ -389,16 +397,19 @@ export function createBff(deps: BffDeps) {
 
   async function timed(req: Request, route: string, run: (requestId: string) => Promise<Response>): Promise<Response> {
     const requestId = `web_${randomUUID()}`;
+    // Continue a valid traceparent from the browser, else start the trace here; the API joins it.
+    const traceId = traceIdFrom(req.headers.get('traceparent')) ?? newTraceId();
     const started = Date.now();
     let res: Response;
     try {
-      res = await run(requestId);
+      res = await traceScope.run({ traceId }, () => run(requestId));
     } catch {
       res = error(503, 'UPSTREAM_UNAVAILABLE', requestId);
     }
     log(res.status >= 500 ? 'ERROR' : res.status >= 400 ? 'WARN' : 'INFO', {
       eventCode: 'BFF_REQUEST',
       requestId,
+      traceId,
       method: req.method,
       route,
       status: res.status,
@@ -450,7 +461,7 @@ export function createBff(deps: BffDeps) {
       if (!token) return null;
       const res = await fetchImpl(`${config.apiBaseUrl}${path}`, {
         method: init.method,
-        headers: { ...init.headers, authorization: `Bearer ${token}`, 'x-request-id': requestId, accept: 'application/json' },
+        headers: { ...init.headers, authorization: `Bearer ${token}`, 'x-request-id': requestId, traceparent: traceparent(), accept: 'application/json' },
         body: init.body,
         signal: AbortSignal.timeout(10_000),
         redirect: 'error',
@@ -488,7 +499,7 @@ export function createBff(deps: BffDeps) {
 
   async function markStaffAtLogin(id: string, session: Session): Promise<void> {
     const res = await fetchImpl(`${config.apiBaseUrl}/v1/me/staff`, {
-      headers: { authorization: `Bearer ${session.tokens.accessToken}`, accept: 'application/json', 'x-request-id': `web_${randomUUID()}` },
+      headers: { authorization: `Bearer ${session.tokens.accessToken}`, accept: 'application/json', 'x-request-id': `web_${randomUUID()}`, traceparent: traceparent() },
       signal: AbortSignal.timeout(5_000),
       redirect: 'error',
     });
@@ -532,6 +543,39 @@ export function createBff(deps: BffDeps) {
     if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
     return passthrough(upstream, requestId);
   }
+
+  /**
+   * A staff CSV export: the search in the page's query string (only `params`, no paging) and `{ reason }` in the
+   * JSON body. The API checks the role, MFA and the row bound, and records the export with its reason.
+   */
+  const csvExport = (req: Request, route: string, apiPath: string, params: readonly string[], fallbackName: string) =>
+    timed(req, route, async (requestId) => {
+      const ctx = await sessionFromCookie(req.headers.get('cookie'));
+      if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+      if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
+      if (!req.headers.get('content-type')?.startsWith('application/json')) return error(415, 'UNSUPPORTED_MEDIA_TYPE', requestId);
+      const body = await req.text();
+      if (Buffer.byteLength(body) > MAX_BODY_BYTES) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
+      const incoming = new URL(req.url).searchParams;
+      const qs = new URLSearchParams();
+      for (const k of params) {
+        const v = incoming.get(k);
+        if (k !== 'cursor' && k !== 'limit' && v && v.length <= 200) qs.set(k, v);
+      }
+      const upstream = await callApi(ctx, `${apiPath}?${qs}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body }, requestId);
+      if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+      if (!upstream.ok) return passthrough(upstream, requestId);
+      const disposition = upstream.headers.get('content-disposition') ?? '';
+      return new Response(await upstream.arrayBuffer(), {
+        status: 200,
+        headers: {
+          'content-type': 'text/csv; charset=utf-8',
+          'cache-control': 'no-store',
+          'x-request-id': requestId,
+          'content-disposition': /^attachment; filename="[\w.-]{1,64}"$/.test(disposition) ? disposition : `attachment; filename="${fallbackName}"`,
+        },
+      });
+    });
 
   const notFound = (requestId: string) =>
     json(404, { code: 'NOT_FOUND', messageKey: 'errors.request.notFound', requestId, details: {} }, requestId);
@@ -666,34 +710,10 @@ export function createBff(deps: BffDeps) {
      * POST /bff/admin/audit/export: the current audit search as CSV, with `{ reason }` in the JSON body.
      * The API checks the role, bounds the rows and records the export with its reason.
      */
-    auditExport: (req: Request) =>
-      timed(req, '/bff/admin/audit/export', async (requestId) => {
-        const ctx = await sessionFromCookie(req.headers.get('cookie'));
-        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
-        if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
-        if (!req.headers.get('content-type')?.startsWith('application/json')) return error(415, 'UNSUPPORTED_MEDIA_TYPE', requestId);
-        const body = await req.text();
-        if (Buffer.byteLength(body) > MAX_BODY_BYTES) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
-        const incoming = new URL(req.url).searchParams;
-        const qs = new URLSearchParams();
-        for (const k of AUDIT_PARAMS) {
-          const v = incoming.get(k);
-          if (k !== 'cursor' && k !== 'limit' && v && v.length <= 200) qs.set(k, v);
-        }
-        const upstream = await callApi(ctx, `/v1/admin/audit/export?${qs}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body }, requestId);
-        if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
-        if (!upstream.ok) return passthrough(upstream, requestId);
-        const disposition = upstream.headers.get('content-disposition') ?? '';
-        return new Response(await upstream.arrayBuffer(), {
-          status: 200,
-          headers: {
-            'content-type': 'text/csv; charset=utf-8',
-            'cache-control': 'no-store',
-            'x-request-id': requestId,
-            'content-disposition': /^attachment; filename="[\w.-]{1,64}"$/.test(disposition) ? disposition : 'attachment; filename="tunedeck-audit.csv"',
-          },
-        });
-      }),
+    auditExport: (req: Request) => csvExport(req, '/bff/admin/audit/export', '/v1/admin/audit/export', AUDIT_PARAMS, 'tunedeck-audit.csv'),
+
+    /** POST /bff/admin/logs/export: the current log search as CSV (Doc 17 log export), with `{ reason }` and recent MFA. */
+    logExport: (req: Request) => csvExport(req, '/bff/admin/logs/export', '/v1/admin/logs/export', LOG_PARAMS, 'tunedeck-logs.csv'),
 
     /** GET/POST /bff/admin/stations */
     stations: (req: Request) =>
@@ -832,7 +852,7 @@ export function createBff(deps: BffDeps) {
       let cursor: string | null = null;
       for (let page = 0; page < 5; page++) {
         const res = await fetchImpl(`${config.apiBaseUrl}/v1/catalog/radio?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, {
-          headers: { accept: 'application/json', 'x-request-id': `web_${randomUUID()}` },
+          headers: { accept: 'application/json', 'x-request-id': `web_${randomUUID()}`, traceparent: traceparent() },
           signal: AbortSignal.timeout(10_000),
           redirect: 'error',
         });

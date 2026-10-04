@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { formatLogTime, RATE_LIMITED, LOG_FIELD_LABELS, LOG_LEVELS, LOG_RANGES, logHref, LogSearch } from '@/lib/admin';
+import { formatLogTime, RATE_LIMITED, LOG_FIELD_LABELS, LOG_LEVELS, LOG_RANGES, logApiParams, logHref, LogSearch } from '@/lib/admin';
 import type { LogEntry, LogPage } from '@/lib/bff';
 import { Icon, useAdmin } from '../AdminShell';
+import { CsvExport } from '../CsvExport';
 
 /**
  * Staff log search (Doc 17 /admin/logs). Data and filters are shared; each theme lays the page out
@@ -20,7 +21,9 @@ export interface LogsViewProps {
 const shortId = (v: string) => (v.length > 14 ? `${v.slice(0, 6)}…${v.slice(-6)}` : v);
 const sev = (l: LogEntry) => l.severity.toLowerCase();
 const what = (l: LogEntry) => (l.method ? `${l.method} ${l.route ?? ''}` : (l.errorName ?? ''));
-const traceHref = (s: LogSearch, requestId: string) => logHref({ ...s, requestId, cursor: '', to: '', range: '7d' });
+const requestHref = (s: LogSearch, requestId: string) => logHref({ ...s, requestId, cursor: '', to: '', range: '24h' });
+/** Every line of one trace (console BFF and API) in the last 24 hours, whatever the other filters were. */
+const traceHref = (traceId: string) => logHref({ traceId, range: '24h' });
 
 function stats(logs: LogEntry[]) {
   const timed = logs.filter((l) => l.durationMs !== null);
@@ -89,6 +92,14 @@ function SearchForm({ search, className, pickers = true, compact = false }: { se
         <span>HTTP status</span>
         <input name="status" defaultValue={search.status} inputMode="numeric" maxLength={3} placeholder="เช่น 500" />
       </label>
+      <label className="fld">
+        <span>รหัสข้อผิดพลาด</span>
+        <input name="errorCode" defaultValue={search.errorCode} maxLength={64} placeholder="IDP_DELETE_FAILED" />
+      </label>
+      <label className="fld wide">
+        <span>traceId</span>
+        <input name="traceId" defaultValue={search.traceId} maxLength={32} placeholder="32 ตัวอักษร 0-9 a-f" spellCheck={false} />
+      </label>
       {!compact && (
         <>
           <label className="fld">
@@ -141,6 +152,22 @@ function Pickers({ search, className }: { search: LogSearch; className: string }
   );
 }
 
+/** Doc 17 log export: the current search as CSV, with a reason and recent MFA. Each theme places the button. */
+function ExportPanel({ search, className }: { search: LogSearch; className?: string }) {
+  const { cursor: _c, limit: _l, ...params } = logApiParams({ ...search, cursor: '' });
+  return (
+    <CsvExport
+      endpoint="/bff/admin/logs/export"
+      params={params}
+      forbidden="ส่งออกได้เฉพาะโอเปอเรเตอร์หรือแอดมิน"
+      formLabel="ส่งออกบันทึกระบบ"
+      unit="บรรทัด"
+      fallbackName="tunedeck-logs.csv"
+      className={className}
+    />
+  );
+}
+
 function Pager({ page, search, older, className = 'lg-pager' }: { page: LogPage; search: LogSearch; older: string | null; className?: string }) {
   return (
     <nav className={className} aria-label="หน้าบันทึก">
@@ -168,6 +195,7 @@ function LogTable({ logs, search }: { logs: LogEntry[]; search: LogSearch }) {
             ใช้เวลา
           </th>
           <th scope="col">requestId</th>
+          <th scope="col">traceId</th>
           <th scope="col">ผู้ใช้</th>
           <th scope="col">build / error</th>
         </tr>
@@ -185,8 +213,15 @@ function LogTable({ logs, search }: { logs: LogEntry[]; search: LogSearch }) {
             <td className="mo num">{l.durationMs !== null ? `${l.durationMs} ms` : ''}</td>
             <td className="mo nowrap">
               {l.requestId && (
-                <a href={traceHref(search, l.requestId)} title={`ดูทุกบรรทัดของ ${l.requestId}`}>
+                <a href={requestHref(search, l.requestId)} title={`ดูทุกบรรทัดของ ${l.requestId}`}>
                   {shortId(l.requestId)}
+                </a>
+              )}
+            </td>
+            <td className="mo nowrap">
+              {l.traceId && (
+                <a href={traceHref(l.traceId)} title={`ดูทุกบรรทัดของ trace ${l.traceId}`}>
+                  {shortId(l.traceId)}
                 </a>
               )}
             </td>
@@ -201,7 +236,7 @@ function LogTable({ logs, search }: { logs: LogEntry[]; search: LogSearch }) {
   );
 }
 
-const RETENTION_NOTE = 'ตัดข้อมูลลับออกแล้ว เก็บ 14 วัน ค้นได้ทีละไม่เกิน 7 วัน ทุกการค้นหาถูกบันทึกใน audit';
+const RETENTION_NOTE = 'ตัดข้อมูลลับออกแล้ว เก็บ 14 วัน ค้นได้ทีละไม่เกิน 24 ชั่วโมง ทุกการค้นหาและการส่งออกถูกบันทึกใน audit';
 
 /** Workbench: line list with j/k on the left, every field of the chosen line on the right. */
 function WorkbenchLogs({ page, search, older }: { page: LogPage; search: LogSearch; older: string | null }) {
@@ -234,6 +269,7 @@ function WorkbenchLogs({ page, search, older }: { page: LogPage; search: LogSear
         ['status', sel.status],
         ['ใช้เวลา', sel.durationMs !== null ? `${sel.durationMs} ms` : null],
         ['requestId', sel.requestId],
+        ['traceId', sel.traceId],
         ['ผู้ใช้ (id ภายใน)', sel.actorId],
         ['error', [sel.errorName, sel.errorCode].filter(Boolean).join(' · ') || null],
         ['service', sel.service],
@@ -249,6 +285,7 @@ function WorkbenchLogs({ page, search, older }: { page: LogPage; search: LogSear
             บันทึกระบบ <span>{logs.length}</span>
           </h3>
           <SearchForm search={search} className="wb-search" compact />
+          <ExportPanel search={search} />
         </div>
         {logs.length === 0 ? (
           <Empty />
@@ -289,8 +326,13 @@ function WorkbenchLogs({ page, search, older }: { page: LogPage; search: LogSear
               ))}
             </dl>
             {sel.requestId && (
-              <a className="btn secondary" href={traceHref(search, sel.requestId)}>
+              <a className="btn secondary" href={requestHref(search, sel.requestId)}>
                 ดูทุกบรรทัดของคำขอนี้
+              </a>
+            )}{' '}
+            {sel.traceId && (
+              <a className="btn secondary" href={traceHref(sel.traceId)}>
+                ดูทั้ง trace (เว็บและ API)
               </a>
             )}
           </div>
@@ -323,6 +365,7 @@ export function LogsView({ page, status, badField, search, older }: LogsViewProp
           <a className="btn secondary" href={latest}>
             ↻ ล่าสุด
           </a>
+          <ExportPanel search={search} />
         </div>
         <SearchForm search={search} className="cr-filter" pickers={false} />
         <div className="pn lg-pn">{body((p) => <LogTable logs={p.logs} search={search} />)}</div>
@@ -350,6 +393,7 @@ export function LogsView({ page, status, badField, search, older }: LogsViewProp
           <a className="btn" href={latest}>
             ล่าสุด
           </a>
+          <ExportPanel search={search} />
         </div>
         <div className="br-pick">
           <Pickers search={search} className="knobs" />
@@ -366,8 +410,15 @@ export function LogsView({ page, status, badField, search, older }: LogsViewProp
                 <span className="n">{l.status ?? ''}</span>
                 <span className="n">{l.durationMs !== null ? `${l.durationMs}ms` : ''}</span>
                 {l.requestId ? (
-                  <a href={traceHref(search, l.requestId)} title={`ดูทุกบรรทัดของ ${l.requestId}`}>
+                  <a href={requestHref(search, l.requestId)} title={`ดูทุกบรรทัดของ ${l.requestId}`}>
                     {shortId(l.requestId)}
+                  </a>
+                ) : (
+                  <span />
+                )}
+                {l.traceId ? (
+                  <a href={traceHref(l.traceId)} title={`ดูทุกบรรทัดของ trace ${l.traceId}`}>
+                    tr {shortId(l.traceId)}
                   </a>
                 ) : (
                   <span />
@@ -389,9 +440,12 @@ export function LogsView({ page, status, badField, search, older }: LogsViewProp
             <h3>บันทึกระบบ</h3>
             <p>{RETENTION_NOTE}</p>
           </div>
-          <a className="btn" href={latest}>
-            โหลดล่าสุด
-          </a>
+          <div className="db-actions">
+            <a className="btn" href={latest}>
+              โหลดล่าสุด
+            </a>
+            <ExportPanel search={search} />
+          </div>
         </div>
         <div className="search">
           <Pickers search={search} className="chips" />
@@ -430,7 +484,13 @@ export function LogsView({ page, status, badField, search, older }: LogsViewProp
                   {l.requestId && (
                     <>
                       {' · '}
-                      <a href={traceHref(search, l.requestId)}>{shortId(l.requestId)}</a>
+                      <a href={requestHref(search, l.requestId)}>{shortId(l.requestId)}</a>
+                    </>
+                  )}
+                  {l.traceId && (
+                    <>
+                      {' · trace '}
+                      <a href={traceHref(l.traceId)}>{shortId(l.traceId)}</a>
                     </>
                   )}
                 </small>
@@ -476,9 +536,12 @@ export function LogsView({ page, status, badField, search, older }: LogsViewProp
             <h2 id="fv-logsearch">บันทึกระบบ</h2>
             <small>{RETENTION_NOTE}</small>
           </div>
-          <a className="fv-ghost lg-latest" href={latest}>
-            <Icon name="bolt" /> โหลดล่าสุด
-          </a>
+          <div className="fv-actions">
+            <a className="fv-ghost lg-latest" href={latest}>
+              <Icon name="bolt" /> โหลดล่าสุด
+            </a>
+            <ExportPanel search={search} className="fv-ghost" />
+          </div>
         </div>
         <SearchForm search={search} className="lg-filters fv-logform" />
       </section>
