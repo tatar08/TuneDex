@@ -222,6 +222,35 @@ describe('devices through the BFF and the real API', () => {
   });
 });
 
+describe('favorites through the BFF and the real API', () => {
+  const push = (cookie: string, body: unknown, csrf?: string) =>
+    bff.pushSync(
+      new Request(`${BASE}/bff/sync/push`, {
+        method: 'POST',
+        headers: { cookie, origin: BASE, 'content-type': 'application/json', ...(csrf ? { 'x-csrf-token': csrf } : {}) },
+        body: JSON.stringify(body),
+      }),
+    );
+  const change = () => ({ changeId: crypto.randomUUID(), entityId: crypto.randomUUID(), type: 'favorite', op: 'upsert', baseRevision: 0, value: { stationId: crypto.randomUUID(), order: 0 } });
+
+  it('needs CSRF to change favorites and passes per-change results through', async () => {
+    const cookie = await signIn('bff-favorites');
+    expect((await push(cookie, { changes: [change()] })).status).toBe(403);
+    const res = await push(cookie, { changes: [change()] }, await csrfFor(cookie));
+    expect(res.status).toBe(200);
+    expect((await res.json()).results[0]).toMatchObject({ status: 'rejected', reason: 'unknown_station' });
+    const list = await bff.getFavorites(new Request(`${BASE}/bff/favorites`, { headers: { cookie } }));
+    expect(await list.json()).toEqual({ favorites: [] });
+    expect((await push('', { changes: [change()] })).status).toBe(401);
+  });
+
+  it('serves the catalog to the page without stream addresses', async () => {
+    const catalog = await bff.loadCatalog();
+    expect(catalog.status).toBe(200);
+    for (const s of catalog.stations ?? []) expect(s).not.toHaveProperty('streamUrl');
+  });
+});
+
 describe('staff routes through the BFF', () => {
   const station = {
     name: 'BFF FM', country: 'TH', language: 'th', genres: [], streamUrl: 'https://stream.example.com/bff.mp3', codec: 'mp3',

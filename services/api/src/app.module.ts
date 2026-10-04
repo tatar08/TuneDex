@@ -30,7 +30,7 @@ import { StaffController, StaffGuard, StaffService } from './staff/staff';
 import { AdminStationsController, CatalogController } from './stations/stations.controller';
 import { PROBE_DEPS, StationHealthService } from './stations/station-health';
 import { StationsService } from './stations/stations.service';
-import { PUSH_MAX_BYTES, SyncController, SyncService } from './sync/sync';
+import { FavoritesController, PUSH_MAX_BYTES, SyncController, SyncService } from './sync/sync';
 import { AuditRetentionService } from './audit/audit-retention';
 import type { ProbeDeps } from './stations/stream-probe';
 import { UsersService } from './users/users.service';
@@ -51,7 +51,7 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, AdminOverviewController, AdminJobsController, AdminUsersController, AdminConfigController, PublicConfigController, SyncController],
+      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, AdminOverviewController, AdminJobsController, AdminUsersController, AdminConfigController, PublicConfigController, SyncController, FavoritesController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },

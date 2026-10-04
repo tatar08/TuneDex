@@ -45,8 +45,36 @@ export interface DeviceView {
   appBuild: string;
   appliedSettingsRevision: number;
   lastSeenAt: string;
+  /** When the phone last finished a sync; null if it never synced. */
+  lastSyncedAt: string | null;
   revokedAt: string | null;
 }
+
+/** A live favorite from GET /v1/me/favorites; `revision` is what a change must name to apply. */
+export interface Favorite {
+  entityId: string;
+  revision: number;
+  stationId: string;
+  order: number;
+  updatedAt: string;
+}
+
+/** A published station from the public catalog (GET /v1/catalog/radio). The web page never plays it. */
+export interface CatalogStation {
+  id: string;
+  name: string;
+  country: string;
+  language: string;
+  genres: string[];
+  codec: string;
+  bitrateKbps: number | null;
+}
+
+/** Per-change result of POST /v1/sync/push. */
+export type SyncResult =
+  | { changeId: string; entityId: string; status: 'applied'; revision: number }
+  | { changeId: string; entityId: string; status: 'conflict'; reason: string; existingEntityId?: string }
+  | { changeId: string; entityId: string; status: 'rejected'; reason: string };
 
 export interface DevicesView {
   settingsRevision: number;
@@ -698,6 +726,67 @@ export function createBff(deps: BffDeps) {
       if (!res) return null;
       return res.ok ? { status: 200, view: (await res.json()) as DevicesView } : { status: res.status };
     },
+
+    /** Server-side read of the account's live favorites for /app/radio and /app/overview. Null means sign in again. */
+    async loadFavorites(ctx: SessionContext): Promise<{ status: number; favorites?: Favorite[] } | null> {
+      const res = await callApi(ctx, '/v1/me/favorites', { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, favorites: ((await res.json()) as { favorites: Favorite[] }).favorites } : { status: res.status };
+    },
+
+    /** Server-side read of the public catalog, up to 500 stations. No session needed: the catalog is public. */
+    async loadCatalog(): Promise<{ status: number; stations?: CatalogStation[]; truncated?: boolean }> {
+      const stations: CatalogStation[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 5; page++) {
+        const res = await fetchImpl(`${config.apiBaseUrl}/v1/catalog/radio?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, {
+          headers: { accept: 'application/json', 'x-request-id': `web_${randomUUID()}` },
+          signal: AbortSignal.timeout(10_000),
+          redirect: 'error',
+        });
+        if (!res.ok) return { status: res.status };
+        const body = (await res.json()) as { stations: (CatalogStation & { streamUrl?: string })[]; nextCursor: string | null };
+        // The stream address is not needed on the web page, so it never reaches the browser.
+        for (const { id, name, country, language, genres, codec, bitrateKbps } of body.stations) stations.push({ id, name, country, language, genres, codec, bitrateKbps });
+        cursor = body.nextCursor;
+        if (!cursor) return { status: 200, stations };
+      }
+      return { status: 200, stations, truncated: true };
+    },
+
+    /** Whether the API answers its readiness probe, for the service line on /app/overview. */
+    async serviceReady(): Promise<boolean> {
+      try {
+        const res = await fetchImpl(`${config.apiBaseUrl}/health/ready`, { signal: AbortSignal.timeout(3_000), redirect: 'error' });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    },
+
+    /** GET /bff/favorites: the page reloads the list after a change or a conflict. */
+    getFavorites: (req: Request) =>
+      timed(req, '/bff/favorites', async (requestId) => {
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        const upstream = await callApi(ctx, '/v1/me/favorites', { method: 'GET' }, requestId);
+        if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        return passthrough(upstream, requestId);
+      }),
+
+    /** POST /bff/sync/push: favorites changes made on the web, through the same sync the phones use. */
+    pushSync: (req: Request) =>
+      timed(req, '/bff/sync/push', async (requestId) => {
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
+        if (!req.headers.get('content-type')?.startsWith('application/json')) return error(415, 'UNSUPPORTED_MEDIA_TYPE', requestId);
+        const body = await req.text();
+        if (Buffer.byteLength(body) > MAX_BODY_BYTES) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
+        const upstream = await callApi(ctx, '/v1/sync/push', { method: 'POST', headers: { 'content-type': 'application/json' }, body }, requestId);
+        if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        return passthrough(upstream, requestId);
+      }),
 
     /** Server-side read of the account's own diagnostic reports for /app/privacy. Null means sign in again. */
     async loadDiagnostics(ctx: SessionContext): Promise<{ status: number; view?: DiagnosticsView } | null> {

@@ -63,3 +63,5 @@ a.btn { display: inline-block; text-decoration: none; }
 .support-code { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 .support-code code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; overflow-wrap: anywhere; user-select: all; }
 .btn.small { padding: 3px 10px; font-size: 12.5px; }
+.radio-actions { display: flex; gap: 6px; align-items: center; }
+.radio-list li { align-items: center; }

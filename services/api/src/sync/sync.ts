@@ -299,3 +299,16 @@ export class SyncController {
     return this.sync.pull(req.actor!.userId, cursor, limit, deviceId);
   }
 }
+
+@Controller('v1/me/favorites')
+@UseGuards(AuthGuard)
+export class FavoritesController {
+  constructor(private readonly sync: SyncService) {}
+
+  /** Live favorites with their revisions, in order, for the web page. Changes go through POST /v1/sync/push. */
+  @Get()
+  async list(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    res.setHeader('Cache-Control', 'no-store');
+    return { favorites: await this.sync.favorites(req.actor!.userId) };
+  }
+}

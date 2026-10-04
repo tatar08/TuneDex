@@ -43,6 +43,8 @@ describe('SettingsForm', () => {
     const user = userEvent.setup();
     render(<SettingsForm initial={view(0)} devices={[]} csrfToken="csrf-1" />);
 
+    await user.tab(); // overview link
+    await user.tab(); // radio link
     await user.tab(); // settings link
     await user.tab(); // devices link
     await user.tab(); // privacy link
@@ -146,6 +148,7 @@ describe('SettingsForm', () => {
       appBuild: '1.0.0+42',
       appliedSettingsRevision: applied,
       lastSeenAt: '2026-10-03T17:30:00.000Z',
+      lastSyncedAt: null,
       revokedAt: null,
       ...extra,
     });

@@ -240,3 +240,64 @@ test('download my data, then delete the account after a fresh sign-in', async ({
   await page.goto(`${base}/app/privacy`);
   await expect(page).toHaveURL(/\/login/);
 });
+
+test('the overview shows each phone’s last sync, and favorites picked on the web reach the phone', async ({ browser }) => {
+  const token = await idp.accessTokenFor('e2e-frank');
+  const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+  const phone = crypto.randomUUID();
+  expect((await fetch(`${api.url}/v1/me/devices/${phone}`, { method: 'PUT', headers: auth, body: JSON.stringify({ platform: 'ios', osMajor: 18, appBuild: '1.0.0+42', appliedSettingsRevision: 0 }) })).status).toBe(200);
+  const me = (await (await fetch(`${api.url}/v1/me`, { headers: auth })).json()) as { userId: string };
+  for (const [name, genre] of [['Bangkok Jazz', 'jazz'], ['Chiang Mai News', 'news'], ['Phuket Beach FM', 'pop']]) {
+    const draft = { name, country: 'TH', language: 'th', genres: [genre], streamUrl: 'https://radio.test/live', codec: 'aac', bitrateKbps: 64 };
+    // Test constants only (no quotes in them), so inlining them into the SQL is safe here.
+    const d = `'${JSON.stringify(draft)}'::jsonb`;
+    const u = `'${me.userId}'::uuid`;
+    await stack.api.sql(`INSERT INTO radio_stations (draft, created_by, updated_by, published, published_revision, published_by, published_at) VALUES (${d}, ${u}, ${u}, ${d}, 1, ${u}, now())`);
+  }
+
+  idp.setUser('e2e-frank');
+  const page = await (await browser.newContext()).newPage();
+  await page.goto(`${base}/auth/login?returnTo=/app/overview`);
+  await expect(page.getByRole('heading', { name: 'ภาพรวม', exact: true })).toBeVisible();
+  await expect(page.getByTestId('service')).toContainText('ระบบทำงานปกติ');
+  await expect(page.getByTestId('overview-device')).toContainText('ยังไม่เคยซิงก์');
+  await expect(page.getByText('สถานีโปรด 0 สถานี')).toBeVisible();
+
+  await page.getByRole('link', { name: 'วิทยุ' }).click();
+  await expect(page).toHaveURL(`${base}/app/radio`);
+  await expect(page.getByTestId('station')).toHaveCount(3);
+  // The stream address stays on the server.
+  expect(await page.content()).not.toContain('radio.test');
+  await page.getByRole('button', { name: 'เพิ่ม Chiang Mai News ในสถานีโปรด' }).click();
+  await expect(page.getByTestId('favorite')).toHaveText(['Chiang Mai News↑↓★']);
+  await page.getByRole('button', { name: 'เพิ่ม Bangkok Jazz ในสถานีโปรด' }).click();
+  await expect(page.getByTestId('favorite')).toHaveCount(2);
+  await page.getByRole('button', { name: 'เลื่อน Bangkok Jazz ขึ้น' }).click();
+  await expect(page.getByTestId('favorite').first()).toContainText('Bangkok Jazz');
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/radio.png`, fullPage: true });
+
+  // The phone pulls the same list and order.
+  const pulled = (await (await fetch(`${api.url}/v1/sync/pull?deviceId=${phone}`, { headers: auth })).json()) as { changes: { value: { stationId: string; order: number } | null }[] };
+  const live = pulled.changes.filter((c) => c.value).sort((a, b) => a.value!.order - b.value!.order);
+  expect(live).toHaveLength(2);
+
+  // A change from the phone meanwhile makes the web's next edit a conflict, and the page reloads the list.
+  const favs = (await (await fetch(`${api.url}/v1/me/favorites`, { headers: auth })).json()) as { favorites: { entityId: string; revision: number; stationId: string }[] };
+  const jazz = favs.favorites[0];
+  const phoneEdit = await fetch(`${api.url}/v1/sync/push`, {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ deviceId: phone, changes: [{ changeId: crypto.randomUUID(), entityId: jazz.entityId, type: 'favorite', op: 'upsert', baseRevision: jazz.revision, value: { stationId: jazz.stationId, order: 50 } }] }),
+  });
+  expect(phoneEdit.status).toBe(200);
+  await page.getByRole('button', { name: 'เอา Bangkok Jazz ออกจากสถานีโปรด' }).first().click();
+  await expect(page.locator('.notice.error')).toContainText('รายการโปรดเปลี่ยนจากอุปกรณ์อื่น');
+  await expect(page.getByTestId('favorite').first()).toContainText('Chiang Mai News');
+  await page.getByRole('button', { name: 'เอา Bangkok Jazz ออกจากสถานีโปรด' }).first().click();
+  await expect(page.getByTestId('favorite')).toHaveCount(1);
+
+  await page.getByRole('link', { name: 'ภาพรวม' }).click();
+  await expect(page.getByTestId('overview-device')).toContainText('ซิงก์ล่าสุด');
+  await expect(page.getByText('สถานีโปรด 1 สถานี')).toBeVisible();
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/overview.png`, fullPage: true });
+});

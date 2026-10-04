@@ -140,6 +140,7 @@ describe('account sync (/v1/sync) and audit retention', () => {
     const a = await bearer('sync-a');
     const exp = (await http().get('/v1/me/export').set(a).expect(200)).body;
     expect(exp.favorites).toEqual([{ stationId: jazz, order: 0, updatedAt: expect.any(String) }]);
+    expect((await http().get('/v1/me/favorites').set(a).expect(200)).body.favorites).toEqual([{ entityId: expect.any(String), revision: 1, stationId: jazz, order: 0, updatedAt: expect.any(String) }]);
     await t.pool.query('UPDATE devices SET revoked_at = now() WHERE id = $1', [phone]);
     expect((await http().get(`/v1/sync/pull?deviceId=${phone}`).set(a)).body.code).toBe('DEVICE_REVOKED');
     expect((await http().post('/v1/sync/push').set(a).send({ deviceId: phone, changes: [fav(randomUUID(), news, 0)] })).status).toBe(403);
