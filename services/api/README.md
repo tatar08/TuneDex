@@ -12,7 +12,7 @@ NestJS + PostgreSQL backend. This folder started as COL-01 from [Doc 19](../../D
 | `PATCH /v1/me/settings` | Partial update. Requires `If-Match: "<revision>"`; stale → 412 `REVISION_MISMATCH` with `currentRevision` |
 | `GET /v1/me/devices` | The account's devices plus the current `settingsRevision`, active first, most recently seen first |
 | `PUT /v1/me/devices/{deviceId}` | The phone app's check-in: registers the device on first call, then records platform, OS major, app build and the settings revision it has applied |
-| `DELETE /v1/me/devices/{deviceId}/session` | Revokes a device. Needs a sign-in within the last 5 minutes (`auth_time`), else 401 `REAUTH_REQUIRED` |
+| `DELETE /v1/me/devices/{deviceId}/session` | Revokes a device. Needs a sign-in within the last 5 minutes (`auth_time`), else 401 `REAUTH_REQUIRED`. The first revoke is audited as `device.revoke` |
 | `GET /v1/me/staff` | The caller's current staff roles (empty for customers), so the console knows which pages to show |
 | `POST /v1/diagnostics/batches` | Signed-in user, from one of their registered, non-revoked devices. Opt-in upload: `consent: true`, `batchId`, `deviceId` and 1-100 events in the Doc 07 schema (allowlisted names and fields only; unknown fields are refused). Up to 128 KiB, 10 batches a minute per device. Retries are safe: a repeated `batchId` returns the first result and repeated `eventId`s are skipped |
 | `GET /v1/me/diagnostics`, `GET /v1/me/diagnostics/{id}`, `DELETE /v1/me/diagnostics/{id}` | The owner's own reports (summary, full events, delete). Reports are deleted after 7 days |

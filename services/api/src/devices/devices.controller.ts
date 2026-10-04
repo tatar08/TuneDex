@@ -36,6 +36,6 @@ export class DevicesController {
     if (authTime === undefined || Date.now() / 1000 - authTime > REAUTH_MAX_AGE_SECONDS) {
       throw new ApiError(HttpStatus.UNAUTHORIZED, 'REAUTH_REQUIRED', { maxAgeSeconds: REAUTH_MAX_AGE_SECONDS });
     }
-    return this.devices.revoke(req.actor!.userId, id);
+    return this.devices.revoke(req.actor!.userId, id, req.requestId);
   }
 }

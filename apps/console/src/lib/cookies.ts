@@ -42,6 +42,8 @@ export interface LoginTransaction {
   codeVerifier: string;
   returnTo: string;
   exp: number;
+  /** Set for a re-authentication: the epoch second it started. The callback requires an ID token auth_time at or after it. */
+  reauthSince?: number;
 }
 
 export function sealTransaction(tx: LoginTransaction, secret: string): string {

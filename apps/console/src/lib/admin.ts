@@ -268,6 +268,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'staff_role.revoke': 'ถอนสิทธิ์ทีมงาน',
   'logs.search': 'ค้นบันทึกระบบ',
   'audit.search': 'ดูประวัติการแก้ไข',
+  'device.revoke': 'ผู้ใช้ออกจากระบบอุปกรณ์',
 };
 export const actionLabel = (a: string) => ACTION_LABELS[a] ?? a;
 /** Family used for colors and the action filter. */

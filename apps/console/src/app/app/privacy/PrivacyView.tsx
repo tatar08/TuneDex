@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { DiagnosticReport, DiagnosticsView } from '@/lib/bff';
 import { Lang, strings } from '@/lib/i18n';
+import { AppNav } from '../AppNav';
 
 const when = (lang: Lang) =>
   new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -33,17 +34,7 @@ export function PrivacyView({ lang, csrfToken, view }: { lang: Lang; csrfToken: 
 
   return (
     <main className="shell">
-      <div className="nav">
-        <span className="brand">{t.appName}</span>
-        <a href="/app/settings">{t.navSettings}</a>
-        <a href="/app/privacy" aria-current="page">
-          {t.navPrivacy}
-        </a>
-        <form method="post" action="/auth/logout">
-          <input type="hidden" name="csrf" value={csrfToken} />
-          <button type="submit">{t.signOut}</button>
-        </form>
-      </div>
+      <AppNav lang={lang} current="/app/privacy" csrfToken={csrfToken} />
 
       <h1>{t.privacyTitle}</h1>
       <p className="lede">{t.privacyLede}</p>

@@ -126,3 +126,60 @@ test('the privacy page lists the account’s diagnostic reports and deletes one'
   await page.reload();
   await expect(page.getByTestId('report')).toHaveCount(1);
 });
+
+test('signing a phone out from the web asks for a fresh sign-in first', async ({ browser }) => {
+  const token = await idp.accessTokenFor('e2e-erin');
+  const register = (id: string, platform: string, osMajor: number) =>
+    fetch(`${api.url}/v1/me/devices/${id}`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ platform, osMajor, appBuild: '1.0.0+42', appliedSettingsRevision: 0 }),
+    });
+  const lost = crypto.randomUUID();
+  expect((await register(lost, 'android', 15)).status).toBe(200);
+  expect((await register(crypto.randomUUID(), 'ios', 18)).status).toBe(200);
+
+  // An old SSO sign-in: the web session works, but it is too old to sign a device out.
+  idp.setUser('e2e-erin');
+  const first = await (await browser.newContext()).newPage();
+  await first.goto(`${base}/auth/login`);
+  await first.close();
+  idp.ageSignIn(600);
+  const page = await (await browser.newContext()).newPage();
+  await page.goto(`${base}/auth/login?returnTo=/app/settings`);
+  await page.getByRole('link', { name: 'จัดการอุปกรณ์' }).click();
+  await expect(page).toHaveURL(`${base}/app/devices`);
+  await expect(page.getByRole('heading', { name: 'อุปกรณ์', exact: true })).toBeVisible();
+  const devices = page.getByTestId('device');
+  await expect(devices).toHaveCount(2);
+
+  const android = devices.filter({ hasText: 'Android 15' });
+  await android.getByRole('button', { name: 'ออกจากระบบเครื่องนี้' }).click();
+  await expect(android).toContainText('ออกจากระบบ Android 15 ใช่ไหม');
+  await expect(android.getByRole('button', { name: 'ยืนยัน ออกจากระบบ' })).toBeFocused();
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/devices-confirm.png`, fullPage: true });
+  await page.keyboard.press('Enter');
+
+  const alert = page.getByRole('alert').filter({ hasText: 'ยืนยันตัวตน' });
+  await expect(alert).toContainText('กรุณายืนยันตัวตนอีกครั้ง');
+  await expect(alert).toBeFocused();
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/devices-reauth.png`, fullPage: true });
+  await expect(devices).toHaveCount(2);
+
+  // Back from the provider, the same phone is still chosen and only needs the final click.
+  await alert.getByRole('link', { name: 'ยืนยันตัวตน' }).click();
+  await expect(page).toHaveURL(`${base}/app/devices`);
+  const confirm = page.getByRole('button', { name: 'ยืนยัน ออกจากระบบ' });
+  await expect(confirm).toBeFocused();
+  await confirm.click();
+  await expect(devices).toHaveCount(1);
+  await expect(page.getByTestId('revoked-device')).toContainText('Android 15');
+  await expect(page.getByText('ออกจากระบบ Android 15 แล้ว')).toBeAttached();
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/devices-done.png`, fullPage: true });
+
+  // The phone itself is now refused, and a reload keeps the result without reopening the confirmation.
+  expect((await register(lost, 'android', 15)).status).toBe(403);
+  await page.reload();
+  await expect(page.getByTestId('revoked-device')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'ยืนยัน ออกจากระบบ' })).toHaveCount(0);
+});

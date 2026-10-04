@@ -14,6 +14,10 @@ export interface MockIdp {
   setUser(sub: string): void;
   setAccessTtl(seconds: number): void;
   revokeRefreshTokens(): void;
+  /** Moves the current user's last real sign-in this many seconds into the past (an old SSO session). */
+  ageSignIn(seconds: number): void;
+  /** When true, prompt=login / max_age=0 are ignored and the old SSO sign-in is reused, like a misconfigured provider. */
+  ignoreReauth(on: boolean): void;
   /** Signs an API access token directly, standing in for the phone app's own login. */
   accessTokenFor(sub: string): Promise<string>;
   issued: string[];
@@ -33,8 +37,11 @@ const body = (req: IncomingMessage) =>
 export async function startMockIdp(): Promise<MockIdp> {
   const { privateKey, publicKey } = await generateKeyPair('RS256');
   const jwk = { ...(await exportJWK(publicKey)), kid: 'idp-1', alg: 'RS256', use: 'sig' };
-  const codes = new Map<string, { sub: string; nonce: string; challenge: string; redirectUri: string }>();
-  const refresh = new Map<string, string>();
+  const codes = new Map<string, { sub: string; nonce: string; challenge: string; redirectUri: string; authTime: number }>();
+  const refresh = new Map<string, { sub: string; authTime: number }>();
+  /** Per user: when they last typed credentials. The SSO session reuses it until a forced re-prompt. */
+  const signedInAt = new Map<string, number>();
+  let honorReauth = true;
   const issued: string[] = [];
   let user = 'alice';
   let accessTtl = 300;
@@ -45,11 +52,11 @@ export async function startMockIdp(): Promise<MockIdp> {
     return new SignJWT(claims).setProtectedHeader({ alg: 'RS256', kid: 'idp-1' }).setIssuer(issuer).setAudience(aud).setIssuedAt(now).setExpirationTime(now + ttl).sign(key);
   };
 
-  async function tokens(sub: string, nonce?: string) {
-    const access = await sign({ sub }, API_AUDIENCE, accessTtl);
-    const id = nonce !== undefined ? await sign({ sub, nonce }, CLIENT_ID, 300) : undefined;
+  async function tokens(sub: string, authTime: number, nonce?: string) {
+    const access = await sign({ sub, auth_time: authTime }, API_AUDIENCE, accessTtl);
+    const id = nonce !== undefined ? await sign({ sub, nonce, auth_time: authTime }, CLIENT_ID, 300) : undefined;
     const rt = randomBytes(24).toString('base64url');
-    refresh.set(rt, sub);
+    refresh.set(rt, { sub, authTime });
     issued.push(access, rt, ...(id ? [id] : []));
     return { access_token: access, token_type: 'Bearer', expires_in: accessTtl, refresh_token: rt, ...(id ? { id_token: id } : {}) };
   }
@@ -75,8 +82,16 @@ export async function startMockIdp(): Promise<MockIdp> {
       if (p.get('client_id') !== CLIENT_ID || p.get('code_challenge_method') !== 'S256' || p.get('response_type') !== 'code') {
         return send(400, { error: 'invalid_request' });
       }
+      const forced = honorReauth && (p.get('prompt') === 'login' || p.get('max_age') === '0');
+      if (forced || !signedInAt.has(user)) signedInAt.set(user, Math.floor(Date.now() / 1000));
       const code = randomBytes(16).toString('base64url');
-      codes.set(code, { sub: user, nonce: p.get('nonce')!, challenge: p.get('code_challenge')!, redirectUri: p.get('redirect_uri')! });
+      codes.set(code, {
+        sub: user,
+        nonce: p.get('nonce')!,
+        challenge: p.get('code_challenge')!,
+        redirectUri: p.get('redirect_uri')!,
+        authTime: signedInAt.get(user)!,
+      });
       const back = new URL(p.get('redirect_uri')!);
       back.searchParams.set('code', code);
       back.searchParams.set('state', p.get('state')!);
@@ -99,13 +114,13 @@ export async function startMockIdp(): Promise<MockIdp> {
         if (!entry || entry.redirectUri !== p.get('redirect_uri') || entry.challenge !== challenge) {
           return send(400, { error: 'invalid_grant' });
         }
-        return send(200, await tokens(entry.sub, entry.nonce));
+        return send(200, await tokens(entry.sub, entry.authTime, entry.nonce));
       }
       if (p.get('grant_type') === 'refresh_token') {
-        const sub = refresh.get(p.get('refresh_token') ?? '');
-        if (!sub) return send(400, { error: 'invalid_grant' });
+        const entry = refresh.get(p.get('refresh_token') ?? '');
+        if (!entry) return send(400, { error: 'invalid_grant' });
         refresh.delete(p.get('refresh_token')!); // rotation: each refresh token works once
-        return send(200, await tokens(sub));
+        return send(200, await tokens(entry.sub, entry.authTime));
       }
       return send(400, { error: 'unsupported_grant_type' });
     }
@@ -121,6 +136,8 @@ export async function startMockIdp(): Promise<MockIdp> {
     setUser: (s) => (user = s),
     setAccessTtl: (s) => (accessTtl = s),
     revokeRefreshTokens: () => refresh.clear(),
+    ageSignIn: (seconds) => signedInAt.set(user, (signedInAt.get(user) ?? Math.floor(Date.now() / 1000)) - seconds),
+    ignoreReauth: (on) => (honorReauth = !on),
     accessTokenFor: (sub) => sign({ sub }, API_AUDIENCE, 300),
   };
 }
