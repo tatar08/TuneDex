@@ -4,12 +4,17 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  countByHealth,
   countByStatus,
   FIELD_LABELS,
   FILTER_LABELS,
   formatDate,
   formatDateTime,
+  HEALTH_LABELS,
+  healthLine,
+  healthOf,
   initials,
+  isLive,
   REASON_LABELS,
   rightsDaysLeft,
   rightsLine,
@@ -154,6 +159,10 @@ export function MinimalDashboard({ stations, filter, query }: { stations: AdminS
     .filter((d): d is string => !!d)
     .sort()
     .pop();
+  const health = useMemo(() => countByHealth(stations), [stations]);
+  const unhealthy = stations
+    .filter((s) => isLive(s) && (healthOf(s).state === 'suspect' || healthOf(s).state === 'failing'))
+    .sort((a, b) => Number(healthOf(b).state === 'suspect') - Number(healthOf(a).state === 'suspect'));
   const shown = stations
     .filter((s) => filter === 'all' || s.status === filter)
     .filter((s) => !query || s.draft.name.toLowerCase().includes(query.toLowerCase()));
@@ -226,6 +235,40 @@ export function MinimalDashboard({ stations, filter, query }: { stations: AdminS
               <Link href="/admin/stations/new" className="fv-dark">
                 + เพิ่มสถานี
               </Link>
+            )}
+          </section>
+          <section className="fv-card" aria-labelledby="fv-health">
+            <div className="fv-card-head">
+              <div>
+                <h2 id="fv-health">สตรีมที่ต้องดู</h2>
+                <small>ผลตรวจสตรีมของสถานีที่แอปเห็น ระบบไม่ปิดสถานีเอง</small>
+              </div>
+              <span className={health.suspect ? 'fv-accent' : 'fv-muted'}>{health.suspect + health.failing} สถานี</span>
+            </div>
+            <ul className="fv-health" aria-label="สรุปผลตรวจ">
+              {(['ok', 'failing', 'suspect', 'unknown'] as const).map((k) => (
+                <li key={k} className={k}>
+                  <b>{health[k]}</b>
+                  <small>{HEALTH_LABELS[k]}</small>
+                </li>
+              ))}
+            </ul>
+            {unhealthy.length === 0 ? (
+              <p className="fv-muted">{health.ok ? 'ทุกสถานีที่ตรวจแล้วเล่นได้' : 'ยังไม่มีผลตรวจ'}</p>
+            ) : (
+              <ul className="fv-tx">
+                {unhealthy.slice(0, 4).map((s) => (
+                  <li key={s.id}>
+                    <span className={`fv-tile hl-${healthOf(s).state}`} aria-hidden="true">
+                      {initials(s.draft.name)}
+                    </span>
+                    <Link href={href(s)} className="fv-tx-main">
+                      <b>{s.draft.name}</b>
+                      <small>{healthLine(healthOf(s))}</small>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
             )}
           </section>
         </div>
@@ -350,6 +393,14 @@ export function MinimalDashboard({ stations, filter, query }: { stations: AdminS
                 </Link>
                 <small>{subtitle(s)}</small>
                 <span className={`st ${s.status}`}>{STATUS_LABELS[s.status]}</span>
+                {isLive(s) ? (
+                  <small className={`hl-line ${healthOf(s).state}`} title={healthLine(healthOf(s))}>
+                    <i className={`hl-dot ${healthOf(s).state}`} aria-hidden="true" />
+                    {HEALTH_LABELS[healthOf(s).state]}
+                  </small>
+                ) : (
+                  <small>—</small>
+                )}
                 <small className={rightsSoon(s) ? 'hot' : undefined}>{rightsLine(s)}</small>
                 <small className="mono">r{s.revision}</small>
               </li>

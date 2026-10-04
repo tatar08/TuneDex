@@ -8,6 +8,7 @@ test.beforeAll(async () => {
   stack.api.staff('grant', 'e2e-editor', 'catalog_editor', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-admin', 'admin', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-ops', 'operator', '--by', 'e2e', '--reason', 'test');
+  stack.api.staff('grant', 'e2e-auditor', 'auditor', '--by', 'e2e', '--reason', 'test');
 });
 
 test.afterAll(async () => {
@@ -216,4 +217,103 @@ test('the log page has its own layout in each theme', async ({ browser }) => {
     await expect(page.getByRole('link', { name: 'บันทึกระบบ' }).first()).toBeVisible();
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/logs-${theme}.png`, fullPage: true });
   }
+});
+
+test('auditors read who changed what; reading is recorded', async ({ browser }) => {
+  const aud = await signInAs(browser, 'e2e-auditor', '/admin/audit');
+  await aud.goto(`${stack.base}/admin`);
+  await expect(aud).toHaveURL(`${stack.base}/admin/audit`);
+  await expect(aud.getByRole('link', { name: 'บันทึกระบบ' })).toHaveCount(0);
+  const feed = aud.locator('.au-feed li');
+  // Role grants from the operator CLI are always there; station work from earlier tests too.
+  await expect(aud.locator('.au-feed')).toContainText('ให้สิทธิ์ทีมงาน');
+  await expect(aud.locator('.au-feed')).toContainText('เผยแพร่สถานี');
+  await expect(aud.locator('.au-feed')).not.toContainText('ดูประวัติการแก้ไข');
+  if (SHOTS) await aud.screenshot({ path: `${SHOTS}/audit-minimal.png`, fullPage: true });
+
+  // Clicking an actor narrows the list to that actor.
+  await aud.locator('.au-feed').getByRole('link', { name: 'e2e-admin' }).first().click();
+  await expect(aud).toHaveURL(/actor=e2e-admin/);
+  for (const text of await feed.locator('.fv-tx-side b').allInnerTexts()) expect(text).toBe('e2e-admin');
+
+  // Including reads shows this auditor's own views.
+  await aud.goto(`${stack.base}/admin/audit?family=audit&reads=1`);
+  await expect(aud.locator('.au-feed')).toContainText('ดูประวัติการแก้ไข');
+  await expect(aud.locator('.au-feed')).toContainText('e2e-auditor');
+
+  const editor = await signInAs(browser, 'e2e-editor');
+  await expect(editor.getByRole('link', { name: 'ประวัติการแก้ไข' })).toHaveCount(0);
+  await editor.goto(`${stack.base}/admin/audit`);
+  await expect(editor.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูประวัติการแก้ไข');
+});
+
+test('the audit page has its own layout in each theme', async ({ browser }) => {
+  const page = await signInAs(browser, 'e2e-admin', '/admin/audit');
+  const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
+  const layouts: Record<string, string> = {
+    'control-room': '.t-control-room .audit .cr-filter + .lg-pn table',
+    'broadcast-rack': '.t-broadcast-rack .br-book li',
+    'daylight-bento': '.t-daylight-bento .db-days h4',
+    workbench: '.t-workbench .split .au-it',
+    minimal: '.t-minimal .fv-logstats + .fv-card .fv-logform',
+  };
+  for (const [theme, selector] of Object.entries(layouts)) {
+    await picker.selectOption(theme);
+    await expect(page.locator(selector).first()).toBeVisible();
+    await expect(page.getByRole('link', { name: 'ประวัติการแก้ไข' }).first()).toBeVisible();
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/audit-${theme}.png`, fullPage: true });
+  }
+});
+
+/** Scheduled check results, as the API's checker would write them (it is off in tests). */
+async function seedHealth() {
+  const rows = (name: string, n: number, status: 'ok' | 'fail', reason: string, http: number | null, latency: number | null) =>
+    `INSERT INTO station_health (station_id, check_region, checked_at, status, reason, http_status, latency_ms)
+     SELECT id, 'asia-southeast', now() - make_interval(mins => g * 15), '${status}', '${reason}', ${http ?? 'NULL'}, ${latency ?? 'NULL'}
+       FROM radio_stations, generate_series(0, ${n - 1}) g WHERE draft->>'name' = '${name}';`;
+  // Health counts only checks since the last publish, so place the publishes before the seeded checks.
+  await stack.api.sql(
+    `UPDATE radio_stations SET published_at = now() - interval '1 day' WHERE published_at IS NOT NULL;` +
+    rows('News Hour TH', 2, 'ok', 'ok', 200, 184) +
+      rows('Andaman Chill', 3, 'fail', 'timeout', null, 10000) +
+      rows('Lukthung Online', 1, 'fail', 'http_status', 503, 92),
+  );
+}
+
+test('stream health shows in every theme, and staff can check a stream now', async ({ browser }) => {
+  await seedHealth();
+  const page = await signInAs(browser, 'e2e-editor');
+  const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
+  const markers: Record<string, string> = {
+    minimal: '.t-minimal .fv-rows .hl-line.suspect',
+    'control-room': '.t-control-room table .tag.hl-suspect',
+    'broadcast-rack': '.t-broadcast-rack .pre .hl-sig.suspect',
+    'daylight-bento': '.t-daylight-bento .st .hl-chip.suspect',
+    workbench: '.t-workbench .list .hl-line.suspect',
+  };
+  for (const [theme, selector] of Object.entries(markers)) {
+    await picker.selectOption(theme);
+    await expect(page.locator(selector).first()).toBeVisible();
+    await expect(page.locator(selector).first()).toContainText('น่าสงสัย');
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/health-list-${theme}.png`, fullPage: true });
+  }
+  await picker.selectOption('minimal');
+  await expect(page.getByRole('region', { name: 'สตรีมที่ต้องดู' })).toContainText('Andaman Chill');
+
+  // The station page explains a suspect stream and does not disable it.
+  await page.getByRole('link', { name: 'Andaman Chill' }).first().click();
+  const panel = page.getByRole('region', { name: 'สุขภาพสตรีม' });
+  await expect(panel.locator('.hl-pill')).toHaveText('น่าสงสัย');
+  await expect(panel).toContainText('ไม่ผ่าน 3 ครั้งติด');
+  await expect(panel).toContainText('ระบบไม่ปิดสถานีเอง');
+  await expect(page.getByText('เผยแพร่แล้ว').first()).toBeVisible();
+  await panel.getByText('ประวัติการตรวจ 3 ครั้งล่าสุด').click();
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/health-station-minimal.png`, fullPage: true });
+
+  // Check now: the real probe runs against the published URL, so the outcome depends on the network.
+  await panel.getByRole('button', { name: 'ตรวจตอนนี้' }).click();
+  await expect(panel.getByRole('status')).toHaveText(/เล่นได้|ตรวจไม่ผ่าน/, { timeout: 15_000 });
+  await expect(panel).toContainText('ประวัติการตรวจ 4 ครั้งล่าสุด');
+  await panel.getByRole('button', { name: 'ตรวจตอนนี้' }).click();
+  await expect(panel.getByRole('status')).toHaveText('เพิ่งตรวจไปไม่ถึงนาที รอสักครู่แล้วลองใหม่');
 });

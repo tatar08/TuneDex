@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { countByHealth, healthLine } from '@/lib/admin';
+import type { AdminStation } from '@/lib/bff';
 import { loadConfig } from '@/lib/config';
 import { openTransaction, safeReturnTo, sealTransaction } from '@/lib/cookies';
 import { MemorySessionStore } from '@/lib/session';
@@ -55,5 +57,27 @@ describe('MemorySessionStore', () => {
     const { id: idle } = await store.create({ accessToken: 'a', expiresAt: 1 });
     now += 101;
     expect(await store.touch(idle)).toBeNull();
+  });
+});
+
+describe('stream health helpers', () => {
+  const region = { region: 'asia-southeast', checkedAt: '2026-10-03T00:00:00Z', latencyMs: 180, httpStatus: 200, reason: 'ok' };
+  it('says why a stream is failing and how many times in a row', () => {
+    expect(healthLine({ state: 'unknown', regions: [] })).toBe('ยังไม่ได้ตรวจ');
+    expect(healthLine({ state: 'ok', regions: [{ ...region, state: 'ok', consecutiveFailures: 0 }] })).toBe('เล่นได้ · 180 ms');
+    expect(
+      healthLine({ state: 'suspect', regions: [{ ...region, state: 'suspect', reason: 'http_status', httpStatus: 503, consecutiveFailures: 3 }] }),
+    ).toBe('น่าสงสัย · เซิร์ฟเวอร์ตอบข้อผิดพลาด (503) · 3 ครั้งติด');
+  });
+
+  it('counts only stations the apps can see', () => {
+    const s = (publishedRevision: number | null, disabledAt: string | null, state: 'ok' | 'suspect') =>
+      ({ publishedRevision, disabledAt, health: { state, regions: [] } }) as unknown as AdminStation;
+    expect(countByHealth([s(1, null, 'ok'), s(1, null, 'suspect'), s(null, null, 'ok'), s(1, '2026-10-01', 'suspect')])).toEqual({
+      unknown: 0,
+      ok: 1,
+      failing: 0,
+      suspect: 1,
+    });
   });
 });

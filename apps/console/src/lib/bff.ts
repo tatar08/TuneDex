@@ -79,10 +79,39 @@ export interface AdminStation {
   disabledAt: string | null;
   updatedAt: string;
   publishBlockers: string[];
+  health: StationHealth;
+}
+
+export type HealthState = 'unknown' | 'ok' | 'failing' | 'suspect';
+
+export interface RegionHealth {
+  region: string;
+  state: Exclude<HealthState, 'unknown'>;
+  checkedAt: string;
+  reason: string;
+  httpStatus: number | null;
+  latencyMs: number | null;
+  consecutiveFailures: number;
+}
+
+/** Health of the published stream, from the API's scheduled checks (Doc 17). */
+export interface StationHealth {
+  state: HealthState;
+  regions: RegionHealth[];
+}
+
+export interface HealthCheck {
+  region: string;
+  checkedAt: string;
+  target: 'published' | 'draft';
+  ok: boolean;
+  reason: string;
+  httpStatus: number | null;
+  latencyMs: number | null;
 }
 
 const STATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const STATION_ACTIONS = ['publish', 'disable', 'enable'] as const;
+const STATION_ACTIONS = ['publish', 'disable', 'enable', 'check'] as const;
 export type StationAction = (typeof STATION_ACTIONS)[number];
 
 export type SessionContext = { id: string; session: Session };
@@ -109,6 +138,26 @@ export interface LogPage {
   nextCursor: string | null;
   retentionDays: number;
 }
+export interface AuditEvent {
+  id: string;
+  occurredAt: string;
+  actor: string;
+  actorSubject: string | null;
+  action: string;
+  targetLabel: string | null;
+  targetType: string;
+  targetId: string;
+  reason: string | null;
+  changes: Record<string, unknown>;
+  requestId: string | null;
+}
+export interface AuditPage {
+  events: AuditEvent[];
+  nextCursor: string | null;
+}
+/** Search fields the console forwards to GET /v1/admin/audit; anything else is dropped. The API validates values. */
+export const AUDIT_PARAMS = ['from', 'to', 'actor', 'action', 'targetType', 'targetId', 'requestId', 'includeReads', 'limit', 'cursor'] as const;
+
 /** Search fields the console forwards to GET /v1/admin/logs; anything else is dropped. The API validates values. */
 export const LOG_PARAMS = ['from', 'to', 'severity', 'service', 'build', 'eventCode', 'requestId', 'status', 'limit', 'cursor'] as const;
 
@@ -296,6 +345,12 @@ export function createBff(deps: BffDeps) {
       if (!res) return null;
       return res.ok ? { status: 200, station: (await res.json()) as AdminStation } : { status: res.status };
     },
+    async loadStationHealth(ctx: SessionContext, id: string): Promise<{ status: number; checks?: HealthCheck[] } | null> {
+      if (!STATION_ID.test(id)) return { status: 404 };
+      const res = await callApi(ctx, `/v1/admin/stations/${id}/health`, { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, checks: ((await res.json()) as { checks: HealthCheck[] }).checks } : { status: res.status };
+    },
 
     /** Server-side log search for /admin/logs. Null means the user must sign in again. */
     async loadLogs(
@@ -314,6 +369,23 @@ export function createBff(deps: BffDeps) {
       return { status: res.status, field: body.details?.field };
     },
 
+    /** Server-side audit search for /admin/audit. Null means the user must sign in again. */
+    async loadAudit(
+      ctx: SessionContext,
+      params: Partial<Record<(typeof AUDIT_PARAMS)[number], string>>,
+    ): Promise<{ status: number; page?: AuditPage; field?: string } | null> {
+      const qs = new URLSearchParams();
+      for (const k of AUDIT_PARAMS) {
+        const v = params[k];
+        if (typeof v === 'string' && v && v.length <= 200) qs.set(k, v);
+      }
+      const res = await callApi(ctx, `/v1/admin/audit?${qs}`, { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      if (res.ok) return { status: 200, page: (await res.json()) as AuditPage };
+      const body = (await res.json().catch(() => ({}))) as { details?: { field?: string } };
+      return { status: res.status, field: body.details?.field };
+    },
+
     /** GET/POST /bff/admin/stations */
     stations: (req: Request) =>
       timed(req, '/bff/admin/stations', (requestId) => adminProxy(req, requestId, '/v1/admin/stations', req.method === 'POST')),
@@ -324,7 +396,7 @@ export function createBff(deps: BffDeps) {
         STATION_ID.test(id) ? adminProxy(req, requestId, `/v1/admin/stations/${id}`, req.method === 'PATCH') : notFound(requestId),
       ),
 
-    /** POST /bff/admin/stations/{id}/{publish|disable|enable} */
+    /** POST /bff/admin/stations/{id}/{publish|disable|enable|check} */
     stationAction: (req: Request, id: string, action: string) =>
       timed(req, '/bff/admin/stations/:id/:action', async (requestId) =>
         STATION_ID.test(id) && (STATION_ACTIONS as readonly string[]).includes(action)

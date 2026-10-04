@@ -4,8 +4,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { BLOCKER_LABELS, FIELD_LABELS, formatDateTime, REASON_LABELS, RIGHTS_BASIS_LABELS, STATUS_LABELS } from '@/lib/admin';
-import type { AdminStation, StationDraft } from '@/lib/bff';
+import type { AdminStation, HealthCheck, StationDraft } from '@/lib/bff';
 import { useAdmin } from '../AdminShell';
+import { HealthPanel } from './HealthPanel';
 
 type Form = Record<keyof StationDraft, string>;
 const FIELDS = Object.keys(FIELD_LABELS).filter((k) => k !== 'reason') as (keyof StationDraft)[];
@@ -57,7 +58,7 @@ const display = (k: keyof StationDraft, v: unknown) =>
 
 type Problem = { kind: 'field'; field: string; reason: string } | { kind: 'conflict'; revision: number } | { kind: 'message'; text: string };
 
-export function StationEditor({ station: initial }: { station?: AdminStation }) {
+export function StationEditor({ station: initial, history = [] }: { station?: AdminStation; history?: HealthCheck[] }) {
   const { csrfToken, canEdit, isAdmin } = useAdmin();
   const router = useRouter();
   const [station, setStation] = useState(initial);
@@ -290,6 +291,9 @@ export function StationEditor({ station: initial }: { station?: AdminStation }) 
                 </>
               )}
             </section>
+
+            {/* From props, not local state, so a refresh after "check now" shows the new result. */}
+            <HealthPanel station={initial ?? station} history={history} />
 
             {isAdmin && station.publishedRevision !== null && (
               <section className="adm-panel" aria-label="เปิดหรือปิดสถานี">

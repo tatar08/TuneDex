@@ -35,6 +35,8 @@ export interface ApiProcess {
   stop: () => Promise<void>;
   /** Runs the operator staff CLI (grant/revoke/list) against this API's database. */
   staff: (...args: string[]) => void;
+  /** Runs SQL against this API's database (tests seed rows the API only writes on a schedule). */
+  sql: (query: string) => Promise<unknown>;
 }
 
 /**
@@ -73,6 +75,7 @@ export async function startApi(issuer: string): Promise<ApiProcess> {
   }
   return {
     url,
+    sql: (query) => psql(dbUrl.toString(), query),
     staff: (...args) => {
       execFileSync('node', ['dist/staff/staff-cli.js', ...args], { cwd: API_DIR, env, stdio: 'ignore' });
     },
