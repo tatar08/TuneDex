@@ -48,6 +48,7 @@ test('sign in, save by keyboard, resolve a conflict, sign out', async ({ browser
   await expect(page.getByRole('button', { name: 'บันทึก' })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('saved-revision')).toHaveText('บันทึกแล้ว · revision 1');
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/settings.png`, fullPage: true });
 
   // A second browser changes the same account, so the first one is now stale.
   const other = await (await browser.newContext()).newPage();
