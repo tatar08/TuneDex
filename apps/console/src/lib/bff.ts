@@ -412,6 +412,39 @@ export function createBff(deps: BffDeps) {
       return { status: res.status, field: body.details?.field };
     },
 
+    /**
+     * POST /bff/admin/audit/export: the current audit search as CSV, with `{ reason }` in the JSON body.
+     * The API checks the role, bounds the rows and records the export with its reason.
+     */
+    auditExport: (req: Request) =>
+      timed(req, '/bff/admin/audit/export', async (requestId) => {
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
+        if (!req.headers.get('content-type')?.startsWith('application/json')) return error(415, 'UNSUPPORTED_MEDIA_TYPE', requestId);
+        const body = await req.text();
+        if (Buffer.byteLength(body) > MAX_BODY_BYTES) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
+        const incoming = new URL(req.url).searchParams;
+        const qs = new URLSearchParams();
+        for (const k of AUDIT_PARAMS) {
+          const v = incoming.get(k);
+          if (k !== 'cursor' && k !== 'limit' && v && v.length <= 200) qs.set(k, v);
+        }
+        const upstream = await callApi(ctx, `/v1/admin/audit/export?${qs}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body }, requestId);
+        if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        if (!upstream.ok) return passthrough(upstream, requestId);
+        const disposition = upstream.headers.get('content-disposition') ?? '';
+        return new Response(await upstream.arrayBuffer(), {
+          status: 200,
+          headers: {
+            'content-type': 'text/csv; charset=utf-8',
+            'cache-control': 'no-store',
+            'x-request-id': requestId,
+            'content-disposition': /^attachment; filename="[\w.-]{1,64}"$/.test(disposition) ? disposition : 'attachment; filename="tunedeck-audit.csv"',
+          },
+        });
+      }),
+
     /** GET/POST /bff/admin/stations */
     stations: (req: Request) =>
       timed(req, '/bff/admin/stations', (requestId) => adminProxy(req, requestId, '/v1/admin/stations', req.method === 'POST')),

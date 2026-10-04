@@ -261,8 +261,24 @@ test('the audit page has its own layout in each theme', async ({ browser }) => {
     await picker.selectOption(theme);
     await expect(page.locator(selector).first()).toBeVisible();
     await expect(page.getByRole('link', { name: 'ประวัติการแก้ไข' }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'ส่งออก CSV' })).toBeVisible();
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/audit-${theme}.png`, fullPage: true });
   }
+
+  // Export the current search with a reason; the export lands in the trail with that reason.
+  await page.getByRole('button', { name: 'ส่งออก CSV' }).click();
+  const reason = page.getByLabel('เหตุผลในการส่งออก (จะถูกบันทึกไว้)');
+  await expect(reason).toBeFocused();
+  await expect(page.getByRole('button', { name: 'ดาวน์โหลด CSV' })).toBeDisabled();
+  await reason.fill('ตรวจสอบรายไตรมาสให้เจ้าของ');
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/audit-export.png`, fullPage: true });
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'ดาวน์โหลด CSV' }).click()]);
+  expect(download.suggestedFilename()).toMatch(/^tunedeck-audit-\d{4}-\d{2}-\d{2}\.csv$/);
+  const csv = await (await import('node:fs/promises')).readFile((await download.path())!, 'utf8');
+  expect(csv.replace(/^\uFEFF/, '').split('\r\n')[0]).toBe('id,occurredAt,actor,actorSubject,action,targetType,targetId,targetLabel,reason,changes,requestId');
+  await expect(page.getByRole('status').filter({ hasText: 'ถูกบันทึกพร้อมเหตุผล' })).toBeVisible();
+  const logged = (await stack.api.sql(`SELECT reason FROM audit_events WHERE action = 'audit.export'`)) as { rows: { reason: string }[] };
+  expect(logged.rows.map((r) => r.reason)).toEqual(['ตรวจสอบรายไตรมาสให้เจ้าของ']);
 });
 
 /** Scheduled check results, as the API's checker would write them (it is off in tests). */

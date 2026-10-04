@@ -269,6 +269,10 @@ export const ACTION_LABELS: Record<string, string> = {
   'logs.search': 'ค้นบันทึกระบบ',
   'audit.search': 'ดูประวัติการแก้ไข',
   'device.revoke': 'ผู้ใช้ออกจากระบบอุปกรณ์',
+  'audit.export': 'ส่งออกประวัติ',
+  'account.export': 'ผู้ใช้ดาวน์โหลดข้อมูล',
+  'account.delete_requested': 'ผู้ใช้ขอลบบัญชี',
+  'account.deleted': 'ลบข้อมูลบัญชีเสร็จ',
 };
 export const actionLabel = (a: string) => ACTION_LABELS[a] ?? a;
 /** Family used for colors and the action filter. */

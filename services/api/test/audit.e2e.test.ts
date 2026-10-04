@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { parseAuditQuery } from '../src/audit/audit-search';
+import { parseAuditQuery, toCsv } from '../src/audit/audit-search';
 import { Database } from '../src/db/database';
 import { runStaffCli } from '../src/staff/staff-cli';
 import { createIdentity, createTestApp, createTestDatabase, TestIdentity } from './harness';
@@ -113,6 +113,43 @@ describe('audit trail search', () => {
       const res = await search('auditor', q);
       expect([res.status, q]).toEqual([400, q]);
     }
+  });
+
+  describe('export', () => {
+    const exportAs = (who: keyof typeof tokens, body: object, q: Record<string, string> = {}) =>
+      http().post('/v1/admin/audit/export').query(q).set(as(who)).send(body);
+
+    it('downloads the search as CSV and records the reason, filters and row count', async () => {
+      const res = await exportAs('auditor', { reason: 'Quarterly review for the owner' }, { action: 'station' });
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toBe('text/csv; charset=utf-8');
+      expect(res.headers['content-disposition']).toMatch(/^attachment; filename="tunedeck-audit-\d{4}-\d{2}-\d{2}\.csv"$/);
+      const lines = res.text.replace(/^\uFEFF/, '').trim().split('\r\n');
+      expect(lines[0]).toBe('id,occurredAt,actor,actorSubject,action,targetType,targetId,targetLabel,reason,changes,requestId');
+      expect(lines.slice(1).every((l) => l.includes(',station.'))).toBe(true);
+      expect(res.text).toContain('checked rights letter');
+      const { rows } = await t.pool.query(`SELECT actor, reason, changes FROM audit_events WHERE action = 'audit.export' ORDER BY id DESC LIMIT 1`);
+      expect(rows[0]).toMatchObject({ reason: 'Quarterly review for the owner', changes: { action: 'station', rows: lines.length - 1 } });
+    });
+
+    it('needs the auditor or admin role and a real reason', async () => {
+      expect((await exportAs('editor', { reason: 'Quarterly review for the owner' })).status).toBe(403);
+      for (const body of [{}, { reason: 'short' }, { reason: 'x'.repeat(501) }, { reason: 'tab\there is not ok' }]) {
+        const res = await exportAs('admin', body);
+        expect([res.status, res.body.details?.field]).toEqual([400, 'reason']);
+      }
+    });
+
+    it('neutralises cells a spreadsheet would run as formulas', () => {
+      const csv = toCsv([
+        { id: '1', occurredAt: '2026-10-04T00:00:00.000Z', actor: 'operator:=cmd', actorSubject: null, action: 'x.y', targetLabel: '=HYPERLINK("http://evil")', targetType: 't', targetId: '-1', reason: 'a, "b"', changes: { k: 1 }, requestId: null },
+      ]);
+      const row = csv.split('\r\n')[1];
+      expect(row).toContain(`"'=HYPERLINK(""http://evil"")"`);
+      expect(row).toContain(`,'-1,`);
+      expect(row).toContain('"a, ""b"""');
+      expect(row).toContain('"{""k"":1}"');
+    });
   });
 
   it('defaults to the last 7 days', () => {
