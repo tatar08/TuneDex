@@ -41,7 +41,7 @@ function age(t: Translate, iso: string, now = Date.now()) {
 }
 /** Completion time, or the 30-day deadline for a deletion; other queues have no deadline. */
 function due(t: Translate, job: Job, now = Date.now()) {
-  if (job.status === 'completed') return job.completedAt ? t('เสร็จ {0}', formatLogTime(job.completedAt)) : t('เสร็จแล้ว');
+  if (job.status === 'completed') return job.completedAt ? t('เสร็จ {0}', formatLogTime(job.completedAt, t.lang)) : t('เสร็จแล้ว');
   if (!job.deadline) return '—';
   const d = Math.ceil((new Date(job.deadline).getTime() - now) / 86_400_000);
   return d > 0 ? t('ต้องเสร็จใน {0} วัน', d) : t('เลยกำหนด 30 วันแล้ว');
@@ -51,7 +51,7 @@ const late = (job: Job) => job.status !== 'completed' && !!job.deadline && new D
 function next(t: Translate, job: Job) {
   if (job.status === 'dead_letter') return t('หยุดลองแล้ว รอทีมงาน');
   if (job.status === 'completed') return '—';
-  return job.nextAttemptAt ? formatLogTime(job.nextAttemptAt) : t('รอบถัดไป (ภายใน 1 นาที)');
+  return job.nextAttemptAt ? formatLogTime(job.nextAttemptAt, t.lang) : t('รอบถัดไป (ภายใน 1 นาที)');
 }
 const tries = (job: Job) => `${job.attempts}/${job.maxAttempts}`;
 const errCode = (job: Job) => job.lastErrorCode ?? '—';
@@ -305,7 +305,7 @@ function Layout({ page, status, filter }: { page?: JobsPage; status: number; fil
                     </td>
                     <td className="mo">{age(t, j.requestedAt)}</td>
                     <td className="mo">{tries(j)}</td>
-                    <td className="mo">{j.lastAttemptAt ? formatLogTime(j.lastAttemptAt) : '—'}</td>
+                    <td className="mo">{j.lastAttemptAt ? formatLogTime(j.lastAttemptAt, t.lang) : '—'}</td>
                     <td className={j.status === 'dead_letter' ? 'jb-late' : 'mo'}>{next(t, j)}</td>
                     <td className="mo">{errCode(j)}</td>
                     <td className={late(j) ? 'jb-late' : undefined}>{due(t, j)}</td>
@@ -410,7 +410,7 @@ function Layout({ page, status, filter }: { page?: JobsPage; status: number; fil
                 <span className={`hl-pill jb-${j.status}`}>{t(STATUS_LABEL[j.status])}</span>
                 <small>
                   {t('อายุ {0} · ลอง {1}', age(t, j.requestedAt), tries(j))}
-                  {j.lastAttemptAt ? ' · ' + t('ล่าสุด {0}', formatLogTime(j.lastAttemptAt)) : ''}
+                  {j.lastAttemptAt ? ' · ' + t('ล่าสุด {0}', formatLogTime(j.lastAttemptAt, t.lang)) : ''}
                 </small>
                 <small>
                   {t('ถัดไป {0}', next(t, j))}
@@ -478,7 +478,7 @@ function Layout({ page, status, filter }: { page?: JobsPage; status: number; fil
                 </div>
                 <div>
                   <dt>{t('ขอเมื่อ')}</dt>
-                  <dd className="mo">{formatLogTime(cur.requestedAt)}</dd>
+                  <dd className="mo">{formatLogTime(cur.requestedAt, t.lang)}</dd>
                 </div>
                 <div>
                   <dt>{t('ลองแล้ว')}</dt>
@@ -486,7 +486,7 @@ function Layout({ page, status, filter }: { page?: JobsPage; status: number; fil
                 </div>
                 <div>
                   <dt>{t('ลองล่าสุด')}</dt>
-                  <dd className="mo">{cur.lastAttemptAt ? formatLogTime(cur.lastAttemptAt) : '—'}</dd>
+                  <dd className="mo">{cur.lastAttemptAt ? formatLogTime(cur.lastAttemptAt, t.lang) : '—'}</dd>
                 </div>
                 <div>
                   <dt>{t('ลองครั้งถัดไป')}</dt>

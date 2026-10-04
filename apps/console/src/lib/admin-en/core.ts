@@ -189,7 +189,6 @@ export const EN_CORE: Record<string, string> = {
   'ผล: {0}': 'Result: {0}',
   'ทำรายการถี่เกินไป รอประมาณหนึ่งนาทีแล้วลองใหม่': 'Too many requests. Wait about a minute and try again.',
   'ยังไม่ได้ตรวจ': 'Not checked yet',
-  'เล่นได้': 'Plays',
   'ตรวจไม่ผ่าน': 'Failed check',
   'น่าสงสัย': 'Suspect',
   'ที่อยู่สตรีมไม่ถูกต้อง': 'Invalid stream address',

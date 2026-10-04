@@ -212,7 +212,7 @@ function LogTable({ logs, search }: { logs: LogEntry[]; search: LogSearch }) {
       <tbody>
         {logs.map((l) => (
           <tr key={l.id} className={`lg-${sev(l)}`}>
-            <td className="mo nowrap">{formatLogTime(l.timestamp)}</td>
+            <td className="mo nowrap">{formatLogTime(l.timestamp, t.lang)}</td>
             <td>
               <span className={`lg-sev ${sev(l)}`}>{l.severity}</span>
             </td>
@@ -271,7 +271,7 @@ function WorkbenchLogs({ page, search, older }: { page: LogPage; search: LogSear
   }, [cursor]);
   const fields: [string, string | number | null][] = sel
     ? [
-        [t('เวลา'), `${formatLogTime(sel.timestamp)} (${sel.timestamp})`],
+        [t('เวลา'), `${formatLogTime(sel.timestamp, t.lang)} (${sel.timestamp})`],
         [t('ระดับ'), sel.severity],
         [t('เหตุการณ์'), sel.eventCode],
         ['method', sel.method],
@@ -309,7 +309,7 @@ function WorkbenchLogs({ page, search, older }: { page: LogPage; search: LogSear
                 </button>
                 <span className="r">{l.status ?? l.severity}</span>
                 <small>
-                  {formatLogTime(l.timestamp)} · {l.durationMs !== null ? `${l.durationMs} ms` : l.eventCode}
+                  {formatLogTime(l.timestamp, t.lang)} · {l.durationMs !== null ? `${l.durationMs} ms` : l.eventCode}
                 </small>
               </li>
             ))}
@@ -414,7 +414,7 @@ export function LogsView({ page, status, badField, search, older }: LogsViewProp
             {p.logs.map((l) => (
               <li key={l.id} className={sev(l)}>
                 <i className={`lamp lg-${sev(l)}`} aria-hidden="true" />
-                <span className="t">{formatLogTime(l.timestamp)}</span>
+                <span className="t">{formatLogTime(l.timestamp, t.lang)}</span>
                 <span className="sv">{l.severity}</span>
                 <span className="w">{what(l) || l.eventCode}</span>
                 <span className="n">{l.status ?? ''}</span>
@@ -489,7 +489,7 @@ export function LogsView({ page, status, badField, search, older }: LogsViewProp
                 <b className="mo">{what(l) || l.eventCode}</b>
                 <span className="mo st">{l.status ?? ''}</span>
                 <small>
-                  {formatLogTime(l.timestamp)}
+                  {formatLogTime(l.timestamp, t.lang)}
                   {l.durationMs !== null && ` · ${l.durationMs} ms`}
                   {l.requestId && (
                     <>

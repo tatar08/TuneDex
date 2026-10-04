@@ -34,7 +34,7 @@ const INCIDENTS: Record<IncidentCode, { title: string; detail: string; href?: st
 
 /** An open alert also says since when (Doc 17 rules, checked every minute). */
 const detailOf = (t: Translate, i: Overview['incidents'][number]) =>
-  t(INCIDENTS[i.code].detail, i.code === 'api_latency' ? num(i.count) : i.count) + (i.since ? ' · ' + t('ตั้งแต่ {0}', formatLogTime(i.since)) : '');
+  t(INCIDENTS[i.code].detail, i.code === 'api_latency' ? num(i.count) : i.count) + (i.since ? ' · ' + t('ตั้งแต่ {0}', formatLogTime(i.since, t.lang)) : '');
 
 const pct = (r: number | null) => (r === null ? '—' : `${(r * 100).toFixed(r < 0.1 ? 1 : 0)}%`);
 const ms = (v: number | null) => (v === null ? '—' : v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${v} ms`);
@@ -177,7 +177,7 @@ function Incidents({ o, className }: { o: Overview; className: string }) {
 function kpis(t: Translate, o: Overview) {
   const h = o.stations.health;
   return [
-    { id: 'req', label: t('คำขอ API'), value: num(o.api.requests), sub: o.api.stale ? t('ไม่มีคำขอใน 15 นาทีล่าสุด') : t('ล่าสุด {0}', o.api.lastRequestAt ? formatLogTime(o.api.lastRequestAt) : '—'), warn: o.api.stale },
+    { id: 'req', label: t('คำขอ API'), value: num(o.api.requests), sub: o.api.stale ? t('ไม่มีคำขอใน 15 นาทีล่าสุด') : t('ล่าสุด {0}', o.api.lastRequestAt ? formatLogTime(o.api.lastRequestAt, t.lang) : '—'), warn: o.api.stale },
     {
       id: 'err',
       label: t('อัตรา 5xx'),
@@ -208,11 +208,11 @@ function kpis(t: Translate, o: Overview) {
 function Footnote({ o }: { o: Overview }) {
   const t = useT();
   const checker = o.stations.checkerEnabled
-    ? t('ตัวตรวจสตรีม เปิดอยู่ ผลล่าสุด {0}', o.stations.lastCheckAt ? formatLogTime(o.stations.lastCheckAt) : t('ยังไม่มี'))
+    ? t('ตัวตรวจสตรีม เปิดอยู่ ผลล่าสุด {0}', o.stations.lastCheckAt ? formatLogTime(o.stations.lastCheckAt, t.lang) : t('ยังไม่มี'))
     : t('ตัวตรวจสตรีม ปิดอยู่ (STATION_CHECK_ENABLED)');
   return (
     <p className="ov-foot dim">
-      {t('ข้อมูล {0} ถึง {1}', winLabel(t, o.window.id), formatLogTime(o.generatedAt))} · {checker} ·{' '}
+      {t('ข้อมูล {0} ถึง {1}', winLabel(t, o.window.id), formatLogTime(o.generatedAt, t.lang))} · {checker} ·{' '}
       {t('รายงานวินิจฉัย {0} ฉบับ', num(o.queues.diagnosticReports))} · {t('ตัวเลขรวมเท่านั้น ไม่มีข้อมูลรายคน')}
     </p>
   );

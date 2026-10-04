@@ -84,7 +84,7 @@ function expiryText(t: Translate, r: ConfigRelease) {
   const d = daysLeft(r.expiresAt);
   return d <= 0
     ? t("หมดอายุแล้ว แอปกลับไปใช้ค่าเริ่มต้น")
-    : t("หมดอายุใน {0} วัน ({1})", d, formatLogTime(r.expiresAt));
+    : t("หมดอายุใน {0} วัน ({1})", d, formatLogTime(r.expiresAt, t.lang));
 }
 const expiringSoon = (r: ConfigRelease | null) =>
   !!r && daysLeft(r.expiresAt) < 7;
@@ -682,7 +682,7 @@ function ReleaseMeta({ r }: { r: ConfigRelease }) {
   const t = useT();
   return (
     <small className="dim">
-      {formatLogTime(r.publishedAt)}
+      {formatLogTime(r.publishedAt, t.lang)}
       {" · "}
       {r.rollbackOf
         ? t("ย้อนจากรุ่น {0}", r.rollbackOf)
@@ -968,7 +968,7 @@ function Layout({ view }: { view: AdminConfigView }) {
           <small className="fv-label">{t("รุ่นที่แอปใช้")}</small>
           <p className="fv-amount">{c ? c.release : "—"}</p>
           <small>
-            {c ? formatLogTime(c.publishedAt) : t("ใช้ค่าเริ่มต้นของแอป")}
+            {c ? formatLogTime(c.publishedAt, t.lang) : t("ใช้ค่าเริ่มต้นของแอป")}
           </small>
         </section>
         <section className="fv-card">
@@ -995,7 +995,7 @@ function Layout({ view }: { view: AdminConfigView }) {
               <h2 id="fv-cf-draft">{t("ร่าง r{0}", view.draft.revision)}</h2>
               <small>
                 {view.draft.updatedAt
-                  ? t("แก้ล่าสุด {0}", formatLogTime(view.draft.updatedAt))
+                  ? t("แก้ล่าสุด {0}", formatLogTime(view.draft.updatedAt, t.lang))
                   : t("ยังไม่เคยแก้")}
               </small>
             </div>

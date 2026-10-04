@@ -3,7 +3,6 @@ export const EN_PEOPLE: Record<string, string> = {
   // Shared by users, audit and logs
   'ค้นหา': 'Search',
   'ล้างตัวกรอง': 'Clear filters',
-  'ช่วงเวลา': 'Time range',
   'ตัวกรอง': 'filter',
   'ค่าที่กรอกไม่ถูกต้อง: {0}': 'Invalid value: {0}',
   'เวลา': 'Time',
@@ -99,7 +98,6 @@ export const EN_PEOPLE: Record<string, string> = {
   'ค้นได้ทีละบัญชี พร้อมเหตุผล': 'One account at a time, with a reason',
   'บัญชี: {0} · {1}': 'Account: {0} · {1}',
   'เครื่องที่ยังไม่ได้รับการตั้งค่าล่าสุด {0} จาก {1}': 'Devices missing the latest settings: {0} of {1}',
-  'ล่าสุด {0}': 'Last seen {0}',
   'รายงานวินิจฉัย': 'Diagnostics',
   'ช่วยลูกค้าจากรหัสที่เขาแจ้ง ดูได้ทีละบัญชี': 'Help a customer from the ID they give you, one account at a time',
   'จาก {0} เครื่องที่ใช้อยู่': 'of {0} active devices',

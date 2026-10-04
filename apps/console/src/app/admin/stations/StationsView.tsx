@@ -153,7 +153,7 @@ export function WorkbenchSplit({
           </ul>
         )}
         <p className="foot">
-          <kbd>j</kbd> <kbd>k</kbd> {t('เลื่อน')} · <kbd>Enter</kbd> {t('เปิด')}
+          <kbd>j</kbd> <kbd>k</kbd> {t('เลื่อน')} · <kbd>Enter</kbd> {t('เปิดดู')}
         </p>
       </section>
       <section className="det">{children ?? <p className="adm-empty">{t('เลือกสถานีจากรายการทางซ้าย')}</p>}</section>

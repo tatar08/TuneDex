@@ -137,11 +137,11 @@ function Facts({ u }: { u: User }) {
       </div>
       <div>
         <dt>{t('สมัครเมื่อ')}</dt>
-        <dd>{formatLogTime(u.user.createdAt)}</dd>
+        <dd>{formatLogTime(u.user.createdAt, t.lang)}</dd>
       </div>
       <div>
         <dt>{t('การตั้งค่า')}</dt>
-        <dd>{u.settings.revision ? t('r{0} · บันทึก {1}', u.settings.revision, formatLogTime(u.settings.updatedAt!)) : t('ยังไม่เคยบันทึก')}</dd>
+        <dd>{u.settings.revision ? t('r{0} · บันทึก {1}', u.settings.revision, formatLogTime(u.settings.updatedAt!, t.lang)) : t('ยังไม่เคยบันทึก')}</dd>
       </div>
       <div>
         <dt>{t('รายงานวินิจฉัย 7 วัน')}</dt>
@@ -149,7 +149,7 @@ function Facts({ u }: { u: User }) {
       </div>
       <div>
         <dt>{t('การลบบัญชี')}</dt>
-        <dd>{u.deletion ? t('{0} · ขอเมื่อ {1}', t(DELETION[u.deletion.status]), formatLogTime(u.deletion.requestedAt)) : t('ไม่มีคำขอ')}</dd>
+        <dd>{u.deletion ? t('{0} · ขอเมื่อ {1}', t(DELETION[u.deletion.status]), formatLogTime(u.deletion.requestedAt, t.lang)) : t('ไม่มีคำขอ')}</dd>
       </div>
     </dl>
   );
@@ -179,7 +179,7 @@ function DeviceTable({ u }: { u: User }) {
                   {osLabel(d)} <span className="mo dim">{short(d.id)}</span>
                 </td>
                 <td className="mo">{d.appBuild}</td>
-                <td>{formatLogTime(d.lastSeenAt)}</td>
+                <td>{formatLogTime(d.lastSeenAt, t.lang)}</td>
                 <td>
                   <span className={`us-tone ${s.tone}`}>{s.label}</span>
                 </td>
@@ -294,7 +294,7 @@ function SupportDiagnostics({ u }: { u: User }) {
         </form>
       ) : !data ? (
         <p>
-          <span className="dim">{t('ลูกค้าให้สิทธิ์คุณดูรายงานได้ถึง {0} · การเปิดดูถูกบันทึก', formatLogTime(access.expiresAt))} </span>
+          <span className="dim">{t('ลูกค้าให้สิทธิ์คุณดูรายงานได้ถึง {0} · การเปิดดูถูกบันทึก', formatLogTime(access.expiresAt, t.lang))} </span>
           <button type="button" className="btn" disabled={busy} onClick={() => void load()}>
             {busy ? t('กำลังโหลด…') : t('เปิดดูรายงาน')}
           </button>
@@ -302,7 +302,7 @@ function SupportDiagnostics({ u }: { u: User }) {
       ) : (
         <>
           <p className="dim">
-            {t('ดูได้ถึง {0} · รายงานถูกลบเองเมื่อครบ {1} วัน · มีแค่รหัสผลลัพธ์ ไม่มีชื่อช่อง ลิงก์ หรือตำแหน่ง', formatLogTime(data.access.expiresAt), data.retentionDays)}
+            {t('ดูได้ถึง {0} · รายงานถูกลบเองเมื่อครบ {1} วัน · มีแค่รหัสผลลัพธ์ ไม่มีชื่อช่อง ลิงก์ หรือตำแหน่ง', formatLogTime(data.access.expiresAt, t.lang), data.retentionDays)}
           </p>
           {data.reports.length === 0 ? (
             <p className="dim">{t('ไม่มีรายงานใน {0} วันที่ผ่านมา', data.retentionDays)}</p>
@@ -311,7 +311,7 @@ function SupportDiagnostics({ u }: { u: User }) {
               <div key={r.id} className="us-scroll" data-testid="support-report">
                 <table className="us-table">
                   <caption>
-                    {formatLogTime(r.receivedAt)} · {r.platform === 'ios' ? 'iPhone' : r.platform === 'android' ? 'Android' : t('เครื่องที่ออกจากระบบแล้ว')} · {t('{0} เหตุการณ์', r.eventCount)}
+                    {formatLogTime(r.receivedAt, t.lang)} · {r.platform === 'ios' ? 'iPhone' : r.platform === 'android' ? 'Android' : t('เครื่องที่ออกจากระบบแล้ว')} · {t('{0} เหตุการณ์', r.eventCount)}
                   </caption>
                   <thead>
                     <tr>
@@ -448,7 +448,7 @@ export function UsersView() {
                       <b>{osLabel(d)}</b> <span className="mo dim">{short(d.id)}</span>
                     </span>
                     <span className="mo">{d.appBuild}</span>
-                    <span>{t('ล่าสุด {0}', formatLogTime(d.lastSeenAt))}</span>
+                    <span>{t('ล่าสุด {0}', formatLogTime(d.lastSeenAt, t.lang))}</span>
                     <span>{s.label}</span>
                   </li>
                 );
@@ -504,7 +504,7 @@ export function UsersView() {
                     </h4>
                     <span className={`hl-pill us-tone ${s.tone}`}>{s.label}</span>
                     <small>
-                      {t('แอป {0} · ล่าสุด {1}', d.appBuild, formatLogTime(d.lastSeenAt))}
+                      {t('แอป {0} · ล่าสุด {1}', d.appBuild, formatLogTime(d.lastSeenAt, t.lang))}
                     </small>
                   </section>
                 );
@@ -536,7 +536,7 @@ export function UsersView() {
           {
             id: 'diagnostics',
             title: t('รายงานวินิจฉัย'),
-            sub: u.diagnostics.access ? t('ดูได้ถึง {0}', formatLogTime(u.diagnostics.access.expiresAt)) : t('{0} ฉบับ · ต้องมีรหัสจากลูกค้า', u.diagnostics.reportsLast7Days),
+            sub: u.diagnostics.access ? t('ดูได้ถึง {0}', formatLogTime(u.diagnostics.access.expiresAt, t.lang)) : t('{0} ฉบับ · ต้องมีรหัสจากลูกค้า', u.diagnostics.reportsLast7Days),
             tone: (u.diagnostics.access ? 'ok' : 'mute') as string,
           },
           ...u.devices.map((d) => {
@@ -591,11 +591,11 @@ export function UsersView() {
                   </div>
                   <div>
                     <dt>{t('ลงทะเบียน')}</dt>
-                    <dd>{formatLogTime(device.createdAt)}</dd>
+                    <dd>{formatLogTime(device.createdAt, t.lang)}</dd>
                   </div>
                   <div>
                     <dt>{t('ติดต่อล่าสุด')}</dt>
-                    <dd>{formatLogTime(device.lastSeenAt)}</dd>
+                    <dd>{formatLogTime(device.lastSeenAt, t.lang)}</dd>
                   </div>
                   <div>
                     <dt>{t('สถานะ')}</dt>

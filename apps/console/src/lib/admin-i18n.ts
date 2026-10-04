@@ -11,11 +11,13 @@ import type { Lang } from './i18n';
  */
 export const ADMIN_EN: Record<string, string> = { ...EN_CORE, ...EN_STATIONS, ...EN_OPS, ...EN_PEOPLE };
 
-export type Translate = (thai: string, ...values: Array<string | number>) => string;
+/** Translates by Thai key; `lang` lets date and number formatters follow the same choice. */
+export type Translate = ((thai: string, ...values: Array<string | number>) => string) & { readonly lang: Lang };
 
 export function translator(lang: Lang): Translate {
-  return (thai, ...values) => {
+  const t = (thai: string, ...values: Array<string | number>) => {
     const text = lang === 'en' ? (ADMIN_EN[thai] ?? thai) : thai;
     return values.length ? text.replace(/\{(\d+)\}/g, (m, i) => (values[Number(i)] === undefined ? m : String(values[Number(i)]))) : text;
   };
+  return Object.assign(t, { lang });
 }

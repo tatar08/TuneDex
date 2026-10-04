@@ -1,5 +1,6 @@
 /** English for the staff console (stations), keyed by the Thai text. `{0}`, `{1}` … are filled in by t(). */
 export const EN_STATIONS: Record<string, string> = {
+  'เปิดดู': 'open',
   'บัญชีนี้ไม่มีสิทธิ์ดูรายการสถานี': "This account can't view the station list",
   'ไม่พบสถานีนี้': 'Station not found',
   'โหลดข้อมูลไม่ได้ในขณะนี้ ลองโหลดหน้าใหม่': "Couldn't load the data right now. Try reloading the page.",
@@ -61,7 +62,6 @@ export const EN_STATIONS: Record<string, string> = {
   'แก้ไข': 'Edit',
   'ค้นหาชื่อสถานี': 'Search station names',
   'เลื่อน': 'move',
-  'เปิด': 'open',
   'เลือกสถานีจากรายการทางซ้าย': 'Pick a station from the list on the left',
   '{0} สถานี · เผยแพร่ {1} · รอตรวจ {2} · ร่าง {3}': '{0} stations · {1} published · {2} awaiting review · {3} drafts',
   'ภาษา / แนว': 'Language / genre',

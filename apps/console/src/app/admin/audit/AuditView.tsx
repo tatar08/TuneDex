@@ -18,6 +18,7 @@ import {
   formatDay,
   formatLogTime,
 } from '@/lib/admin';
+import type { Lang } from '@/lib/i18n';
 import type { AuditEvent, AuditPage } from '@/lib/bff';
 import { Icon, useAdmin, useT } from '../AdminShell';
 import { CsvExport } from '../CsvExport';
@@ -58,8 +59,8 @@ function Target({ e }: { e: AuditEvent }) {
 function ActorLink({ e, search }: { e: AuditEvent; search: AuditSearch }) {
   const t = useT();
   return (
-    <a href={auditHref({ ...search, actor: actorKey(e), cursor: '', to: '' })} title={t('ดูทุกอย่างที่ {0} ทำ', actorName(e))}>
-      {actorName(e)}
+    <a href={auditHref({ ...search, actor: actorKey(e), cursor: '', to: '' })} title={t('ดูทุกอย่างที่ {0} ทำ', actorName(e, t))}>
+      {actorName(e, t)}
     </a>
   );
 }
@@ -205,10 +206,10 @@ function stats(events: AuditEvent[]) {
 }
 
 /** Groups consecutive events by Thailand calendar day. */
-function byDay(events: AuditEvent[]) {
+function byDay(events: AuditEvent[], lang: Lang) {
   const groups: { day: string; events: AuditEvent[] }[] = [];
   for (const e of events) {
-    const day = formatDay(e.occurredAt);
+    const day = formatDay(e.occurredAt, lang);
     if (groups[groups.length - 1]?.day !== day) groups.push({ day, events: [] });
     groups[groups.length - 1].events.push(e);
   }
@@ -218,12 +219,12 @@ function byDay(events: AuditEvent[]) {
 function Fields({ e }: { e: AuditEvent }) {
   const t = useT();
   const rows: [string, React.ReactNode][] = [
-    [t('เวลา'), `${formatLogTime(e.occurredAt)} (${e.occurredAt})`],
+    [t('เวลา'), `${formatLogTime(e.occurredAt, t.lang)} (${e.occurredAt})`],
     [t('การกระทำ'), `${t(actionLabel(e.action))} (${e.action})`],
-    [t('ผู้กระทำ'), `${actorName(e)} (${e.actor})`],
+    [t('ผู้กระทำ'), `${actorName(e, t)} (${e.actor})`],
     [t('เป้าหมาย'), <Target key="t" e={e} />],
     [t('เหตุผล'), e.reason ?? '—'],
-    [t('สิ่งที่เปลี่ยน'), changeSummary(e) || '—'],
+    [t('สิ่งที่เปลี่ยน'), changeSummary(e, t) || '—'],
     ['requestId', e.requestId ?? '—'],
   ];
   return (
@@ -279,9 +280,9 @@ function WorkbenchAudit({ page, search, older }: { page: AuditPage; search: Audi
                 <button type="button" className="lg-pick" onClick={() => setCursor(i)} aria-pressed={i === cursor}>
                   <b>{t(actionLabel(e.action))}</b>
                 </button>
-                <span className="r">{formatLogTime(e.occurredAt).split(' ').pop()}</span>
+                <span className="r">{formatLogTime(e.occurredAt, t.lang).split(' ').pop()}</span>
                 <small>
-                  {actorName(e)} · {formatLogTime(e.occurredAt)}
+                  {actorName(e, t)} · {formatLogTime(e.occurredAt, t.lang)}
                 </small>
               </li>
             ))}
@@ -299,7 +300,7 @@ function WorkbenchAudit({ page, search, older }: { page: AuditPage; search: Audi
             <p className="dim">{t(NOTE)}</p>
             <Fields e={sel} />
             <a className="btn secondary" href={auditHref({ ...search, actor: actorKey(sel), cursor: '', to: '' })}>
-              {t('ดูทุกอย่างที่ {0} ทำ', actorName(sel))}
+              {t('ดูทุกอย่างที่ {0} ทำ', actorName(sel, t))}
             </a>
           </div>
         ) : (
@@ -358,7 +359,7 @@ export function AuditView({ page, status, badField, search, older }: AuditViewPr
               <tbody>
                 {p.events.map((e) => (
                   <tr key={e.id}>
-                    <td className="mo nowrap">{formatLogTime(e.occurredAt)}</td>
+                    <td className="mo nowrap">{formatLogTime(e.occurredAt, t.lang)}</td>
                     <td className="nowrap">
                       <ActorLink e={e} search={search} />
                     </td>
@@ -369,7 +370,7 @@ export function AuditView({ page, status, badField, search, older }: AuditViewPr
                       <Target e={e} />
                     </td>
                     <td>{e.reason ?? <span className="dim">—</span>}</td>
-                    <td className="dim">{changeSummary(e)}</td>
+                    <td className="dim">{changeSummary(e, t)}</td>
                     <td className="mo dim nowrap">{e.requestId ? shortId(e.requestId) : ''}</td>
                   </tr>
                 ))}
@@ -412,7 +413,7 @@ export function AuditView({ page, status, badField, search, older }: AuditViewPr
             {p.events.map((e) => (
               <li key={e.id} className={fam(e)}>
                 <span className="no">#{e.id.padStart(4, '0')}</span>
-                <span className="t">{formatLogTime(e.occurredAt)}</span>
+                <span className="t">{formatLogTime(e.occurredAt, t.lang)}</span>
                 <b>
                   <i className={`lamp au-${fam(e)}`} aria-hidden="true" />
                   {t(actionLabel(e.action))}
@@ -420,9 +421,9 @@ export function AuditView({ page, status, badField, search, older }: AuditViewPr
                 <span className="who">
                   {t('โดย')} <ActorLink e={e} search={search} /> · <Target e={e} />
                 </span>
-                {(e.reason || changeSummary(e)) && (
+                {(e.reason || changeSummary(e, t)) && (
                   <span className="why">
-                    {e.reason && <q>{e.reason}</q>} {changeSummary(e)}
+                    {e.reason && <q>{e.reason}</q>} {changeSummary(e, t)}
                   </span>
                 )}
               </li>
@@ -475,7 +476,7 @@ export function AuditView({ page, status, badField, search, older }: AuditViewPr
         <SearchForm search={search} className="adm-panel db-filter" pickers={false} />
         {body((p) => (
           <div className="db-days">
-            {byDay(p.events).map((g) => (
+            {byDay(p.events, t.lang).map((g) => (
               <section key={g.day} aria-label={g.day}>
                 <h4>{g.day}</h4>
                 <ul className="db-logs au-cards">
@@ -485,9 +486,9 @@ export function AuditView({ page, status, badField, search, older }: AuditViewPr
                       <b>
                         <ActorLink e={e} search={search} /> · <Target e={e} />
                       </b>
-                      <span className="mo st">{formatLogTime(e.occurredAt).split(' ').pop()}</span>
+                      <span className="mo st">{formatLogTime(e.occurredAt, t.lang).split(' ').pop()}</span>
                       <small>
-                        {e.reason && <q>{e.reason}</q>} {changeSummary(e)}
+                        {e.reason && <q>{e.reason}</q>} {changeSummary(e, t)}
                       </small>
                     </li>
                   ))}
@@ -557,14 +558,14 @@ export function AuditView({ page, status, badField, search, older }: AuditViewPr
                   </b>
                   <small>
                     {e.reason ? `“${e.reason}” · ` : ''}
-                    {changeSummary(e)}
+                    {changeSummary(e, t)}
                   </small>
                 </span>
                 <span className="fv-tx-side">
                   <b>
                     <ActorLink e={e} search={search} />
                   </b>
-                  <small>{formatLogTime(e.occurredAt)}</small>
+                  <small>{formatLogTime(e.occurredAt, t.lang)}</small>
                 </span>
               </li>
             ))}
