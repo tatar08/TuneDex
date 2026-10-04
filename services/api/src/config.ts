@@ -46,10 +46,16 @@ export interface AppConfig {
     } | null;
   };
   /**
-   * Daily removal of audit records older than 180 days (Doc 17 proposed retention). Off unless
-   * AUDIT_RETENTION_ENABLED=true, because the retention period needs the owner's confirmation first.
+   * Daily removal of audit records older than 180 days (Doc 17 retention, confirmed by Tar 2026-10-04).
+   * On unless AUDIT_RETENTION_ENABLED=false.
    */
   auditRetentionEnabled: boolean;
+  /**
+   * Doc 17: privileged operations (publish, rollback, audit export) need MFA within the last 5 minutes. The
+   * token's `acr` must be one of these values (Keycloak step-up level of assurance). Required outside dev;
+   * dev without it does not ask for MFA.
+   */
+  staffMfaAcr: string[] | null;
   /** Scheduled stream checks of published stations (Doc 17). Off unless STATION_CHECK_ENABLED=true. */
   stationCheck: {
     enabled: boolean;
@@ -102,7 +108,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     idpAdmin: loadIdpAdmin(env, appEnv, required(env, 'OIDC_ISSUER')),
     configSigningKey: loadConfigSigningKey(env, appEnv),
     billing: { apple: loadApple(env), google: loadGoogle(env) },
-    auditRetentionEnabled: flag(env, 'AUDIT_RETENTION_ENABLED'),
+    auditRetentionEnabled: flag(env, 'AUDIT_RETENTION_ENABLED', true),
+    staffMfaAcr: loadStaffMfa(env, appEnv),
     stationCheck: loadStationCheck(env),
   };
 }
@@ -179,8 +186,18 @@ function loadGoogle(env: NodeJS.ProcessEnv): AppConfig['billing']['google'] {
   };
 }
 
-function flag(env: NodeJS.ProcessEnv, key: string): boolean {
-  const v = (env[key] ?? 'false').trim();
+function loadStaffMfa(env: NodeJS.ProcessEnv, appEnv: AppEnv): string[] | null {
+  const values = listOf(env.STAFF_MFA_ACR);
+  if (values.length === 0) {
+    if (appEnv !== 'dev') throw new Error('Missing required environment variable STAFF_MFA_ACR (the acr values that mean MFA, e.g. 2)');
+    return null;
+  }
+  if (values.some((v) => !/^[A-Za-z0-9:._-]{1,64}$/.test(v))) throw new Error('STAFF_MFA_ACR must list acr values');
+  return values;
+}
+
+function flag(env: NodeJS.ProcessEnv, key: string, fallback = false): boolean {
+  const v = (env[key] ?? String(fallback)).trim();
   if (v !== 'true' && v !== 'false') throw new Error(`${key} must be true or false`);
   return v === 'true';
 }

@@ -10,6 +10,7 @@ import type {
   ConfigRelease,
 } from "@/lib/bff";
 import { useAdmin } from "../AdminShell";
+import { isMfaRequired, MfaLink, MFA_NEEDED } from "../MfaPrompt";
 
 /**
  * App configuration (Doc 17 /admin/config): one draft, a different admin publishes exactly the revision they
@@ -135,6 +136,8 @@ function useSend() {
         code?: string;
         details?: { field?: string; reasons?: string[] };
       };
+      if (isMfaRequired(res.status, b))
+        return { ok: false, message: MFA_NEEDED };
       if (b.code === "PUBLISH_BLOCKED") {
         const r = b.details?.reasons ?? [];
         return {
@@ -289,6 +292,12 @@ function DraftForm({
       {problem && (
         <p role="alert" className="au-export-err">
           {problem}
+          {problem === MFA_NEEDED && (
+            <>
+              {" "}
+              <MfaLink />
+            </>
+          )}
         </p>
       )}
       {isAdmin ? (
@@ -384,6 +393,12 @@ function Publish({ view }: { view: AdminConfigView }) {
           {problem && (
             <p role="alert" className="au-export-err">
               {problem}
+              {problem === MFA_NEEDED && (
+                <>
+                  {" "}
+                  <MfaLink />
+                </>
+              )}
             </p>
           )}
           <button type="submit" className="btn" disabled={busy}>
@@ -468,6 +483,12 @@ function Rollback({
           {problem && (
             <p role="alert" className="au-export-err">
               {problem}
+              {problem === MFA_NEEDED && (
+                <>
+                  {" "}
+                  <MfaLink />
+                </>
+              )}
             </p>
           )}
           <div className="row">

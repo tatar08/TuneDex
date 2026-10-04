@@ -25,6 +25,11 @@ describe('config', () => {
     expect(() => loadConfig({ ...env, SESSION_SECRET: 'short' })).toThrow();
     expect(() => loadConfig({ ...env, OIDC_ALGORITHMS: 'HS256' })).toThrow();
   });
+  it('reads the MFA acr values for staff step-up', () => {
+    expect(loadConfig(env).oidc.mfaAcr).toBeUndefined();
+    expect(loadConfig({ ...env, OIDC_MFA_ACR: 'gold, 2' }).oidc.mfaAcr).toBe('gold 2');
+    expect(() => loadConfig({ ...env, OIDC_MFA_ACR: 'a"b' })).toThrow('OIDC_MFA_ACR');
+  });
   it('needs a shared session database outside localhost', () => {
     expect(() => loadConfig({ ...env, SESSION_DATABASE_URL: '' })).toThrow('SESSION_DATABASE_URL');
     expect(() => loadConfig({ ...env, SESSION_DATABASE_URL: 'redis://x' })).toThrow('SESSION_DATABASE_URL');

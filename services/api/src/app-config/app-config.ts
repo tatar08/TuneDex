@@ -4,6 +4,7 @@ import type { Request, Response } from 'express';
 import { CompactSign } from 'jose';
 import { writeAudit } from '../audit/audit';
 import { AuthGuard } from '../auth/auth.guard';
+import { requireRecentMfa } from '../auth/recent-sign-in';
 import { ApiError } from '../common/api-error';
 import { APP_CONFIG, AppConfig } from '../config';
 import { Database } from '../db/database';
@@ -322,14 +323,18 @@ export class AdminConfigController {
   @HttpCode(HttpStatus.OK)
   @RequireRoles('admin')
   async publish(@Req() req: Request, @Headers('if-match') ifMatch: string | undefined, @Body() body: unknown, @Res({ passthrough: true }) res: Response) {
-    return this.send(res, await this.configs.publish(actorOf(req), parseIfMatch(ifMatch), body));
+    const expected = parseIfMatch(ifMatch);
+    requireRecentMfa(req);
+    return this.send(res, await this.configs.publish(actorOf(req), expected, body));
   }
 
   @Post('releases/:release/rollback')
   @HttpCode(HttpStatus.OK)
   @RequireRoles('admin')
   async rollback(@Req() req: Request, @Param('release') release: string, @Body() body: unknown, @Res({ passthrough: true }) res: Response) {
-    return this.send(res, await this.configs.rollback(actorOf(req), parseReleaseId(release), body));
+    const target = parseReleaseId(release);
+    requireRecentMfa(req);
+    return this.send(res, await this.configs.rollback(actorOf(req), target, body));
   }
 }
 

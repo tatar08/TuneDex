@@ -1,7 +1,15 @@
 export interface ConsoleConfig {
   baseUrl: string;
   apiBaseUrl: string;
-  oidc: { issuer: string; clientId: string; clientSecret: string; scopes: string; algorithms: string[] };
+  oidc: {
+    issuer: string;
+    clientId: string;
+    clientSecret: string;
+    scopes: string;
+    algorithms: string[];
+    /** `acr_values` sent when staff step up to MFA (OIDC_MFA_ACR, space- or comma-separated). Unset sends none. */
+    mfaAcr?: string;
+  };
   sessionSecret: string;
   /** Secure cookies (and the __Host- prefix) everywhere except plain-http localhost development. */
   secureCookies: boolean;
@@ -35,6 +43,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     throw new Error('SESSION_DATABASE_URL is required outside localhost: in-memory sessions are lost on restart and cannot be shared');
   }
   if (sessionDatabaseUrl && !/^postgres(ql)?:\/\//.test(sessionDatabaseUrl)) throw new Error('SESSION_DATABASE_URL must be a postgres:// URL');
+  const mfaAcr = (env.OIDC_MFA_ACR ?? '').split(/[\s,]+/).filter(Boolean).join(' ');
+  if (mfaAcr && !/^[A-Za-z0-9:._/-]+( [A-Za-z0-9:._/-]+)*$/.test(mfaAcr)) throw new Error('OIDC_MFA_ACR must list acr values');
   return {
     baseUrl: baseUrl.origin,
     apiBaseUrl: new URL(required(env, 'API_BASE_URL')).origin,
@@ -44,6 +54,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       clientSecret: required(env, 'OIDC_CLIENT_SECRET'),
       scopes: env.OIDC_SCOPES?.trim() || 'openid',
       algorithms,
+      ...(mfaAcr ? { mfaAcr } : {}),
     },
     sessionSecret,
     secureCookies: !isLocalHttp,

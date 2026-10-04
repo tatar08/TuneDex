@@ -437,6 +437,24 @@ it('readCookie ignores lookalike cookie names', () => {
   expect(readCookie('xtd_session=a; td_session=b', 'td_session')).toBe('b');
 });
 
+describe('MFA step-up for staff actions', () => {
+  it('asks the provider for a fresh sign-in at the MFA level, and only with mfa=1', async () => {
+    const withAcr = new OidcClient({ ...config(), oidc: { ...config().oidc, mfaAcr: 'gold' } });
+    const mfa = new URL(await withAcr.authorizeUrl({ state: 's', nonce: 'n', codeVerifier: 'v'.repeat(48), mfa: true }));
+    expect(mfa.searchParams.get('acr_values')).toBe('gold');
+    expect(mfa.searchParams.get('prompt')).toBe('login');
+    expect(mfa.searchParams.get('max_age')).toBe('0');
+    const plain = new URL(await withAcr.authorizeUrl({ state: 's', nonce: 'n', codeVerifier: 'v'.repeat(48), reauth: true }));
+    expect(plain.searchParams.has('acr_values')).toBe(false);
+
+    const start = await bff.login(new Request(`${BASE}/auth/login?mfa=1&returnTo=${encodeURIComponent('/admin/config')}`));
+    const url = new URL(start.headers.get('location')!);
+    expect(url.searchParams.get('max_age')).toBe('0');
+    // No OIDC_MFA_ACR configured here: still a forced sign-in, without acr_values.
+    expect(url.searchParams.has('acr_values')).toBe(false);
+  });
+});
+
 describe('device sign-out with re-authentication', () => {
   const DEVICE = '3f1c2b4a-5d6e-4f70-8a91-b2c3d4e5f607';
   const revoke = (cookie: string, csrf: string | undefined, id = DEVICE) =>

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
+import { requireRecentMfa } from '../auth/recent-sign-in';
 import { ApiError } from '../common/api-error';
 import { parseIfMatch } from '../settings/settings.schema';
 import { RequireRoles, StaffGuard } from '../staff/staff';
@@ -88,7 +89,9 @@ export class AdminStationsController {
   ) {
     const stationId = parseStationId(id);
     const expected = parseIfMatch(ifMatch);
-    return this.send(res, await this.stations.publish(actorOf(req), stationId, expected, parseReason(body)));
+    const reason = parseReason(body);
+    requireRecentMfa(req);
+    return this.send(res, await this.stations.publish(actorOf(req), stationId, expected, reason));
   }
 
   @Post(':id/disable')

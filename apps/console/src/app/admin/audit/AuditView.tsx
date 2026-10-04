@@ -20,6 +20,7 @@ import {
 } from '@/lib/admin';
 import type { AuditEvent, AuditPage } from '@/lib/bff';
 import { Icon, useAdmin } from '../AdminShell';
+import { isMfaRequired, MfaLink, MFA_NEEDED } from '../MfaPrompt';
 
 /**
  * Staff audit trail (Doc 17 /admin/audit): who, what, when, why and a change summary.
@@ -189,7 +190,8 @@ function ExportPanel({ search, className = 'btn secondary' }: { search: AuditSea
         setOpen(false);
         return;
       }
-      const body = (await res.json().catch(() => ({}))) as { details?: { field?: string; reason?: string } };
+      const body = (await res.json().catch(() => ({}))) as { code?: string; details?: { field?: string; reason?: string } };
+      if (isMfaRequired(res.status, body)) return setProblem(MFA_NEEDED);
       setProblem(
         EXPORT_PROBLEMS[
           res.status === 400 ? (body.details?.reason === 'too_many_rows' ? 'too_many_rows' : 'reason') : res.status === 403 ? 'forbidden' : res.status === 401 ? 'expired' : res.status === 429 ? 'rate' : 'down'
@@ -222,6 +224,12 @@ function ExportPanel({ search, className = 'btn secondary' }: { search: AuditSea
           {problem && (
             <p role="alert" className="au-export-err">
               {problem}
+              {problem === MFA_NEEDED && (
+                <>
+                  {' '}
+                  <MfaLink />
+                </>
+              )}
             </p>
           )}
           <div className="lg-actions">

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Injectable, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
+import { requireRecentMfa } from '../auth/recent-sign-in';
 import { ApiError } from '../common/api-error';
 import { Database } from '../db/database';
 import { RequireRoles, StaffGuard } from '../staff/staff';
@@ -253,6 +254,7 @@ export class AdminAuditController {
   async export(@Req() req: Request, @Query() q: Record<string, unknown>, @Body() body: unknown, @Res({ passthrough: true }) res: Response) {
     const query = parseAuditQuery(q);
     const reason = parseExportReason(body);
+    requireRecentMfa(req);
     const { csv } = await this.audit.export({ userId: req.actor!.userId, requestId: req.requestId }, query, reason);
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

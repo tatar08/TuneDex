@@ -6,6 +6,11 @@ export interface Actor {
   userId: string;
   /** When the user last actually authenticated (OIDC `auth_time`, epoch seconds), if the token says. */
   authTime?: number;
+  /** Keycloak session id (`sid`), when the token carries one. */
+  sid?: string;
+  /** When MFA was last proven (auth_time of a token whose acr counts as MFA); `mfaRequired` false in dev without STAFF_MFA_ACR. */
+  mfaAt?: number;
+  mfaRequired?: boolean;
   /** Staff roles, filled in by StaffGuard on staff routes only. */
   roles?: string[];
 }

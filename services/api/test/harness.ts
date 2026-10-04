@@ -19,7 +19,7 @@ export const AUDIENCE = 'tunedeck-api';
 
 export interface TestIdentity {
   keyResolver: JWTVerifyGetKey;
-  token(sub: string, overrides?: { iss?: string; aud?: string; expSeconds?: number; key?: KeyLike; kid?: string; authTime?: number; email?: string; emailVerified?: boolean }): Promise<string>;
+  token(sub: string, overrides?: { iss?: string; aud?: string; expSeconds?: number; key?: KeyLike; kid?: string; authTime?: number; email?: string; emailVerified?: boolean; sid?: string; acr?: string }): Promise<string>;
   foreignKey: KeyLike;
 }
 
@@ -34,6 +34,8 @@ export async function createIdentity(): Promise<TestIdentity> {
       const now = Math.floor(Date.now() / 1000);
       const claims: Record<string, unknown> = {};
       if (o.authTime !== undefined) claims.auth_time = o.authTime;
+      if (o.sid !== undefined) claims.sid = o.sid;
+      if (o.acr !== undefined) claims.acr = o.acr;
       if (o.email !== undefined) Object.assign(claims, { email: o.email, email_verified: o.emailVerified ?? true });
       return new SignJWT(claims)
         .setProtectedHeader({ alg: 'RS256', kid: o.kid ?? 'test-key-1' })
@@ -57,6 +59,7 @@ export function testConfig(databaseUrl: string): AppConfig {
     rateLimit: { enabled: false, readsPerMinute: 120, writesPerMinute: 30, catalogPerMinutePerIp: 60, trustProxyHops: 0 },
     billing: { apple: null, google: null },
     auditRetentionEnabled: false,
+    staffMfaAcr: null,
     stationCheck: { enabled: false, intervalMinutes: 15, region: 'test-region' },
     configSigningKey: null,
     idpAdmin: {
@@ -74,7 +77,8 @@ export function testConfig(databaseUrl: string): AppConfig {
  */
 export function createFakeIdp() {
   const deleted: string[] = [];
-  const state = { failDeletes: false, tokenRequests: 0 };
+  const endedSessions: string[] = [];
+  const state = { failDeletes: false, failSessions: false, tokenRequests: 0 };
   const fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = String(input);
     if (url === 'https://idp.test/realms/tunedeck/protocol/openid-connect/token') {
@@ -92,9 +96,16 @@ export function createFakeIdp() {
       deleted.push(id);
       return new Response(null, { status: 204 });
     }
+    const session = /^https:\/\/idp\.test\/admin\/realms\/tunedeck\/sessions\/([^/?]+)(\?isOffline=true)?$/.exec(url);
+    if (session && init?.method === 'DELETE') {
+      if ((init.headers as Record<string, string>).Authorization !== 'Bearer admin-token') return new Response(null, { status: 401 });
+      if (state.failSessions) return new Response(null, { status: 503 });
+      endedSessions.push(`${decodeURIComponent(session[1])}${session[2] ? ':offline' : ''}`);
+      return new Response(null, { status: 204 });
+    }
     return new Response(null, { status: 404 });
   };
-  return { fetch: fetch as typeof globalThis.fetch, deleted, state };
+  return { fetch: fetch as typeof globalThis.fetch, deleted, endedSessions, state };
 }
 
 const ADMIN_URL = process.env.TEST_DATABASE_URL ?? 'postgres://postgres@127.0.0.1:54329/postgres';
