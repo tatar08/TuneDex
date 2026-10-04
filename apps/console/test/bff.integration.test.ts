@@ -34,13 +34,13 @@ const cookieValue = (res: Response, name: string) => {
 };
 
 /** Plays the browser through login: BFF → IdP → BFF callback. Returns the session cookie header. */
-async function signIn(user: string): Promise<string> {
+async function signIn(user: string, via: Bff = bff): Promise<string> {
   idp.setUser(user);
-  const start = await bff.login(new Request(`${BASE}/auth/login?returnTo=/app/settings`));
+  const start = await via.login(new Request(`${BASE}/auth/login?returnTo=/app/settings`));
   expect(start.status).toBe(302);
   const tx = cookieValue(start, 'td_login')!;
   const atIdp = await fetch(start.headers.get('location')!, { redirect: 'manual' });
-  const callback = await bff.callback(new Request(atIdp.headers.get('location')!, { headers: { cookie: `td_login=${tx}` } }));
+  const callback = await via.callback(new Request(atIdp.headers.get('location')!, { headers: { cookie: `td_login=${tx}` } }));
   expect(callback.status).toBe(302);
   expect(callback.headers.get('location')).toBe('/app/settings');
   return `td_session=${cookieValue(callback, 'td_session')}`;
@@ -452,6 +452,37 @@ describe('MFA step-up for staff actions', () => {
     expect(url.searchParams.get('max_age')).toBe('0');
     // No OIDC_MFA_ACR configured here: still a forced sign-in, without acr_values.
     expect(url.searchParams.has('acr_values')).toBe(false);
+  });
+  it('passes the API\'s MFA_REQUIRED through without refreshing or ending the session', async () => {
+    // The test API runs without STAFF_MFA_ACR, so the MFA answer is staged on the BFF's way to the API.
+    let apiCalls = 0;
+    const store = new MemorySessionStore(12 * 3600_000, 7 * 24 * 3600_000, () => clock);
+    const stepUp = createBff({
+      config: config(),
+      oidc: new OidcClient(config()),
+      store,
+      logWriter: () => undefined,
+      fetchImpl: async (input, init) => {
+        if (String(input).includes('/v1/admin/audit/export')) {
+          apiCalls++;
+          return Response.json({ code: 'MFA_REQUIRED', messageKey: 'errors.auth.mfaRequired', details: { maxAgeSeconds: 300 } }, { status: 401 });
+        }
+        return fetch(input, init);
+      },
+    });
+    const cookie = await signIn('mfa-auditor', stepUp);
+    const ctx = await stepUp.sessionFromCookie(cookie);
+    const res = await stepUp.auditExport(
+      new Request(`${BASE}/bff/admin/audit/export`, {
+        method: 'POST',
+        headers: { cookie, origin: BASE, 'x-csrf-token': ctx!.session.csrfToken, 'content-type': 'application/json' },
+        body: JSON.stringify({ reason: 'quarterly review of changes' }),
+      }),
+    );
+    expect(res.status).toBe(401);
+    expect((await res.json()).code).toBe('MFA_REQUIRED');
+    expect(apiCalls).toBe(1);
+    expect(await stepUp.sessionFromCookie(cookie)).not.toBeNull();
   });
 });
 

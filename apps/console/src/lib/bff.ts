@@ -406,7 +406,8 @@ export function createBff(deps: BffDeps) {
       });
       if (res.status !== 401) return res;
       // A step-up demand is not an expired token: hand it back without refreshing or ending the session.
-      if ((await res.clone().json().catch(() => null))?.code === 'REAUTH_REQUIRED') return res;
+      const code = (await res.clone().json().catch(() => null))?.code;
+      if (code === 'REAUTH_REQUIRED' || code === 'MFA_REQUIRED') return res;
     }
     await store.delete(ctx.id);
     return null;

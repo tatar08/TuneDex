@@ -1,0 +1,93 @@
+# Local TuneDeck backend: PostgreSQL, Keycloak (realm imported with MFA step-up), API and console.
+# Not a production deployment: Keycloak runs in dev mode over plain http. See README.md.
+name: tunedeck
+
+x-oidc: &oidc
+  OIDC_ISSUER: http://keycloak.localhost:8080/realms/tunedeck
+  NO_PROXY: keycloak.localhost,api,postgres,localhost,127.0.0.1
+  no_proxy: keycloak.localhost,api,postgres,localhost,127.0.0.1
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: tunedeck
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: tunedeck
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tunedeck -d tunedeck"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  keycloak:
+    image: keycloak/keycloak:26.4
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env}
+      # One issuer for the browser and the containers: browsers resolve *.localhost to this machine,
+      # and inside the network the alias below points at this container.
+      KC_HOSTNAME: http://keycloak.localhost:8080
+      KC_HEALTH_ENABLED: "true"
+      # Placeholders in keycloak/tunedeck-realm.json.
+      TUNEDECK_CONSOLE_BASE_URL: http://localhost:3200
+      TUNEDECK_CONSOLE_CLIENT_SECRET: ${CONSOLE_CLIENT_SECRET:?set CONSOLE_CLIENT_SECRET in .env}
+      TUNEDECK_API_ADMIN_CLIENT_SECRET: ${API_ADMIN_CLIENT_SECRET:?set API_ADMIN_CLIENT_SECRET in .env}
+    volumes:
+      # The named volume takes the image's ownership of data/ (Keycloak runs as uid 1000); the realm file sits inside it.
+      - kcdata:/opt/keycloak/data
+      - ./keycloak:/opt/keycloak/data/import:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      default:
+        aliases: [keycloak.localhost]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
+  api:
+    build: ../../services/api
+    command: ["sh", "-c", "node dist/db/migrate.js && exec node dist/main.js"]
+    environment:
+      <<: *oidc
+      APP_ENV: dev
+      BUILD_VERSION: local
+      DATABASE_URL: postgres://tunedeck:${POSTGRES_PASSWORD}@postgres:5432/tunedeck
+      OIDC_AUDIENCE: tunedeck-api
+      OIDC_JWKS_URI: http://keycloak.localhost:8080/realms/tunedeck/protocol/openid-connect/certs
+      KEYCLOAK_ADMIN_CLIENT_ID: tunedeck-api-admin
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${API_ADMIN_CLIENT_SECRET}
+      STAFF_MFA_ACR: mfa
+    ports:
+      - "127.0.0.1:3100:3100"
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+
+  console:
+    build: ../../apps/console
+    environment:
+      <<: *oidc
+      CONSOLE_BASE_URL: http://localhost:3200
+      API_BASE_URL: http://api:3100
+      OIDC_CLIENT_ID: tunedeck-console
+      OIDC_CLIENT_SECRET: ${CONSOLE_CLIENT_SECRET}
+      OIDC_SCOPES: openid
+      OIDC_MFA_ACR: mfa
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env (32+ characters)}
+    ports:
+      - "127.0.0.1:3200:3200"
+    depends_on:
+      api: { condition: service_started }
+
+volumes:
+  pgdata:
+  kcdata:

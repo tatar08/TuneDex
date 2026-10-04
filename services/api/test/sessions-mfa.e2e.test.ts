@@ -62,6 +62,16 @@ describe('device sign-out ends the Keycloak session, and privileged staff action
     expect(await t.app.get(DevicesService).retrySessionEnds()).toBe(0);
   });
 
+  it('replaces an admin token Keycloak stopped accepting and ends the session in the same request', async () => {
+    const web = await id.token('sess-rotate', { sid: 'kc-web-3', authTime: now() });
+    await http().put(`/v1/me/devices/${PHONE}`).set('Authorization', `Bearer ${await id.token('sess-rotate', { sid: 'kc-phone-3' })}`).send(report).expect(200);
+    t.idp.state.validToken = 'admin-token-rotated';
+    const before = t.idp.state.tokenRequests;
+    await http().delete(`/v1/me/devices/${PHONE}/session`).set('Authorization', `Bearer ${web}`).expect(200);
+    expect(t.idp.endedSessions).toContain('kc-phone-3');
+    expect(t.idp.state.tokenRequests).toBe(before + 1);
+  });
+
   it('asks for MFA from the last 5 minutes before publishing, rolling back or exporting audit', async () => {
     const staff = (...args: string[]) => runStaffCli(args, new Database(t.pool), () => undefined);
     for (const sub of ['mfa-admin', 'mfa-auditor']) await http().get('/v1/me/settings').set('Authorization', `Bearer ${await id.token(sub)}`).expect(200);
