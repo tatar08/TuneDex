@@ -97,7 +97,7 @@ describe('SettingsForm', () => {
       vi
         .fn()
         .mockImplementationOnce(() => reply(412, { code: 'REVISION_MISMATCH', details: { currentRevision: 2 } }))
-        .mockImplementationOnce(() => reply(200, view(2, { cellularPolicy: 'wifi_only' }))),
+        .mockImplementationOnce(() => reply(200, view(2, { theme: 'light', cellularPolicy: 'wifi_only' }))),
     );
     const user = userEvent.setup();
     render(<SettingsForm initial={view(1)} devices={[]} csrfToken="c" />);
@@ -105,8 +105,27 @@ describe('SettingsForm', () => {
     await user.click(screen.getByRole('button', { name: 'บันทึก' }));
     await user.click(await screen.findByRole('button', { name: 'ใช้ค่าล่าสุดจากเซิร์ฟเวอร์' }));
     expect((screen.getByRole('radio', { name: 'เฉพาะ Wi-Fi' }) as HTMLInputElement).checked).toBe(true);
-    expect((screen.getByRole('radio', { name: 'ตามระบบ' }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('radio', { name: 'สว่าง' }) as HTMLInputElement).checked).toBe(true);
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('rebases without asking when only other fields changed elsewhere', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => reply(412, { code: 'REVISION_MISMATCH', details: { currentRevision: 2 } }))
+      .mockImplementationOnce(() => reply(200, view(2, { cellularPolicy: 'wifi_only' })))
+      .mockImplementationOnce(() => reply(200, view(3, { theme: 'dark', cellularPolicy: 'wifi_only' })));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<SettingsForm initial={view(1)} devices={[]} csrfToken="c" />);
+    await user.click(screen.getByRole('radio', { name: 'มืด' }));
+    await user.click(screen.getByRole('button', { name: 'บันทึก' }));
+    await waitFor(() => expect(screen.getByTestId('saved-revision').textContent).toBe('บันทึกแล้ว · revision 3'));
+    expect(screen.queryByRole('alert')).toBeNull();
+    const third = fetchMock.mock.calls[2][1] as RequestInit;
+    expect((third.headers as Record<string, string>)['if-match']).toBe('"2"');
+    expect(JSON.parse(third.body as string)).toEqual({ theme: 'dark' });
+    expect((screen.getByRole('radio', { name: 'เฉพาะ Wi-Fi' }) as HTMLInputElement).checked).toBe(true);
   });
 
   it('tells the user to sign in again when the session has ended', async () => {

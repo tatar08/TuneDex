@@ -140,8 +140,12 @@ export function SettingsForm({
     if (problem) alertRef.current?.focus();
   }, [problem]);
 
-  /** Sends only the fields that differ from `base`, the values this user started editing from. */
-  async function save(revision: number, base: Values = saved.settings) {
+  /**
+   * Sends only the fields that differ from `base`, the values this user started editing from.
+   * Doc 06/17: when someone else saved meanwhile, fields only one side changed are rebased and sent again
+   * once without asking; only a field both sides changed to different values goes to the user.
+   */
+  async function save(revision: number, base: Values = saved.settings, rebased = false) {
     const patch: Partial<Values> = {};
     for (const k of Object.keys(values) as Field[]) if (values[k] !== base[k]) patch[k] = values[k] as never;
     if (Object.keys(patch).length === 0) return;
@@ -160,6 +164,10 @@ export function SettingsForm({
         setAnnounce(strings((body as SettingsView).settings.language).savedRevision((body as SettingsView).revision));
       } else if (res.status === 412) {
         const latest = await fetch('/bff/settings').then((r) => (r.ok ? (r.json() as Promise<SettingsView>) : null)).catch(() => null);
+        if (latest && !rebased && !Object.keys(patch).some((k) => latest.settings[k as Field] !== base[k as Field] && latest.settings[k as Field] !== patch[k as Field])) {
+          setSaved(latest);
+          return void (await save(latest.revision, base, true));
+        }
         setProblem({ kind: 'conflict', server: latest, currentRevision: latest?.revision ?? body?.details?.currentRevision ?? revision });
       } else if (res.status === 401) {
         setProblem({ kind: 'expired' });

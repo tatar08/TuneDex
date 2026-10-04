@@ -58,20 +58,32 @@ test('sign in, save by keyboard, resolve a conflict, sign out', async ({ browser
   await other.getByRole('button', { name: 'บันทึก' }).click();
   await expect(other.getByTestId('saved-revision')).toHaveText('บันทึกแล้ว · revision 2');
 
+  // A different field changed elsewhere: the save is rebased on revision 2 without asking.
   await page.getByRole('radio', { name: 'สว่าง' }).check();
   await page.getByRole('button', { name: 'บันทึก' }).click();
+  await expect(page.getByTestId('saved-revision')).toHaveText('บันทึกแล้ว · revision 3');
+  await expect(page.getByRole('alert').filter({ hasText: 'revision' })).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: 'เฉพาะ Wi-Fi' })).toBeChecked();
+
+  // The same field changed elsewhere to something else: the user chooses.
+  await other.reload();
+  await other.getByRole('radio', { name: 'มืด' }).check();
+  await other.getByRole('button', { name: 'บันทึก' }).click();
+  await expect(other.getByTestId('saved-revision')).toHaveText('บันทึกแล้ว · revision 4');
+  await page.getByRole('radio', { name: 'ตามระบบ' }).check();
+  await page.getByRole('button', { name: 'บันทึก' }).click();
   const alert = page.getByRole('alert').filter({ hasText: 'revision' });
-  await expect(alert).toContainText('revision 2');
+  await expect(alert).toContainText('revision 4');
   await expect(alert).toBeFocused();
   await page.getByRole('button', { name: 'บันทึกค่าของฉันทับ' }).click();
-  await expect(page.getByTestId('saved-revision')).toHaveText('บันทึกแล้ว · revision 3');
+  await expect(page.getByTestId('saved-revision')).toHaveText('บันทึกแล้ว · revision 5');
 
   await page.reload();
-  await expect(page.getByRole('radio', { name: 'สว่าง' })).toBeChecked();
+  await expect(page.getByRole('radio', { name: 'ตามระบบ' })).toBeChecked();
   await expect(page.getByRole('radio', { name: 'เฉพาะ Wi-Fi' })).toBeChecked();
   await expect(page.getByText(/ยังไม่มีอุปกรณ์ที่ลงชื่อเข้าใช้/)).toBeVisible();
 
-  // The phone app checks in: first still on revision 2, then after applying revision 3.
+  // The phone app checks in: first still on revision 4, then after applying revision 5.
   const phone = await idp.accessTokenFor('e2e-alice');
   const checkIn = (applied: number) =>
     fetch(`${api.url}/v1/me/devices/7c2e9d10-3b4a-4f5e-8a6b-9c0d1e2f3a4b`, {
@@ -79,12 +91,12 @@ test('sign in, save by keyboard, resolve a conflict, sign out', async ({ browser
       headers: { authorization: `Bearer ${phone}`, 'content-type': 'application/json' },
       body: JSON.stringify({ platform: 'ios', osMajor: 18, appBuild: '1.0.0+42', appliedSettingsRevision: applied }),
     });
-  expect((await checkIn(2)).status).toBe(200);
+  expect((await checkIn(4)).status).toBe(200);
   await page.reload();
   const device = page.getByTestId('device');
   await expect(device).toContainText('iPhone · iOS 18');
   await expect(device).toContainText('รอซิงก์');
-  expect((await checkIn(3)).status).toBe(200);
+  expect((await checkIn(5)).status).toBe(200);
   await page.reload();
   await expect(device).toContainText('ใช้ค่าล่าสุดแล้ว');
 
