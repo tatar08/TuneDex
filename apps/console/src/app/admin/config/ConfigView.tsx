@@ -8,6 +8,7 @@ import type {
   AppConfigPayload,
   ConfigFeature,
   ConfigRelease,
+  ConfigTargets,
 } from "@/lib/bff";
 import { useAdmin } from "../AdminShell";
 import { isMfaRequired, MfaLink, MFA_NEEDED } from "../MfaPrompt";
@@ -42,12 +43,35 @@ const FIELD_LABEL: Record<string, string> = {
   "features.playlistImport": "นำเข้าเพลย์ลิสต์",
   "features.diagnosticsUpload": "รายงานวินิจฉัย",
   catalogRefreshHours: "รอบรีเฟรชแค็ตตาล็อก",
+  "targets.ios.include": "ส่งให้ iOS",
+  "targets.ios.minBuild": "iOS ตั้งแต่ build",
+  "targets.ios.maxBuild": "iOS ถึง build",
+  "targets.android.include": "ส่งให้ Android",
+  "targets.android.minBuild": "Android ตั้งแต่ build",
+  "targets.android.maxBuild": "Android ถึง build",
 };
+const PLATFORMS = [
+  { id: "ios", label: "iOS" },
+  { id: "android", label: "Android" },
+] as const;
 const BLOCKER_LABEL: Record<string, string> = {
   admin_role_required: "ต้องเป็นแอดมินจึงจะเผยแพร่ได้",
   own_change: "คุณแก้ร่างนี้เอง ต้องให้แอดมินอีกคนตรวจและเผยแพร่",
   no_changes: "ร่างตรงกับที่แอปใช้อยู่แล้ว ไม่มีอะไรต้องเผยแพร่",
+  not_staged: "ต้องส่งร่างนี้ขึ้น staging ก่อน แล้วจึงเผยแพร่จริงได้",
+  already_staged: "ร่างนี้อยู่บน staging แล้ว",
+  not_production: "ย้อนกลับได้เฉพาะรุ่นที่เคยใช้จริง ไม่ใช่รุ่น staging",
 };
+
+/** One line per platform: who receives the release. */
+function targetsText(t: ConfigTargets) {
+  return PLATFORMS.map(({ id, label }) => {
+    const r = t[id];
+    if (!r.include) return `${label}: ไม่ส่ง`;
+    if (r.minBuild === null && r.maxBuild === null) return `${label}: ทุก build`;
+    return `${label}: build ${r.minBuild ?? "แรก"}–${r.maxBuild ?? "ล่าสุด"}`;
+  }).join(" · ");
+}
 const DAYS = [7, 14, 30, 60, 90];
 
 const buildLabel = (b: number | null) =>
@@ -110,7 +134,12 @@ const FIELD_PROBLEM: Record<string, string> = {
     "build ขั้นต่ำ Android ต้องเป็นเลขจำนวนเต็มตั้งแต่ 1 หรือเว้นว่าง",
   catalogRefreshHours: "รอบรีเฟรชต้องอยู่ระหว่าง 1–168 ชั่วโมง",
   validDays: "อายุของรุ่นต้องอยู่ระหว่าง 7–90 วัน",
+  targets: "ต้องส่งให้อย่างน้อยหนึ่งแพลตฟอร์ม",
 };
+for (const { id, label } of PLATFORMS) {
+  FIELD_PROBLEM[`targets.${id}.minBuild`] = `build เริ่มต้นของ ${label} ต้องเป็นเลขจำนวนเต็มตั้งแต่ 1 หรือเว้นว่าง`;
+  FIELD_PROBLEM[`targets.${id}.maxBuild`] = `build สุดท้ายของ ${label} ต้องเป็นเลขตั้งแต่ 1 และไม่น้อยกว่า build เริ่มต้น หรือเว้นว่าง`;
+}
 
 /** Sends one change through the BFF and turns the API's answer into a Thai message. */
 function useSend() {
@@ -190,11 +219,24 @@ function DraftForm({
   );
   const [features, setFeatures] = useState(d.features);
   const [hours, setHours] = useState(String(d.catalogRefreshHours));
+  const t = view.draft.targets;
+  const [targets, setTargets] = useState({
+    ios: { include: t.ios.include, min: t.ios.minBuild?.toString() ?? "", max: t.ios.maxBuild?.toString() ?? "" },
+    android: { include: t.android.include, min: t.android.minBuild?.toString() ?? "", max: t.android.maxBuild?.toString() ?? "" },
+  });
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
 
   async function save(ev: React.FormEvent) {
     ev.preventDefault();
+    const nextTargets = {} as ConfigTargets;
+    for (const { id } of PLATFORMS) {
+      const min = toBuild(targets[id].min);
+      const max = toBuild(targets[id].max);
+      if (min === "bad") return setProblem(FIELD_PROBLEM[`targets.${id}.minBuild`]);
+      if (max === "bad") return setProblem(FIELD_PROBLEM[`targets.${id}.maxBuild`]);
+      nextTargets[id] = { include: targets[id].include, minBuild: min, maxBuild: max };
+    }
     const i = toBuild(ios);
     const a = toBuild(android);
     if (i === "bad" || a === "bad")
@@ -214,12 +256,13 @@ function DraftForm({
         minSupportedBuild: { ios: i, android: a },
         features,
         catalogRefreshHours: Number(hours),
+        targets: nextTargets,
       },
       view.draft.revision,
     );
     setBusy(false);
     if (!r.ok) return setProblem(r.message);
-    flash("บันทึกร่างแล้ว แอปยังไม่เห็นจนกว่าแอดมินอีกคนจะเผยแพร่");
+    flash("บันทึกร่างแล้ว แอปยังไม่เห็นจนกว่าจะส่งขึ้น staging และแอดมินอีกคนเผยแพร่");
     router.refresh();
   }
 
@@ -287,6 +330,45 @@ function DraftForm({
             ปิดได้เฉพาะฟีเจอร์ที่มีอยู่ในแอปแล้ว
             ใช้เปิดฟีเจอร์ใหม่ที่แอปไม่มีไม่ได้
           </small>
+          <div className="cf-targets" role="group" aria-label="ส่งให้แอปไหน">
+            {PLATFORMS.map(({ id, label }) => (
+              <div key={id} className="cf-target">
+                <label className="cf-feat">
+                  <input
+                    type="checkbox"
+                    checked={targets[id].include}
+                    onChange={(e) => setTargets({ ...targets, [id]: { ...targets[id], include: e.target.checked } })}
+                  />
+                  <span>
+                    <b>ส่งให้ {label}</b>
+                  </span>
+                </label>
+                <label className="fld">
+                  <span>{label} ตั้งแต่ build</span>
+                  <input
+                    inputMode="numeric"
+                    value={targets[id].min}
+                    disabled={!targets[id].include}
+                    onChange={(e) => setTargets({ ...targets, [id]: { ...targets[id], min: e.target.value } })}
+                    placeholder="ทุก build"
+                  />
+                </label>
+                <label className="fld">
+                  <span>{label} ถึง build</span>
+                  <input
+                    inputMode="numeric"
+                    value={targets[id].max}
+                    disabled={!targets[id].include}
+                    onChange={(e) => setTargets({ ...targets, [id]: { ...targets[id], max: e.target.value } })}
+                    placeholder="ทุก build"
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+          <small className="dim">
+            แอปที่อยู่นอกช่วงนี้จะไม่สนใจรุ่นนี้ และใช้รุ่นล่าสุดที่ตรงกับตัวเองต่อไป
+          </small>
         </div>
       </fieldset>
       {problem && (
@@ -311,39 +393,60 @@ function DraftForm({
   );
 }
 
-/** Publish the reviewed draft revision with a reason and a validity period. */
+/** The error line under a form, with the MFA link when that is what is missing. */
+function FormProblem({ problem }: { problem: string }) {
+  if (!problem) return null;
+  return (
+    <p role="alert" className="au-export-err">
+      {problem}
+      {problem === MFA_NEEDED && (
+        <>
+          {" "}
+          <MfaLink />
+        </>
+      )}
+    </p>
+  );
+}
+
+/**
+ * Doc 17 rollout: send the draft to staging (test builds) first, then a different admin publishes exactly that
+ * staged draft to everyone. An admin who changed the draft may publish alone only as an explained emergency.
+ */
 function Publish({ view }: { view: AdminConfigView }) {
   const router = useRouter();
   const send = useSend();
   const flash = useContext(Flash);
+  const [stageReason, setStageReason] = useState("");
   const [reason, setReason] = useState("");
+  const [emergencyReason, setEmergencyReason] = useState("");
+  const [emergencyOk, setEmergencyOk] = useState(false);
   const [days, setDays] = useState(30);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
   const { changedSinceRelease, revision } = view.draft;
   const blocked = view.publishBlockers.length > 0;
-  // "No changes" is already said by the line above; list only the blockers that need someone to act.
-  const shown = view.publishBlockers.filter((b) => b !== "no_changes");
+  // "No changes" is already said by the line above, and "not staged" by the staging step.
+  const shown = view.publishBlockers.filter((b) => b !== "no_changes" && b !== "not_staged");
+  const canStage = view.stageBlockers.length === 0;
+  const emergencyOnly = view.publishBlockers.length === 1 && view.publishBlockers[0] === "own_change";
 
-  async function submit(ev: React.FormEvent) {
-    ev.preventDefault();
+  async function run(url: string, body: unknown, done: string) {
     setBusy(true);
     setProblem("");
-    const r = await send(
-      "POST",
-      "/bff/admin/config/publish",
-      { reason, validDays: days },
-      revision,
-    );
+    const r = await send("POST", url, body, revision);
     setBusy(false);
     if (!r.ok) return setProblem(r.message);
-    flash("เผยแพร่แล้ว แอปจะได้รับเมื่อเปิดแอปหรือเชื่อมต่อครั้งถัดไป");
+    flash(done);
+    setStageReason("");
     setReason("");
+    setEmergencyReason("");
+    setEmergencyOk(false);
     router.refresh();
   }
 
   return (
-    <form className="cf-publish" onSubmit={submit} aria-label="เผยแพร่ร่าง">
+    <div className="cf-publish">
       <p>
         {changedSinceRelease.length ? (
           <>
@@ -354,18 +457,83 @@ function Publish({ view }: { view: AdminConfigView }) {
           <>ร่าง r{revision} ตรงกับที่แอปใช้อยู่</>
         )}
       </p>
-      {blocked ? (
-        shown.length > 0 && (
-          <ul className="cf-blockers">
-            {shown.map((b) => (
-              <li key={b}>{BLOCKER_LABEL[b] ?? b}</li>
-            ))}
-          </ul>
-        )
-      ) : (
-        <>
+      <p className="dim">
+        {view.staged
+          ? `Staging: รุ่น ${view.staged.release} จากร่าง r${view.staged.draftRevision}${view.stagedIsDraft ? " (ตรงกับร่างนี้)" : " (เก่ากว่าร่างนี้)"}`
+          : "Staging: ยังไม่มีรุ่นทดสอบ"}
+      </p>
+      {canStage && (
+        <form
+          aria-label="ส่งขึ้น staging"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run("/bff/admin/config/stage", { reason: stageReason, validDays: days }, "ส่งขึ้น staging แล้ว แอปรุ่นทดสอบจะได้รับเมื่อเชื่อมต่อครั้งถัดไป");
+          }}
+        >
           <label className="fld">
-            <span>เหตุผล (จะถูกบันทึกไว้ในประวัติ)</span>
+            <span>1. ส่งร่าง r{revision} ขึ้น staging ให้แอปรุ่นทดสอบลองก่อน (เหตุผล)</span>
+            <textarea
+              id="cf-stage-reason"
+              value={stageReason}
+              onChange={(e) => setStageReason(e.target.value)}
+              minLength={10}
+              maxLength={500}
+              rows={2}
+              required
+            />
+          </label>
+          <button type="submit" className="btn secondary" disabled={busy}>
+            {busy ? "กำลังส่ง…" : `ส่งร่าง r${revision} ขึ้น staging`}
+          </button>
+        </form>
+      )}
+      {blocked ? (
+        <>
+          {shown.length > 0 && (
+            <ul className="cf-blockers">
+              {shown.map((b) => (
+                <li key={b}>{BLOCKER_LABEL[b] ?? b}</li>
+              ))}
+            </ul>
+          )}
+          {emergencyOnly && (
+            <details className="emergency">
+              <summary>กรณีฉุกเฉิน: เผยแพร่โดยไม่มีแอดมินคนที่สอง</summary>
+              <form
+                aria-label="เผยแพร่ฉุกเฉิน"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void run("/bff/admin/config/publish", { reason: emergencyReason, validDays: days, emergency: true }, "เผยแพร่แบบฉุกเฉินแล้ว บันทึกใน audit ให้ทีมตรวจย้อนหลัง");
+                }}
+              >
+                <p className="dim">
+                  ใช้เมื่อรอแอดมินคนอื่นไม่ได้ ต้องยืนยัน MFA ภายใน 5 นาที และบันทึกใน audit แยกเป็น “เผยแพร่แบบฉุกเฉิน”
+                </p>
+                <label className="fld">
+                  <span>เหตุผลที่ต้องเผยแพร่ทันที (อย่างน้อย 20 ตัวอักษร)</span>
+                  <textarea value={emergencyReason} onChange={(e) => setEmergencyReason(e.target.value)} maxLength={500} rows={2} />
+                </label>
+                <label className="fld check">
+                  <input type="checkbox" checked={emergencyOk} onChange={(e) => setEmergencyOk(e.target.checked)} />
+                  <span>ฉันตรวจร่างนี้แล้ว และเข้าใจว่าไม่มีผู้ตรวจคนที่สอง</span>
+                </label>
+                <button type="submit" className="btn danger" disabled={busy || !emergencyOk || emergencyReason.trim().length < 20}>
+                  เผยแพร่ฉุกเฉิน r{revision}
+                </button>
+              </form>
+            </details>
+          )}
+        </>
+      ) : (
+        <form
+          aria-label="เผยแพร่ร่าง"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run("/bff/admin/config/publish", { reason, validDays: days }, "เผยแพร่แล้ว แอปจะได้รับเมื่อเปิดแอปหรือเชื่อมต่อครั้งถัดไป");
+          }}
+        >
+          <label className="fld">
+            <span>2. เผยแพร่ให้ทุกคน · เหตุผล (จะถูกบันทึกไว้ในประวัติ)</span>
             <textarea
               id="cf-reason"
               value={reason}
@@ -376,37 +544,25 @@ function Publish({ view }: { view: AdminConfigView }) {
               required
             />
           </label>
-          <label className="fld cf-days">
-            <span>ใช้ได้นาน</span>
-            <select
-              id="cf-days"
-              value={days}
-              onChange={(e) => setDays(Number(e.target.value))}
-            >
-              {DAYS.map((d) => (
-                <option key={d} value={d}>
-                  {d} วัน
-                </option>
-              ))}
-            </select>
-          </label>
-          {problem && (
-            <p role="alert" className="au-export-err">
-              {problem}
-              {problem === MFA_NEEDED && (
-                <>
-                  {" "}
-                  <MfaLink />
-                </>
-              )}
-            </p>
-          )}
           <button type="submit" className="btn" disabled={busy}>
             {busy ? "กำลังเผยแพร่…" : `เผยแพร่ร่าง r${revision}`}
           </button>
-        </>
+        </form>
       )}
-    </form>
+      {(canStage || !blocked || emergencyOnly) && (
+        <label className="fld cf-days">
+          <span>ใช้ได้นาน</span>
+          <select id="cf-days" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+            {DAYS.map((d) => (
+              <option key={d} value={d}>
+                {d} วัน
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <FormProblem problem={problem} />
+    </div>
   );
 }
 
@@ -516,7 +672,11 @@ function ReleaseMeta({ r }: { r: ConfigRelease }) {
       {r.rollbackOf
         ? ` · ย้อนจากรุ่น ${r.rollbackOf}`
         : ` · จากร่าง r${r.draftRevision}`}
+      {r.stagedRelease ? ` · ผ่าน staging รุ่น ${r.stagedRelease}` : ""}
+      {r.emergency ? " · เผยแพร่ฉุกเฉิน ไม่มีผู้ตรวจ" : r.reviewed ? " · ผ่านผู้ตรวจ" : ""}
       {r.publishedByYou ? " · คุณเผยแพร่" : ""}
+      <br />
+      {targetsText(r.targets)}
     </small>
   );
 }
@@ -538,13 +698,14 @@ function Releases({
         <li key={r.release}>
           <div className="cf-rel-head">
             <b>รุ่น {r.release}</b>
+            {r.environment === "staging" && <span className="tag jb-pending">staging</span>}
             {r.release === view.current?.release && (
               <span className="tag jb-completed">ใช้อยู่</span>
             )}
           </div>
           <ReleaseMeta r={r} />
           <p className="cf-reason">{r.reason}</p>
-          {isAdmin && r.release !== view.current?.release && (
+          {isAdmin && r.environment === "production" && r.release !== view.current?.release && (
             <Rollback release={r} />
           )}
         </li>
@@ -566,6 +727,7 @@ function Current({ view }: { view: AdminConfigView }) {
             </span>
           </p>
           <Summary config={c.config} />
+          <small className="dim">{targetsText(c.targets)}</small>
         </>
       ) : (
         <>

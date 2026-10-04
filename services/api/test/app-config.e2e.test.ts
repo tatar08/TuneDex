@@ -43,11 +43,13 @@ describe('remote app config (/v1/config, /v1/admin/config)', () => {
     expect(doc).toEqual({
       schemaVersion: 1,
       release: 0,
+      environment: 'production',
+      targets: { ios: { include: true, minBuild: null, maxBuild: null }, android: { include: true, minBuild: null, maxBuild: null } },
       publishedAt: null,
       expiresAt: null,
       config: { minSupportedBuild: { ios: null, android: null }, features: { catalogBrowse: true, playlistImport: true, diagnosticsUpload: true }, catalogRefreshHours: 24 },
     });
-    expect(res.headers.etag).toMatch(/^"r0-/);
+    expect(res.headers.etag).toMatch(/^"d-production-/);
     await http().get('/v1/config').set('If-None-Match', res.headers.etag).expect(304);
   });
 
@@ -87,7 +89,13 @@ describe('remote app config (/v1/config, /v1/admin/config)', () => {
     expect(stale.status).toBe(412);
     expect(stale.body.details).toEqual({ currentRevision: 1 });
 
-    // The author cannot publish their own change.
+    // Production needs the draft staged first, and never by its own author.
+    expect((await http().post('/v1/admin/config/publish').set(b).set('If-Match', '"1"').send(reason)).body.details.reasons).toEqual(['not_staged']);
+    const staged = await http().post('/v1/admin/config/stage').set(a).set('If-Match', '"1"').send({ reason: 'try build 42 minimum on test phones' }).expect(200);
+    expect(staged.body).toMatchObject({ stagedIsDraft: true, staged: { release: 1, environment: 'staging', draftRevision: 1 }, current: null, stageBlockers: ['already_staged'] });
+    // Test builds see it on the staging channel; everyone else still gets the defaults.
+    expect((await verified((await http().get('/v1/config?channel=staging')).body.jws)).release).toBe(1);
+    expect((await verified((await http().get('/v1/config')).body.jws)).release).toBe(0);
     const own = await http().post('/v1/admin/config/publish').set(a).set('If-Match', '"1"').send(reason);
     expect(own.status).toBe(409);
     expect(own.body.details.reasons).toEqual(['own_change']);
@@ -97,7 +105,7 @@ describe('remote app config (/v1/config, /v1/admin/config)', () => {
     expect((await http().post('/v1/admin/config/publish').set(b).set('If-Match', '"1"').send({ ...reason, validDays: 365 })).status).toBe(400);
 
     const published = await http().post('/v1/admin/config/publish').set(b).set('If-Match', '"1"').send({ ...reason, validDays: 14 }).expect(200);
-    expect(published.body.current).toMatchObject({ release: 1, draftRevision: 1, rollbackOf: null, publishedByYou: true, reason: reason.reason });
+    expect(published.body.current).toMatchObject({ release: 2, environment: 'production', stagedRelease: 1, reviewed: true, emergency: false, draftRevision: 1, rollbackOf: null, publishedByYou: true, reason: reason.reason });
     expect(published.body.publishBlockers).toEqual(['no_changes']);
     const days = (Date.parse(published.body.current.expiresAt) - Date.parse(published.body.current.publishedAt)) / 86_400_000;
     expect(Math.round(days)).toBe(14);
@@ -105,8 +113,8 @@ describe('remote app config (/v1/config, /v1/admin/config)', () => {
     const res = await http().get('/v1/config').expect(200);
     expect(decodeProtectedHeader(res.body.jws).alg).toBe('EdDSA');
     const doc = await verified(res.body.jws);
-    expect(doc).toMatchObject({ release: 1, config: { minSupportedBuild: { ios: 42, android: null }, features: { playlistImport: false, catalogBrowse: true } } });
-    expect(res.headers.etag).toMatch(/^"r1-/);
+    expect(doc).toMatchObject({ release: 2, environment: 'production', config: { minSupportedBuild: { ios: 42, android: null }, features: { playlistImport: false, catalogBrowse: true } } });
+    expect(res.headers.etag).toMatch(/^"r2-/);
     // A tampered payload does not verify.
     const [h, p, s] = res.body.jws.split('.');
     const forged = Buffer.from(JSON.stringify({ ...doc, config: { ...doc.config, features: { ...doc.config.features, playlistImport: true } } })).toString('base64url');
@@ -114,34 +122,75 @@ describe('remote app config (/v1/config, /v1/admin/config)', () => {
     expect(p).not.toBe(forged);
 
     const audit = await t.pool.query(`SELECT action, target_id, reason, changes FROM audit_events WHERE target_type = 'config' ORDER BY id`);
-    expect(audit.rows.map((r) => r.action)).toEqual(['config.update', 'config.publish']);
+    expect(audit.rows.map((r) => r.action)).toEqual(['config.update', 'config.stage', 'config.publish']);
     expect(audit.rows[0].changes).toMatchObject({ fields: ['minSupportedBuild.ios', 'features.playlistImport'], values: { 'minSupportedBuild.ios': 42, 'features.playlistImport': false } });
-    expect(audit.rows[1]).toMatchObject({ target_id: '1', reason: reason.reason, changes: { draftRevision: 1, previousRelease: null, validDays: 14 } });
+    expect(audit.rows[2]).toMatchObject({ target_id: '2', reason: reason.reason, changes: { draftRevision: 1, stagedRelease: 1, previousRelease: null, validDays: 14 } });
   });
 
   it('rolls back by re-releasing an earlier payload as a new release, and never edits history', async () => {
     const a = await bearer('cfg-admin-a');
     const b = await bearer('cfg-admin-b');
-    // Release 2 turns import back on.
+    // Release 4 (staged as 3) turns import back on.
     await http().patch('/v1/admin/config/draft').set(b).set('If-Match', '"1"').send({ features: { playlistImport: true } }).expect(200);
+    await http().post('/v1/admin/config/stage').set(b).set('If-Match', '"2"').send({ reason: 'import fixed in build 42, try it' }).expect(200);
     await http().post('/v1/admin/config/publish').set(a).set('If-Match', '"2"').send({ reason: 'import fixed in build 42, turn it back on' }).expect(200);
-    expect((await verified((await http().get('/v1/config')).body.jws)).release).toBe(2);
+    expect((await verified((await http().get('/v1/config')).body.jws)).release).toBe(4);
 
-    expect((await http().post('/v1/admin/config/releases/2/rollback').set(a).send(reason)).body.details.reasons).toEqual(['already_current']);
+    expect((await http().post('/v1/admin/config/releases/4/rollback').set(a).send(reason)).body.details.reasons).toEqual(['already_current']);
+    expect((await http().post('/v1/admin/config/releases/3/rollback').set(a).send(reason)).body.details.reasons).toEqual(['not_production']);
     expect((await http().post('/v1/admin/config/releases/99/rollback').set(a).send(reason)).status).toBe(404);
     expect((await http().post('/v1/admin/config/releases/abc/rollback').set(a).send(reason)).status).toBe(400);
     expect((await http().post('/v1/admin/config/releases/1/rollback').set(await bearer('cfg-ops')).send(reason)).status).toBe(403);
 
     // One admin may roll back alone, so a bad release can be undone quickly.
-    const rolled = await http().post('/v1/admin/config/releases/1/rollback').set(b).send({ reason: 'import broke again, back to release 1' }).expect(200);
-    expect(rolled.body.current).toMatchObject({ release: 3, rollbackOf: 1, draftRevision: null, config: { features: { playlistImport: false } } });
-    expect(rolled.body.releases.map((r: { release: number }) => r.release)).toEqual([3, 2, 1]);
+    const rolled = await http().post('/v1/admin/config/releases/2/rollback').set(b).send({ reason: 'import broke again, back to release 2' }).expect(200);
+    expect(rolled.body.current).toMatchObject({ release: 5, rollbackOf: 2, draftRevision: null, config: { features: { playlistImport: false } } });
+    expect(rolled.body.releases.map((r: { release: number }) => r.release)).toEqual([5, 4, 3, 2, 1]);
     expect(rolled.body.draft.revision).toBe(2);
-    expect((await verified((await http().get('/v1/config')).body.jws)).release).toBe(3);
+    expect((await verified((await http().get('/v1/config')).body.jws)).release).toBe(5);
 
     await expect(t.pool.query('UPDATE app_config_releases SET reason = $1 WHERE release = 1', ['x'])).rejects.toThrow(/append-only/);
     await expect(t.pool.query('DELETE FROM app_config_releases WHERE release = 1')).rejects.toThrow(/append-only/);
     const { rows } = await t.pool.query(`SELECT action, changes FROM audit_events WHERE action = 'config.rollback'`);
-    expect(rows).toEqual([{ action: 'config.rollback', changes: { rollbackOf: 1, previousRelease: 2, validDays: 30 } }]);
+    expect(rows).toEqual([{ action: 'config.rollback', changes: { rollbackOf: 2, previousRelease: 4, validDays: 30 } }]);
+  });
+
+  it('targets a release to a platform and build range; other clients keep the newest release that fits them', async () => {
+    const a = await bearer('cfg-admin-a');
+    const b = await bearer('cfg-admin-b');
+    const draft = (await http().get('/v1/admin/config').set(a).expect(200)).body.draft;
+    const patch = (body: object, rev = draft.revision) => http().patch('/v1/admin/config/draft').set(a).set('If-Match', `"${rev}"`).send(body);
+    expect((await patch({ targets: { android: { minBuild: 50, maxBuild: 40 } } })).body.details).toEqual({ field: 'targets.android.maxBuild', reason: 'below_min_build' });
+    expect((await patch({ targets: { ios: { include: false }, android: { include: false } } })).body.details).toEqual({ field: 'targets', reason: 'no_platform' });
+    // Android builds 100-199 only: shorter catalog refresh.
+    const edited = await patch({ catalogRefreshHours: 6, targets: { ios: { include: false }, android: { minBuild: 100, maxBuild: 199 } } }).expect(200);
+    // playlistImport differs too: the rollback to release 2 left the draft as it was.
+    expect(edited.body.draft.changedSinceRelease).toEqual(['features.playlistImport', 'catalogRefreshHours', 'targets.ios.include', 'targets.android.minBuild', 'targets.android.maxBuild']);
+    const rev = edited.body.draft.revision;
+    await http().post('/v1/admin/config/stage').set(a).set('If-Match', `"${rev}"`).send({ reason: 'android 1xx refresh test' }).expect(200);
+    const live = await http().post('/v1/admin/config/publish').set(b).set('If-Match', `"${rev}"`).send({ reason: 'android 1xx refresh every 6 hours' }).expect(200);
+    const targeted = live.body.current.release;
+
+    const doc = async (q: string) => verified((await http().get(`/v1/config${q}`).expect(200)).body.jws);
+    expect(await doc('?platform=android&build=150')).toMatchObject({ release: targeted, config: { catalogRefreshHours: 6 }, targets: { android: { minBuild: 100, maxBuild: 199 } } });
+    // Outside the range, on iOS, or not saying: the newest release for everyone (the rollback, 5).
+    for (const q of ['?platform=android&build=200', '?platform=ios&build=150', '', '?platform=android']) expect((await doc(q)).release).toBe(5);
+    expect((await http().get('/v1/config?platform=windows')).status).toBe(400);
+    expect((await http().get('/v1/config?build=150')).status).toBe(400);
+    expect((await http().get('/v1/config?channel=beta')).status).toBe(400);
+  });
+
+  it('lets one admin publish their own change only as a staged, explained emergency', async () => {
+    const a = await bearer('cfg-admin-a');
+    const before = (await http().get('/v1/admin/config').set(a).expect(200)).body.draft.revision;
+    const rev = (await http().patch('/v1/admin/config/draft').set(a).set('If-Match', `"${before}"`).send({ features: { catalogBrowse: false } }).expect(200)).body.draft.revision;
+    const emergency = (r: string) => http().post('/v1/admin/config/publish').set(a).set('If-Match', `"${rev}"`).send({ reason: r, emergency: true });
+    expect((await emergency('catalog server is down, hide browsing now')).body.details.reasons).toEqual(['not_staged']);
+    await http().post('/v1/admin/config/stage').set(a).set('If-Match', `"${rev}"`).send({ reason: 'catalog outage switch' }).expect(200);
+    expect((await emergency('hide browse now')).body.details).toMatchObject({ field: 'reason', reason: 'too_short' });
+    const done = await emergency('catalog server is down, hide browsing now').expect(200);
+    expect(done.body.current).toMatchObject({ emergency: true, reviewed: false });
+    const [row] = (await t.pool.query(`SELECT action, changes FROM audit_events WHERE action LIKE 'config.publish%' ORDER BY id DESC LIMIT 1`)).rows;
+    expect(row).toMatchObject({ action: 'config.publish_emergency', changes: { emergency: true, reviewer: 'none' } });
   });
 });

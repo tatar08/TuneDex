@@ -314,10 +314,17 @@ export interface AppConfigPayload {
   features: Record<ConfigFeature, boolean>;
   catalogRefreshHours: number;
 }
+/** Which apps a release is for (Doc 17 platform and build targeting). */
+export type ConfigTargets = Record<'ios' | 'android', { include: boolean; minBuild: number | null; maxBuild: number | null }>;
 export interface ConfigRelease {
   release: number;
   schemaVersion: number;
+  environment: 'staging' | 'production';
+  targets: ConfigTargets;
   config: AppConfigPayload;
+  stagedRelease: number | null;
+  reviewed: boolean;
+  emergency: boolean;
   rollbackOf: number | null;
   draftRevision: number | null;
   publishedAt: string;
@@ -326,8 +333,11 @@ export interface ConfigRelease {
   publishedByYou: boolean;
 }
 export interface AdminConfigView {
-  draft: { config: AppConfigPayload; revision: number; updatedAt: string | null; changedSinceRelease: string[] };
+  draft: { config: AppConfigPayload; targets: ConfigTargets; revision: number; updatedAt: string | null; changedSinceRelease: string[] };
   current: ConfigRelease | null;
+  staged: ConfigRelease | null;
+  stagedIsDraft: boolean;
+  stageBlockers: string[];
   releases: ConfigRelease[];
   publishBlockers: string[];
   defaults: AppConfigPayload;
@@ -673,6 +683,8 @@ export function createBff(deps: BffDeps) {
     /** PATCH /bff/admin/config/draft (If-Match), POST …/publish (If-Match) and …/releases/{n}/rollback; the API checks roles. */
     configDraft: (req: Request) => timed(req, '/bff/admin/config/draft', (requestId) => adminProxy(req, requestId, '/v1/admin/config/draft', true)),
     configPublish: (req: Request) => timed(req, '/bff/admin/config/publish', (requestId) => adminProxy(req, requestId, '/v1/admin/config/publish', true)),
+    /** POST /bff/admin/config/stage (If-Match): the draft goes to the staging channel first (Doc 17). */
+    configStage: (req: Request) => timed(req, '/bff/admin/config/stage', (requestId) => adminProxy(req, requestId, '/v1/admin/config/stage', true)),
     configRollback: (req: Request, release: string) =>
       timed(req, '/bff/admin/config/releases/:release/rollback', async (requestId) =>
         /^[1-9]\d{0,14}$/.test(release) ? adminProxy(req, requestId, `/v1/admin/config/releases/${release}/rollback`, true) : notFound(requestId),

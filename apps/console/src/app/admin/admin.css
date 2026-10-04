@@ -862,3 +862,5 @@
   .adm .cf-cols, .t-broadcast-rack .cf-rack, .t-daylight-bento .cf-bento { grid-template-columns: 1fr; }
   .adm .cf-builds { grid-template-columns: 1fr; }
 }
+.adm .cf-targets { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.adm .cf-target { display: flex; flex-direction: column; gap: 6px; }
