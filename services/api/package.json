@@ -14,7 +14,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "jest --runInBand",
     "staff": "node dist/staff/staff-cli.js",
-    "config-key": "node dist/app-config/config-key-cli.js"
+    "config-key": "node dist/app-config/config-key-cli.js",
+    "restore-reconcile": "node dist/account/restore-reconcile-cli.js"
   },
   "dependencies": {
     "@nestjs/common": "11.2.7",

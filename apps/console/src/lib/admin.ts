@@ -275,6 +275,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'audit.export': 'ส่งออกประวัติ',
   'account.export': 'ผู้ใช้ดาวน์โหลดข้อมูล',
   'account.delete_requested': 'ผู้ใช้ขอลบบัญชี',
+  'account.restore_repurge': 'ลบบัญชีซ้ำหลังกู้ข้อมูล',
   'account.deleted': 'ลบข้อมูลบัญชีเสร็จ',
   'job.retry': 'สั่งงานเบื้องหลังซ้ำ',
   'user.lookup': 'เปิดดูข้อมูลผู้ใช้',

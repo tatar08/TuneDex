@@ -57,7 +57,10 @@ Doc 17 targets: RPO 15 minutes, RTO 4 hours after an authorised restore, backups
 - **Restore drill:** `ADMIN_DATABASE_URL=<scratch server>/postgres ./restore-drill.sh <dump>` restores into a throwaway database. It then reports the time taken, the latest migration, row counts for the main tables, that the audit table is still append-only, and how many accounts are waiting for deletion. Afterwards it drops the database. Keep each drill's output as evidence.
 - **Real restore:** stop the API (the deletion and retention jobs run inside it), restore, run migrations, then start the API.
   - Accounts that were mid-deletion resume on their own.
-  - **Known gap:** accounts whose deletion finished *after* the backup was taken come back with their data, while their Keycloak user is already gone.
-  - Until a re-purge step exists, list active users whose Keycloak user returns 404 (`GET /admin/realms/tunedeck/users/<subject>`) and delete those accounts again before reopening.
+  - Accounts whose deletion finished *after* the backup was taken come back with their data, while their Keycloak user is already gone. Before reopening, run the reconcile tool with the API's environment:
+    - `docker compose run --rm api node dist/account/restore-reconcile-cli.js` (or `npm run restore-reconcile` in `services/api`) lists the accounts whose Keycloak user no longer exists, and changes nothing.
+    - Add `--apply --by <you> --reason "<why>"` to queue them for deletion again. They are locked out and their devices signed out at once, each one is audited as `account.restore_repurge`, and the API's deletion queue finishes the purge.
+    - If any Keycloak lookup fails, nothing changes. If more than 5% of accounts (and more than 3) look deleted, `--apply` stops unless you add `--allow-many`, because that usually means the database and Keycloak belong to different environments.
+  - The reverse case is not covered: a Keycloak restored to an *older* point than the database still has users the app already deleted. Restore both from the same point in time.
 
 Neither script prints connection strings. Both need `pg_dump`/`pg_restore` 16 or newer.
