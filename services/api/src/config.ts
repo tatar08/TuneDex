@@ -30,6 +30,11 @@ export interface AppConfig {
    * apps pin its public key; dev without one signs with a throwaway key per start.
    */
   configSigningKey: string | null;
+  /**
+   * Daily removal of audit records older than 180 days (Doc 17 proposed retention). Off unless
+   * AUDIT_RETENTION_ENABLED=true, because the retention period needs the owner's confirmation first.
+   */
+  auditRetentionEnabled: boolean;
   /** Scheduled stream checks of published stations (Doc 17). Off unless STATION_CHECK_ENABLED=true. */
   stationCheck: {
     enabled: boolean;
@@ -81,6 +86,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     rateLimit: loadRateLimit(env),
     idpAdmin: loadIdpAdmin(env, appEnv, required(env, 'OIDC_ISSUER')),
     configSigningKey: loadConfigSigningKey(env, appEnv),
+    auditRetentionEnabled: flag(env, 'AUDIT_RETENTION_ENABLED'),
     stationCheck: loadStationCheck(env),
   };
 }
@@ -116,6 +122,12 @@ function loadConfigSigningKey(env: NodeJS.ProcessEnv, appEnv: AppEnv): string | 
   const pem = raw.replace(/\\n/g, '\n');
   if (!/^-----BEGIN PRIVATE KEY-----\n[\s\S]+\n-----END PRIVATE KEY-----$/.test(pem)) throw new Error('CONFIG_SIGNING_KEY must be a PKCS#8 PEM private key');
   return pem;
+}
+
+function flag(env: NodeJS.ProcessEnv, key: string): boolean {
+  const v = (env[key] ?? 'false').trim();
+  if (v !== 'true' && v !== 'false') throw new Error(`${key} must be true or false`);
+  return v === 'true';
 }
 
 function wholeNumber(env: NodeJS.ProcessEnv, key: string, fallback: number, min: number, max: number): number {

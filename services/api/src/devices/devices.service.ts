@@ -12,6 +12,8 @@ export interface DeviceView {
   appliedSettingsRevision: number;
   /** Server-observed time of the device's last report; not a location or listening signal. */
   lastSeenAt: string;
+  /** When the device last finished a sync push or pull; null if it never synced. */
+  lastSyncedAt: string | null;
   revokedAt: string | null;
 }
 
@@ -22,10 +24,11 @@ interface Row {
   app_build: string;
   applied_settings_revision: string;
   last_seen_at: Date;
+  last_synced_at: Date | null;
   revoked_at: Date | null;
 }
 
-const COLUMNS = 'id, platform, os_major, app_build, applied_settings_revision, last_seen_at, revoked_at';
+const COLUMNS = 'id, platform, os_major, app_build, applied_settings_revision, last_seen_at, last_synced_at, revoked_at';
 
 const toView = (r: Row): DeviceView => ({
   id: r.id,
@@ -34,6 +37,7 @@ const toView = (r: Row): DeviceView => ({
   appBuild: r.app_build,
   appliedSettingsRevision: Number(r.applied_settings_revision),
   lastSeenAt: r.last_seen_at.toISOString(),
+  lastSyncedAt: r.last_synced_at ? r.last_synced_at.toISOString() : null,
   revokedAt: r.revoked_at ? r.revoked_at.toISOString() : null,
 });
 

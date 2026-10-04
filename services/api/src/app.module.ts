@@ -30,6 +30,8 @@ import { StaffController, StaffGuard, StaffService } from './staff/staff';
 import { AdminStationsController, CatalogController } from './stations/stations.controller';
 import { PROBE_DEPS, StationHealthService } from './stations/station-health';
 import { StationsService } from './stations/stations.service';
+import { PUSH_MAX_BYTES, SyncController, SyncService } from './sync/sync';
+import { AuditRetentionService } from './audit/audit-retention';
 import type { ProbeDeps } from './stations/stream-probe';
 import { UsersService } from './users/users.service';
 
@@ -49,7 +51,7 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, AdminOverviewController, AdminJobsController, AdminUsersController, AdminConfigController, PublicConfigController],
+      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, AdminOverviewController, AdminJobsController, AdminUsersController, AdminConfigController, PublicConfigController, SyncController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },
@@ -68,6 +70,8 @@ export class AppModule {
         AccountService,
         IdpUsersService,
         AppConfigService,
+        SyncService,
+        AuditRetentionService,
         { provide: CONFIG_SIGNER, useValue: createConfigSigner(deps.config.configSigningKey) },
         { provide: IDP_FETCH, useValue: deps.idpFetch ?? ((input: Parameters<IdpFetch>[0], init?: Parameters<IdpFetch>[1]) => fetch(input, init)) },
         OverviewService,
@@ -94,6 +98,8 @@ export function configureApp(app: NestExpressApplication): INestApplication {
   app.use(requestContext(logger));
   // Diagnostic batches may be up to 128 KiB (Doc 17); every other body stays at 16 KiB. Registered first, so it wins for that path.
   app.use('/v1/diagnostics/batches', json({ limit: DIAGNOSTIC_LIMITS.batchBytes }));
+  // A full sync push (100 changes) is about 25 KiB.
+  app.use('/v1/sync/push', json({ limit: PUSH_MAX_BYTES }));
   app.useBodyParser('json', { limit: '16kb' });
   app.useGlobalFilters(new ErrorEnvelopeFilter(logger));
   return app;

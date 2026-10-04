@@ -55,6 +55,7 @@ export function testConfig(databaseUrl: string): AppConfig {
     databaseUrl,
     oidc: { issuer: ISSUER, audience: AUDIENCE, jwksUri: 'https://idp.test/unused', algorithms: ['RS256'] },
     rateLimit: { enabled: false, readsPerMinute: 120, writesPerMinute: 30, catalogPerMinutePerIp: 60, trustProxyHops: 0 },
+    auditRetentionEnabled: false,
     stationCheck: { enabled: false, intervalMinutes: 15, region: 'test-region' },
     configSigningKey: null,
     idpAdmin: {
