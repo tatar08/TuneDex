@@ -643,6 +643,13 @@ export function createBff(deps: BffDeps) {
       return res.ok ? { status: 200, view: (await res.json()) as SettingsView } : { status: res.status };
     },
 
+    /** Server-side read of GET /v1/me: the account id customers give support. Null means sign in again. */
+    async loadMe(ctx: SessionContext): Promise<{ status: number; userId?: string } | null> {
+      const res = await callApi(ctx, '/v1/me', { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, userId: ((await res.json()) as { userId: string }).userId } : { status: res.status };
+    },
+
     /** Server-side read of the account's devices for the settings page. Null means the user must sign in again. */
     async loadDevices(ctx: SessionContext): Promise<{ status: number; view?: DevicesView } | null> {
       const res = await callApi(ctx, '/v1/me/devices', { method: 'GET' }, `web_${randomUUID()}`);

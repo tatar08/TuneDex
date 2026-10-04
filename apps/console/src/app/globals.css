@@ -60,3 +60,6 @@ a.btn { display: inline-block; text-decoration: none; }
 .confirm-delete { display: grid; gap: 12px; margin-top: 8px; }
 .confirm-delete label { display: flex; gap: 8px; align-items: center; }
 .confirm-delete .row { display: flex; gap: 10px; flex-wrap: wrap; }
+.support-code { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.support-code code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; overflow-wrap: anywhere; user-select: all; }
+.btn.small { padding: 3px 10px; font-size: 12.5px; }

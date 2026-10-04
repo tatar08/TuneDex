@@ -13,6 +13,7 @@ NestJS + PostgreSQL backend. This folder started as COL-01 from [Doc 19](../../D
 | `GET /v1/me/devices` | The account's devices plus the current `settingsRevision`, active first, most recently seen first |
 | `PUT /v1/me/devices/{deviceId}` | The phone app's check-in: registers the device on first call, then records platform, OS major, app build and the settings revision it has applied |
 | `DELETE /v1/me/devices/{deviceId}/session` | Revokes a device. Needs a sign-in within the last 5 minutes (`auth_time`), else 401 `REAUTH_REQUIRED`. The first revoke is audited as `device.revoke` |
+| `GET /v1/me` | Signed-in user. `{ userId, status, createdAt }`: the account code customers give support (looked up in `/admin/users`). No subject, email or roles |
 | `GET /v1/me/export` | The account's own data (settings, devices, diagnostics, staff roles) as a JSON download. Built per request, nothing stored; audited `account.export` |
 | `DELETE /v1/me/account` | Starts account deletion (sign-in within 5 minutes, else 401 `REAUTH_REQUIRED`). 202 with a ticket. The account is locked (403 `ACCOUNT_DELETING`) and every device signed out at once; a purge removes settings, devices, diagnostics and staff roles and leaves a pseudonymous `users` tombstone with the OIDC subject cut. Failed purges retry every 10 minutes. Tokens from sign-ins made before the request are refused; a later sign-in starts a new, empty account |
 | `GET /v1/account-deletions/{ticket}` | Public progress: `deleting`, `completed` or `failed`, with the 30-day deadline. Rate limited per client address |

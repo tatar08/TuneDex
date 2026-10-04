@@ -152,6 +152,12 @@ test('signing a phone out from the web asks for a fresh sign-in first', async ({
   await expect(page.getByRole('heading', { name: 'อุปกรณ์', exact: true })).toBeVisible();
   const devices = page.getByTestId('device');
   await expect(devices).toHaveCount(2);
+  // Codes the customer can read out to support: the account id and each device id.
+  const me = (await (await fetch(`${api.url}/v1/me`, { headers: { authorization: `Bearer ${token}` } })).json()) as { userId: string };
+  await expect(page.getByRole('heading', { name: 'รหัสสำหรับติดต่อซัพพอร์ต' })).toBeVisible();
+  await expect(page.locator('.support-code code').filter({ hasText: me.userId })).toBeVisible();
+  await expect(devices.filter({ hasText: 'Android 15' }).locator('code')).toHaveText(lost);
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/devices-support-code.png`, fullPage: true });
 
   const android = devices.filter({ hasText: 'Android 15' });
   await android.getByRole('button', { name: 'ออกจากระบบเครื่องนี้' }).click();

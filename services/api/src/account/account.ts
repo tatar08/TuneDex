@@ -67,6 +67,11 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
     await this.working?.catch(() => undefined);
   }
 
+  async me(userId: string): Promise<{ userId: string; status: string; createdAt: string }> {
+    const [u] = await this.db.query<{ id: string; status: string; created_at: Date }>('SELECT id, status, created_at FROM users WHERE id = $1', [userId]);
+    return { userId: u.id, status: u.status, createdAt: u.created_at.toISOString() };
+  }
+
   /** Everything the service holds about the account, as one JSON document. Built on request; nothing is stored. */
   async export(userId: string, requestId?: string) {
     const [account] = await this.db.query<{ id: string; created_at: Date; locale: string | null }>(
@@ -271,6 +276,16 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
 @UseGuards(AuthGuard)
 export class MyAccountController {
   constructor(private readonly account: AccountService) {}
+
+  /**
+   * Who am I: the account id the customer reads out to support (Doc 17 /admin/users looks it up), plus its
+   * state. Nothing else: no subject, email or roles.
+   */
+  @Get()
+  async me(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    res.setHeader('Cache-Control', 'no-store');
+    return this.account.me(req.actor!.userId);
+  }
 
   /** Doc 17 export: a JSON download of the account's own data. */
   @Get('export')

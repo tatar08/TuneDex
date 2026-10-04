@@ -5,6 +5,31 @@ import type { DeviceView } from '@/lib/bff';
 import { Lang, strings } from '@/lib/i18n';
 import { AppNav } from '../AppNav';
 
+/** A code with a copy button. Copying can be refused by the browser; the code stays selectable either way. */
+function SupportCode({ label, code, lang }: { label: string; code: string; lang: Lang }) {
+  const t = strings(lang);
+  const [copied, setCopied] = useState(false);
+  return (
+    <span className="support-code">
+      <span className="status">{label}</span>
+      <code>{code}</code>
+      <button
+        type="button"
+        className="btn secondary small"
+        aria-label={`${t.copy} ${label}`}
+        onClick={() =>
+          navigator.clipboard?.writeText(code).then(
+            () => setCopied(true),
+            () => undefined,
+          )
+        }
+      >
+        {copied ? t.copied : t.copy}
+      </button>
+    </span>
+  );
+}
+
 type Problem = 'reauth' | 'reauthFailed' | 'expired' | 'rateLimited' | 'unavailable' | 'gone';
 
 /** Times read in Thailand time whatever the browser's zone, like the settings page. */
@@ -15,6 +40,7 @@ export function DevicesView({
   lang,
   csrfToken,
   devices: initial,
+  accountId,
   pendingRevoke,
   reauthFailed,
 }: {
@@ -22,6 +48,8 @@ export function DevicesView({
   csrfToken: string;
   /** Null when the list could not be loaded. */
   devices: DeviceView[] | null;
+  /** The account id customers read out to support (Doc 17 /admin/users); null if it could not be loaded. */
+  accountId: string | null;
   /** A device the user chose to sign out before being sent to re-authenticate. */
   pendingRevoke: string | null;
   reauthFailed: boolean;
@@ -132,11 +160,20 @@ export function DevicesView({
                   </button>
                 )}
                 <span className="status">{t.deviceSeen(d.appBuild, fmt.format(new Date(d.lastSeenAt)))}</span>
+                <SupportCode label={t.supportDeviceId} code={d.id} lang={lang} />
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      {accountId && (
+        <section className="device" aria-labelledby="support-title">
+          <h2 id="support-title">{t.supportTitle}</h2>
+          <p className="status">{t.supportLede}</p>
+          <SupportCode label={t.supportAccountId} code={accountId} lang={lang} />
+        </section>
+      )}
 
       {revoked.length > 0 && (
         <section className="device" aria-labelledby="revoked-title">

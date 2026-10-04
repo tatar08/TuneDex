@@ -45,6 +45,14 @@ describe('account export and deletion', () => {
     await db.drop();
   });
 
+  it('tells the signed-in customer their account id for support, and nothing more', async () => {
+    expect((await http().get('/v1/me')).status).toBe(401);
+    const res = await http().get('/v1/me').set(await bearer('acct-me')).expect(200);
+    const { rows: [u] } = await t.pool.query(`SELECT id FROM users WHERE oidc_subject = 'acct-me'`);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.body).toEqual({ userId: u.id, status: 'active', createdAt: expect.any(String) });
+  });
+
   it('exports the account’s own data as a JSON download, and audits it', async () => {
     const device = await seed('acct-export');
     await seed('acct-export-other');

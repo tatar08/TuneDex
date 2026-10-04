@@ -16,11 +16,12 @@ export default async function DevicesPage({ searchParams }: { searchParams: Prom
   const ctx = await bff.sessionFromCookie(jar.getAll().map((c) => `${c.name}=${c.value}`).join('; '));
   if (!ctx) redirect(hadCookie ? '/login?expired=1' : '/login?returnTo=/app/devices');
 
-  const [settings, devices] = await Promise.all([
+  const [settings, devices, me] = await Promise.all([
     bff.loadSettings(ctx).catch(() => ({ status: 503 }) as const),
     bff.loadDevices(ctx).catch(() => ({ status: 503 }) as const),
+    bff.loadMe(ctx).catch(() => ({ status: 503 }) as const),
   ]);
-  if (settings === null || devices === null) redirect('/login?expired=1');
+  if (settings === null || devices === null || me === null) redirect('/login?expired=1');
   const lang: Lang = 'view' in settings && settings.view?.settings.language === 'en' ? 'en' : 'th';
   const sp = await searchParams;
   // After a re-authentication the user lands back here with the device they were signing out still chosen.
@@ -30,6 +31,7 @@ export default async function DevicesPage({ searchParams }: { searchParams: Prom
       lang={lang}
       csrfToken={ctx.session.csrfToken}
       devices={'view' in devices && devices.view ? devices.view.devices : null}
+      accountId={'userId' in me ? (me.userId ?? null) : null}
       pendingRevoke={revoke}
       reauthFailed={sp.reauth === 'failed'}
     />
