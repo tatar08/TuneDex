@@ -4,6 +4,11 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { json } from 'express';
 import type { JWTVerifyGetKey } from 'jose';
 import type { Pool } from 'pg';
+import { AccountDeletionStatusController, AccountService, MyAccountController } from './account/account';
+import { IDP_FETCH, IdpFetch, IdpUsersService } from './account/idp-users';
+import { AdminJobsController, JobsService } from './jobs/jobs';
+import { AdminUsersController, AdminUsersService } from './users/admin-users';
+import { AdminOverviewController, OverviewService } from './overview/overview';
 import { AdminAuditController, AuditSearchService } from './audit/audit-search';
 import { AuthGuard, KEY_RESOLVER } from './auth/auth.guard';
 import { ErrorEnvelopeFilter } from './common/error.filter';
@@ -34,6 +39,8 @@ export interface AppDeps {
   logWriter?: LogWriter;
   /** Tests only: fake DNS/HTTPS for the stream checker. Production uses the real ones. */
   probeDeps?: ProbeDeps;
+  /** Tests only: fake Keycloak admin API. Production uses the global fetch. */
+  idpFetch?: IdpFetch;
 }
 
 @Module({})
@@ -41,7 +48,7 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController],
+      controllers: [HealthController, SettingsController, DevicesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, AdminOverviewController, AdminJobsController, AdminUsersController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },
@@ -57,6 +64,12 @@ export class AppModule {
         SettingsService,
         DevicesService,
         DiagnosticsService,
+        AccountService,
+        IdpUsersService,
+        { provide: IDP_FETCH, useValue: deps.idpFetch ?? ((input: Parameters<IdpFetch>[0], init?: Parameters<IdpFetch>[1]) => fetch(input, init)) },
+        OverviewService,
+        JobsService,
+        AdminUsersService,
         StaffService,
         StationsService,
         StationHealthService,

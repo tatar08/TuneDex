@@ -9,6 +9,7 @@ test.beforeAll(async () => {
   stack.api.staff('grant', 'e2e-admin', 'admin', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-ops', 'operator', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-auditor', 'auditor', '--by', 'e2e', '--reason', 'test');
+  stack.api.staff('grant', 'e2e-support', 'support', '--by', 'e2e', '--reason', 'test');
 });
 
 test.afterAll(async () => {
@@ -157,10 +158,11 @@ test('accounts without a staff role see a plain refusal, and signed-out visitors
 
 test('operators search redacted API logs; editors cannot', async ({ browser }) => {
   const ops = await signInAs(browser, 'e2e-ops', '/admin/logs');
-  // Operators have no catalog role, so the menu offers only the log page and /admin lands there.
+  // Operators have no catalog role, so the menu offers no station page and /admin lands on the overview.
   await expect(ops.getByRole('link', { name: 'สถานีวิทยุ' })).toHaveCount(0);
   await ops.goto(`${stack.base}/admin`);
-  await expect(ops).toHaveURL(`${stack.base}/admin/logs`);
+  await expect(ops).toHaveURL(`${stack.base}/admin/overview`);
+  await ops.goto(`${stack.base}/admin/logs`);
   await expect(ops.getByRole('heading', { name: 'บันทึกระบบ' })).toBeVisible();
 
   // Make a failing request with a known requestId and a secret in the URL, then find it.
@@ -261,8 +263,24 @@ test('the audit page has its own layout in each theme', async ({ browser }) => {
     await picker.selectOption(theme);
     await expect(page.locator(selector).first()).toBeVisible();
     await expect(page.getByRole('link', { name: 'ประวัติการแก้ไข' }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'ส่งออก CSV' })).toBeVisible();
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/audit-${theme}.png`, fullPage: true });
   }
+
+  // Export the current search with a reason; the export lands in the trail with that reason.
+  await page.getByRole('button', { name: 'ส่งออก CSV' }).click();
+  const reason = page.getByLabel('เหตุผลในการส่งออก (จะถูกบันทึกไว้)');
+  await expect(reason).toBeFocused();
+  await expect(page.getByRole('button', { name: 'ดาวน์โหลด CSV' })).toBeDisabled();
+  await reason.fill('ตรวจสอบรายไตรมาสให้เจ้าของ');
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/audit-export.png`, fullPage: true });
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'ดาวน์โหลด CSV' }).click()]);
+  expect(download.suggestedFilename()).toMatch(/^tunedeck-audit-\d{4}-\d{2}-\d{2}\.csv$/);
+  const csv = await (await import('node:fs/promises')).readFile((await download.path())!, 'utf8');
+  expect(csv.replace(/^\uFEFF/, '').split('\r\n')[0]).toBe('id,occurredAt,actor,actorSubject,action,targetType,targetId,targetLabel,reason,changes,requestId');
+  await expect(page.getByRole('status').filter({ hasText: 'ถูกบันทึกพร้อมเหตุผล' })).toBeVisible();
+  const logged = (await stack.api.sql(`SELECT reason FROM audit_events WHERE action = 'audit.export'`)) as { rows: { reason: string }[] };
+  expect(logged.rows.map((r) => r.reason)).toEqual(['ตรวจสอบรายไตรมาสให้เจ้าของ']);
 });
 
 /** Scheduled check results, as the API's checker would write them (it is off in tests). */
@@ -316,4 +334,131 @@ test('stream health shows in every theme, and staff can check a stream now', asy
   await expect(panel).toContainText('ประวัติการตรวจ 4 ครั้งล่าสุด');
   await panel.getByRole('button', { name: 'ตรวจตอนนี้' }).click();
   await expect(panel.getByRole('status')).toHaveText('เพิ่งตรวจไปไม่ถึงนาที รอสักครู่แล้วลองใหม่');
+});
+
+test('operators see the overview in every theme; editors cannot', async ({ browser }) => {
+  const page = await signInAs(browser, 'e2e-ops', '/admin/overview');
+  // Every request so far went through the API's own logger (flushed to the database each second).
+  await expect(async () => {
+    await page.reload();
+    await expect(page.locator('.ov-chart svg rect.ok').first()).toBeAttached({ timeout: 500 });
+  }).toPass({ timeout: 10_000 });
+  await expect(page.locator('.ov-chart table tbody tr')).toHaveCount(24);
+  await page.getByRole('link', { name: '1 ชั่วโมง' }).first().click();
+  await expect(page).toHaveURL(`${stack.base}/admin/overview?window=1h`);
+  await expect(page.locator('.ov-chart table tbody tr')).toHaveCount(12);
+
+  const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
+  const layouts: Record<string, string> = {
+    'control-room': '.t-control-room .cr-page .ov-kpis + .ov-grid .ov-chart',
+    'broadcast-rack': '.t-broadcast-rack .ov-lamps + .ov-meters [role=meter]',
+    'daylight-bento': '.t-daylight-bento .ov-bento .b-chart .ov-chart',
+    workbench: '.t-workbench .split .ov-it',
+    minimal: '.t-minimal .fv-logstats + .fv-card .ov-chart',
+  };
+  for (const [theme, selector] of Object.entries(layouts)) {
+    await picker.selectOption(theme);
+    await expect(page.locator(selector).first()).toBeVisible();
+    if (theme === 'workbench') await page.locator('.ov-it .lg-pick', { hasText: 'คำขอ API' }).click();
+    // Hovering a bar shows its numbers.
+    await page.locator('.ov-chart svg g').last().hover();
+    await expect(page.locator('.ov-tip')).toContainText('คำขอ');
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/overview-${theme}.png`, fullPage: true });
+    if (theme === 'workbench') {
+      await page.locator('.ov-it .lg-pick', { hasText: 'สุขภาพสถานี' }).click();
+      await expect(page.locator('.det .ov-dl dt', { hasText: 'น่าสงสัย' })).toBeVisible();
+    }
+  }
+
+  const editor = await signInAs(browser, 'e2e-editor');
+  await expect(editor.getByRole('link', { name: 'ภาพรวมระบบ' })).toHaveCount(0);
+  await editor.goto(`${stack.base}/admin/overview`);
+  await expect(editor.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูภาพรวมระบบ');
+});
+
+test('operators retry a failed account deletion with a reason, in every theme', async ({ browser }) => {
+  // A deletion whose last background attempt failed five minutes ago (the purge itself works in tests).
+  await stack.api.sql(
+    `WITH u AS (INSERT INTO users (oidc_subject, status) VALUES ('e2e-jobs-leaver', 'deleting') RETURNING id)
+     INSERT INTO account_deletions (ticket_hash, user_id, subject_hash, status, attempts, last_attempt_at, requested_at)
+     SELECT repeat('ab', 32), id, 's-e2e', 'failed', 3, now() - interval '5 minutes', now() - interval '2 days' FROM u`,
+  );
+  const page = await signInAs(browser, 'e2e-ops', '/admin/jobs');
+  const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
+  const layouts: Record<string, string> = {
+    'control-room': '.t-control-room .cr-page .jb-kpis + .pn .jb-table',
+    'broadcast-rack': '.t-broadcast-rack .jb-rack li.jb-failed',
+    'daylight-bento': '.t-daylight-bento .jb-bento .b-job',
+    workbench: '.t-workbench .split .jb-it.sel',
+    minimal: '.t-minimal .fv-logstats + .fv-card .jb-list',
+  };
+  for (const [theme, selector] of Object.entries(layouts)) {
+    await picker.selectOption(theme);
+    await expect(page.locator(selector).first()).toBeVisible();
+    await expect(page.getByText('ไม่สำเร็จ กำลังลองใหม่อัตโนมัติ').first()).toBeVisible();
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/jobs-${theme}.png`, fullPage: true });
+  }
+
+  await picker.selectOption('minimal');
+  await page.getByRole('button', { name: 'ลองใหม่ตอนนี้' }).click();
+  await page.getByLabel('เหตุผล (จะถูกบันทึกไว้ในประวัติ)').fill('ลองใหม่หลังแก้ฐานข้อมูลแล้ว');
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/jobs-retry.png`, fullPage: true });
+  await page.getByRole('button', { name: 'ลองใหม่', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'ลบข้อมูลบัญชีเสร็จแล้ว' })).toBeVisible();
+  await expect(page.locator('.jb-empty')).toHaveText('ไม่มีงานค้าง');
+  const logged = (await stack.api.sql(`SELECT reason, changes->>'result' AS result FROM audit_events WHERE action = 'job.retry'`)) as { rows: { reason: string; result: string }[] };
+  expect(logged.rows).toEqual([{ reason: 'ลองใหม่หลังแก้ฐานข้อมูลแล้ว', result: 'completed' }]);
+
+  const editor = await signInAs(browser, 'e2e-editor');
+  await expect(editor.getByRole('link', { name: 'งานเบื้องหลัง' })).toHaveCount(0);
+  await editor.goto(`${stack.base}/admin/jobs`);
+  await expect(editor.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูงานเบื้องหลัง');
+});
+
+test('support looks up a customer by email or device id with a reason, in every theme', async ({ browser }) => {
+  // A customer whose tablet has not picked up the latest settings yet.
+  await stack.api.sql(
+    `WITH u AS (INSERT INTO users (id, oidc_subject, email, email_verified) VALUES ('6f1d2c3b-0000-4000-8000-00000000c0de', 'e2e-support-case', 'nok@example.test', true) RETURNING id),
+          p AS (INSERT INTO account_preferences (owner_id, schema_version, revision, value) SELECT id, 1, 3, '{}' FROM u)
+     INSERT INTO devices (user_id, id, platform, os_major, app_build, applied_settings_revision, last_seen_at)
+     SELECT u.id, d.id::uuid, d.platform, d.os, d.build, d.rev, now() - d.ago FROM u,
+       (VALUES ('11111111-2222-4333-8444-555555555555', 'ios', 18, '1.0.0+42', 3, interval '5 minutes'),
+               ('99999999-8888-4777-8666-555555555555', 'android', 14, '1.0.0+40', 1, interval '3 days')) d(id, platform, os, build, rev, ago)`,
+  );
+  const page = await signInAs(browser, 'e2e-support', '/admin/users');
+  await expect(page.getByRole('link', { name: 'บันทึกระบบ' })).toHaveCount(0);
+  await page.goto(`${stack.base}/admin`);
+  await expect(page).toHaveURL(`${stack.base}/admin/users`);
+
+  const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
+  const layouts: Record<string, string> = {
+    'control-room': '.t-control-room .cr-page .us-kpis + .ov-grid .us-table',
+    'broadcast-rack': '.t-broadcast-rack .ov-lamps + .us-rack li',
+    'daylight-bento': '.t-daylight-bento .us-bento .b-device',
+    workbench: '.t-workbench .split .us-it.sel',
+    minimal: '.t-minimal .fv-logstats + .fv-card .us-table',
+  };
+  for (const [theme, selector] of Object.entries(layouts)) {
+    await picker.selectOption(theme);
+    await page.getByLabel('อีเมล รหัสผู้ใช้ หรือรหัสเครื่อง').fill(theme === 'minimal' ? 'NOK@example.test' : '99999999-8888-4777-8666-555555555555');
+    await page.getByLabel('เหตุผล (จะถูกบันทึกไว้ในประวัติ)').fill('ลูกค้าแจ้งว่าแท็บเล็ตไม่ได้ธีมใหม่');
+    await page.getByRole('button', { name: 'ค้นหา' }).click();
+    await expect(page.locator(selector).first()).toBeVisible();
+    if (theme !== 'workbench') await expect(page.getByText('ยังไม่ได้รับการตั้งค่าล่าสุด (ใช้ r1 จาก r3)').first()).toBeVisible();
+    await expect(page.getByText('nok@example.test').first()).toBeVisible();
+    await expect(page.locator('body')).not.toContainText('e2e-support-case');
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/users-${theme}.png`, fullPage: true });
+  }
+  await page.getByLabel('อีเมล รหัสผู้ใช้ หรือรหัสเครื่อง').fill('00000000-0000-4000-8000-000000000000');
+  await page.getByRole('button', { name: 'ค้นหา' }).click();
+  await expect(page.locator('.us-problem')).toContainText('ไม่พบบัญชี');
+
+  const logged = (await stack.api.sql(`SELECT target_id, changes->>'found' AS found FROM audit_events WHERE action = 'user.lookup' ORDER BY id`)) as { rows: { target_id: string; found: string }[] };
+  expect(logged.rows).toHaveLength(6);
+  expect(logged.rows.at(-1)).toEqual({ target_id: 'none', found: 'false' });
+
+  const ops = await signInAs(browser, 'e2e-ops', '/admin/overview');
+  await expect(ops.getByRole('link', { name: 'ผู้ใช้' })).toHaveCount(0);
+  await ops.goto(`${stack.base}/admin/users`);
+  await expect(ops.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูข้อมูลผู้ใช้');
 });

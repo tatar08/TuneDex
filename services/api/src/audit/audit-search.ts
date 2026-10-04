@@ -1,4 +1,4 @@
-import { Controller, Get, HttpStatus, Injectable, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Injectable, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { ApiError } from '../common/api-error';
@@ -11,6 +11,8 @@ const DEFAULT_WINDOW_MS = 7 * 24 * 3600 * 1000;
 const MAX_LIMIT = 200;
 /** Searching logs or the audit trail is itself recorded; these rows are hidden unless asked for. */
 const READ_ACTIONS = ['logs.search', 'audit.search'];
+/** Doc 17: exports hold at most 10k rows per job. */
+export const EXPORT_MAX_ROWS = 10_000;
 
 export interface AuditQuery {
   from: Date;
@@ -96,6 +98,47 @@ export class AuditSearchService {
 
   /** Reads the audit trail and records the read itself (Doc 17: privileged access logged), in one transaction. */
   async search(actor: { userId: string; requestId: string }, q: AuditQuery): Promise<{ events: AuditRow[]; nextCursor: string | null }> {
+    return this.db.transaction(async (query) => {
+      await writeAudit(query, {
+        actor: `user:${actor.userId}`,
+        action: 'audit.search',
+        targetType: 'audit_events',
+        targetId: '*',
+        changes: { ...filtersOf(q), ...(q.cursor && { page: 'next' }) },
+        requestId: actor.requestId,
+      });
+      const rows = await this.select(query, q, q.limit + 1);
+      const page = rows.slice(0, q.limit);
+      const last = page[page.length - 1];
+      return {
+        events: page,
+        nextCursor: rows.length > q.limit ? Buffer.from(`${last.occurredAt}|${last.id}`).toString('base64url') : null,
+      };
+    });
+  }
+
+  /**
+   * Doc 17 audit export: up to 10,000 rows as CSV, with a stated reason that is itself audited (with the filters
+   * and row count) in the same transaction. A search matching more rows is refused so it can be narrowed.
+   */
+  async export(actor: { userId: string; requestId: string }, q: AuditQuery, reason: string): Promise<{ csv: string; rows: number }> {
+    return this.db.transaction(async (query) => {
+      const rows = await this.select(query, { ...q, cursor: undefined }, EXPORT_MAX_ROWS + 1);
+      if (rows.length > EXPORT_MAX_ROWS) throw bad('from', 'too_many_rows');
+      await writeAudit(query, {
+        actor: `user:${actor.userId}`,
+        action: 'audit.export',
+        targetType: 'audit_events',
+        targetId: '*',
+        reason,
+        changes: { ...filtersOf(q), rows: rows.length },
+        requestId: actor.requestId,
+      });
+      return { csv: toCsv(rows), rows: rows.length };
+    });
+  }
+
+  private async select(query: Database['query'], q: AuditQuery, limit: number): Promise<AuditRow[]> {
     const where = ['a.occurred_at >= $1', 'a.occurred_at < $2'];
     const params: unknown[] = [q.from.toISOString(), q.to.toISOString()];
     const add = (sql: string, v: unknown) => {
@@ -115,27 +158,8 @@ export class AuditSearchService {
       params.push(q.cursor.at, q.cursor.id);
       where.push(`(a.occurred_at, a.id) < ($${params.length - 1}::timestamptz, $${params.length}::bigint)`);
     }
-    params.push(q.limit + 1);
-    return this.db.transaction(async (query) => {
-      await writeAudit(query, {
-        actor: `user:${actor.userId}`,
-        action: 'audit.search',
-        targetType: 'audit_events',
-        targetId: '*',
-        changes: {
-          from: q.from.toISOString(),
-          to: q.to.toISOString(),
-          ...(q.actor && { actor: q.actor }),
-          ...(q.action && { action: q.action }),
-          ...(q.targetType && { targetType: q.targetType }),
-          ...(q.targetId && { targetId: q.targetId }),
-          ...(q.requestId && { requestId: q.requestId }),
-          ...(q.includeReads && { includeReads: true }),
-          ...(q.cursor && { page: 'next' }),
-        },
-        requestId: actor.requestId,
-      });
-      const rows = await query<{
+    params.push(limit);
+    const rows = await query<{
         id: string;
         occurred_at: Date;
         actor: string;
@@ -158,26 +182,56 @@ export class AuditSearchService {
           ORDER BY a.occurred_at DESC, a.id DESC LIMIT $${params.length}`,
         params,
       );
-      const page = rows.slice(0, q.limit);
-      const last = page[page.length - 1];
-      return {
-        events: page.map((r) => ({
-          id: r.id,
-          occurredAt: r.occurred_at.toISOString(),
-          actor: r.actor,
-          actorSubject: r.actor_subject,
-          action: r.action,
-          targetLabel: r.target_label,
-          targetType: r.target_type,
-          targetId: r.target_id,
-          reason: r.reason,
-          changes: r.changes,
-          requestId: r.request_id,
-        })),
-        nextCursor: rows.length > q.limit ? Buffer.from(`${last.occurred_at.toISOString()}|${last.id}`).toString('base64url') : null,
-      };
-    });
+    return rows.map((r) => ({
+      id: r.id,
+      occurredAt: r.occurred_at.toISOString(),
+      actor: r.actor,
+      actorSubject: r.actor_subject,
+      action: r.action,
+      targetLabel: r.target_label,
+      targetType: r.target_type,
+      targetId: r.target_id,
+      reason: r.reason,
+      changes: r.changes,
+      requestId: r.request_id,
+    }));
   }
+}
+
+const filtersOf = (q: AuditQuery) => ({
+  from: q.from.toISOString(),
+  to: q.to.toISOString(),
+  ...(q.actor && { actor: q.actor }),
+  ...(q.action && { action: q.action }),
+  ...(q.targetType && { targetType: q.targetType }),
+  ...(q.targetId && { targetId: q.targetId }),
+  ...(q.requestId && { requestId: q.requestId }),
+  ...(q.includeReads && { includeReads: true }),
+});
+
+const CSV_COLUMNS = ['id', 'occurredAt', 'actor', 'actorSubject', 'action', 'targetType', 'targetId', 'targetLabel', 'reason', 'changes', 'requestId'] as const;
+
+/** One CSV cell. Text a spreadsheet would run as a formula (= + - @, tab, CR) gets a leading apostrophe. */
+function cell(v: unknown): string {
+  let s = v === null || v === undefined ? '' : typeof v === 'string' ? v : JSON.stringify(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\r\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
+}
+
+/** RFC 4180 CSV with a UTF-8 BOM so Excel shows Thai text correctly. */
+export function toCsv(rows: AuditRow[]): string {
+  const lines = [CSV_COLUMNS.join(','), ...rows.map((r) => CSV_COLUMNS.map((c) => cell(r[c])).join(','))];
+  return `\uFEFF${lines.join('\r\n')}\r\n`;
+}
+
+/** The export reason: 10 to 500 characters of plain text, no control characters. */
+export function parseExportReason(body: unknown): string {
+  const reason = typeof body === 'object' && body !== null ? (body as { reason?: unknown }).reason : undefined;
+  if (typeof reason !== 'string') throw bad('reason', 'required');
+  const r = reason.trim();
+  if (r.length < 10 || r.length > 500) throw bad('reason', 'length');
+  if (/[\u0000-\u001f\u007f]/.test(r)) throw bad('reason', 'control_characters');
+  return r;
 }
 
 /** Staff audit trail (Doc 17 /admin/audit): auditors and admins read; every read is itself audited. */
@@ -191,6 +245,19 @@ export class AdminAuditController {
   async search(@Req() req: Request, @Query() q: Record<string, unknown>, @Res({ passthrough: true }) res: Response) {
     res.setHeader('Cache-Control', 'no-store');
     return this.audit.search({ userId: req.actor!.userId, requestId: req.requestId }, parseAuditQuery(q));
+  }
+
+  /** CSV download of the same search (query string), with `{ reason }` in the body. POST because it is recorded. */
+  @Post('export')
+  @HttpCode(HttpStatus.OK)
+  async export(@Req() req: Request, @Query() q: Record<string, unknown>, @Body() body: unknown, @Res({ passthrough: true }) res: Response) {
+    const query = parseAuditQuery(q);
+    const reason = parseExportReason(body);
+    const { csv } = await this.audit.export({ userId: req.actor!.userId, requestId: req.requestId }, query, reason);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="tunedeck-audit-${new Date().toISOString().slice(0, 10)}.csv"`);
+    return csv;
   }
 }
 

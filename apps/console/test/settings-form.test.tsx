@@ -44,6 +44,7 @@ describe('SettingsForm', () => {
     render(<SettingsForm initial={view(0)} devices={[]} csrfToken="csrf-1" />);
 
     await user.tab(); // settings link
+    await user.tab(); // devices link
     await user.tab(); // privacy link
     await user.tab(); // sign-out button
     await user.tab(); // theme radio group

@@ -407,3 +407,123 @@ describe('upstream failures and logging', () => {
 it('readCookie ignores lookalike cookie names', () => {
   expect(readCookie('xtd_session=a; td_session=b', 'td_session')).toBe('b');
 });
+
+describe('device sign-out with re-authentication', () => {
+  const DEVICE = '3f1c2b4a-5d6e-4f70-8a91-b2c3d4e5f607';
+  const revoke = (cookie: string, csrf: string | undefined, id = DEVICE) =>
+    bff.revokeDevice(
+      new Request(`${BASE}/bff/devices/${id}/session`, {
+        method: 'DELETE',
+        headers: { cookie, origin: BASE, ...(csrf ? { 'x-csrf-token': csrf } : {}) },
+      }),
+      id,
+    );
+  /** Plays a ?reauth=1 login through the IdP; returns the callback response. */
+  async function reauth(cookie: string, returnTo: string) {
+    const start = await bff.login(new Request(`${BASE}/auth/login?reauth=1&returnTo=${encodeURIComponent(returnTo)}`));
+    const url = new URL(start.headers.get('location')!);
+    expect(url.searchParams.get('prompt')).toBe('login');
+    expect(url.searchParams.get('max_age')).toBe('0');
+    const atIdp = await fetch(url, { redirect: 'manual' });
+    return bff.callback(new Request(atIdp.headers.get('location')!, { headers: { cookie: `${cookie}; td_login=${cookieValue(start, 'td_login')}` } }));
+  }
+  async function registerPhone(user: string) {
+    const res = await fetch(`${api.url}/v1/me/devices/${DEVICE}`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${await idp.accessTokenFor(user)}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'android', osMajor: 15, appBuild: '1.0.0+42', appliedSettingsRevision: 0 }),
+    });
+    expect(res.status).toBe(200);
+  }
+
+  it('asks for a fresh sign-in without ending the session, then signs the phone out', async () => {
+    await registerPhone('rv-alice');
+    await signIn('rv-alice');
+    idp.ageSignIn(600);
+    const stale = await signIn('rv-alice'); // the SSO session is reused, so auth_time is 10 minutes old
+    const first = await revoke(stale, await csrfFor(stale));
+    expect(first.status).toBe(401);
+    expect((await first.json()).code).toBe('REAUTH_REQUIRED');
+    expect(setCookies(first)).toEqual([]);
+    expect((await get(stale)).status).toBe(200);
+
+    const cb = await reauth(stale, `/app/devices?revoke=${DEVICE}`);
+    expect(cb.headers.get('location')).toBe(`/app/devices?revoke=${DEVICE}`);
+    const fresh = `td_session=${cookieValue(cb, 'td_session')}`;
+    expect(fresh).not.toBe(stale);
+    expect(await bff.sessionFromCookie(stale)).toBeNull();
+    const done = await revoke(fresh, await csrfFor(fresh));
+    expect(done.status).toBe(200);
+    expect((await done.json()).revokedAt).not.toBeNull();
+  });
+
+  it('refuses a re-authentication the provider answered from its old SSO session', async () => {
+    await signIn('rv-bob');
+    idp.ageSignIn(600);
+    idp.ignoreReauth(true);
+    try {
+      const stale = await signIn('rv-bob');
+      const cb = await reauth(stale, `/app/devices?revoke=${DEVICE}`);
+      expect(cb.headers.get('location')).toBe('/app/devices?reauth=failed');
+      expect(cookieValue(cb, 'td_session')).toBeUndefined();
+      expect((await get(stale)).status).toBe(200);
+    } finally {
+      idp.ignoreReauth(false);
+    }
+  });
+
+  it('needs the CSRF token and a device id', async () => {
+    const cookie = await signIn('rv-carol');
+    expect((await revoke(cookie, undefined)).status).toBe(403);
+    expect((await revoke(cookie, await csrfFor(cookie), 'not-a-device')).status).toBe(404);
+    expect((await revoke('td_session=missing', 'x')).status).toBe(401);
+  });
+});
+
+describe('account export and deletion', () => {
+  const del = (cookie: string, csrf?: string) =>
+    bff.deleteAccount(new Request(`${BASE}/bff/account`, { method: 'DELETE', headers: { cookie, origin: BASE, ...(csrf ? { 'x-csrf-token': csrf } : {}) } }));
+
+  it('downloads the export as an attachment', async () => {
+    const cookie = await signIn('acct-web-export');
+    const res = await bff.exportAccount(new Request(`${BASE}/bff/account/export`, { headers: { cookie } }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-disposition')).toMatch(/^attachment; filename="tunedeck-export-[\d-]+\.json"$/);
+    expect((await res.json()).format).toBe('tunedeck-account-export');
+  });
+
+  it('needs CSRF and a fresh sign-in, then ends the web session and hands back a ticket', async () => {
+    await signIn('acct-web-delete');
+    idp.ageSignIn(600);
+    const stale = await signIn('acct-web-delete');
+    expect((await del(stale)).status).toBe(403);
+    const first = await del(stale, await csrfFor(stale));
+    expect(first.status).toBe(401);
+    expect((await first.json()).code).toBe('REAUTH_REQUIRED');
+    expect(await bff.sessionFromCookie(stale)).not.toBeNull();
+
+    const start = await bff.login(new Request(`${BASE}/auth/login?reauth=1&returnTo=${encodeURIComponent('/app/privacy?delete=1')}`));
+    const atIdp = await fetch(start.headers.get('location')!, { redirect: 'manual' });
+    const cb = await bff.callback(new Request(atIdp.headers.get('location')!, { headers: { cookie: `${stale}; td_login=${cookieValue(start, 'td_login')}` } }));
+    expect(cb.headers.get('location')).toBe('/app/privacy?delete=1');
+    const fresh = `td_session=${cookieValue(cb, 'td_session')}`;
+
+    const res = await del(fresh, await csrfFor(fresh));
+    expect(res.status).toBe(202);
+    const { ticket, status } = await res.json();
+    expect(status).toBe('deleting');
+    expect(setCookies(res).some((c) => c.startsWith('td_session=;'))).toBe(true);
+    expect(await bff.sessionFromCookie(fresh)).toBeNull();
+
+    // Progress needs no session; the purge runs right after the request.
+    let body: { status: string } = { status: 'deleting' };
+    for (let i = 0; i < 50 && body.status === 'deleting'; i++) {
+      const s = await bff.deletionStatus(new Request(`${BASE}/bff/account-deletions/${ticket}`), ticket);
+      expect(s.status).toBe(200);
+      body = await s.json();
+      if (body.status === 'deleting') await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(body.status).toBe('completed');
+    expect((await bff.deletionStatus(new Request(`${BASE}/bff/account-deletions/x`), 'x')).status).toBe(404);
+  });
+});

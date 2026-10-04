@@ -3,8 +3,6 @@ import { ApiError } from '../common/api-error';
 
 export const PLATFORMS = ['ios', 'android'] as const;
 export const MAX_ACTIVE_DEVICES = 20;
-/** Doc 17: revoking a device needs a recent sign-in. */
-export const REAUTH_MAX_AGE_SECONDS = 300;
 
 export interface DeviceReport {
   platform: (typeof PLATFORMS)[number];

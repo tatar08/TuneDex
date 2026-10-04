@@ -62,7 +62,7 @@ describe('GET/PATCH /v1/me/settings', () => {
       await t.pool.query(`UPDATE users SET status = 'deleting' WHERE oidc_subject = 'user-deleting'`);
       const res = await http().get('/v1/me/settings').set('Authorization', `Bearer ${token}`);
       expect(res.status).toBe(403);
-      expect(res.body.code).toBe('AUTH_FORBIDDEN');
+      expect(res.body.code).toBe('ACCOUNT_DELETING');
     });
   });
 

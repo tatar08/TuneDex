@@ -1,4 +1,5 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
+import { writeAudit } from '../audit/audit';
 import { ApiError } from '../common/api-error';
 import { Database } from '../db/database';
 import { DeviceReport, MAX_ACTIVE_DEVICES } from './devices.schema';
@@ -94,13 +95,29 @@ export class DevicesService {
     return toView(rows[0]);
   }
 
-  /** Revokes one of the owner's devices. Unknown ids and other users' ids look the same: 404. */
-  async revoke(ownerId: string, deviceId: string): Promise<DeviceView> {
-    const rows = await this.db.query<Row>(
-      `UPDATE devices SET revoked_at = COALESCE(revoked_at, now()) WHERE user_id = $1 AND id = $2 RETURNING ${COLUMNS}`,
-      [ownerId, deviceId],
-    );
-    if (!rows[0]) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
-    return toView(rows[0]);
+  /**
+   * Revokes one of the owner's devices. Unknown ids and other users' ids look the same: 404.
+   * The first revoke is audited in the same transaction; repeating it changes nothing and writes nothing.
+   */
+  async revoke(ownerId: string, deviceId: string, requestId?: string): Promise<DeviceView> {
+    return this.db.transaction(async (query) => {
+      const before = await query<{ revoked_at: Date | null }>('SELECT revoked_at FROM devices WHERE user_id = $1 AND id = $2 FOR UPDATE', [ownerId, deviceId]);
+      if (!before[0]) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
+      const rows = await query<Row>(
+        `UPDATE devices SET revoked_at = COALESCE(revoked_at, now()) WHERE user_id = $1 AND id = $2 RETURNING ${COLUMNS}`,
+        [ownerId, deviceId],
+      );
+      if (!before[0].revoked_at) {
+        await writeAudit(query, {
+          actor: `user:${ownerId}`,
+          action: 'device.revoke',
+          targetType: 'device',
+          targetId: deviceId,
+          changes: { platform: rows[0].platform },
+          requestId,
+        });
+      }
+      return toView(rows[0]);
+    });
   }
 }

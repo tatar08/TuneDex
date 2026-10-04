@@ -114,6 +114,11 @@ describe('/v1/me/devices', () => {
       expect(again.status).toBe(403);
       expect(again.body.code).toBe('DEVICE_REVOKED');
       expect((await list(fresh)).body.devices[0].revokedAt).not.toBeNull();
+      // Audited once, as the owner; a repeat revoke keeps the original time and adds no second record.
+      await http().delete(`/v1/me/devices/${D1}/session`).set('Authorization', `Bearer ${fresh}`).expect(200);
+      const audit = await t.pool.query(`SELECT actor, changes FROM audit_events WHERE action = 'device.revoke' AND target_id = $1`, [D1]);
+      expect(audit.rows).toHaveLength(1);
+      expect(audit.rows[0].changes).toEqual({ platform: 'ios' });
     });
 
     it('returns 404 for a device the account does not have', async () => {

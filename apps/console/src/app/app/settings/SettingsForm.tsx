@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DeviceView, SettingsView } from '@/lib/bff';
 import { strings } from '@/lib/i18n';
+import { AppNav } from '../AppNav';
 
 type Values = SettingsView['settings'];
 type Field = keyof Values;
@@ -108,17 +109,7 @@ export function SettingsForm({
 
   return (
     <main className="shell">
-      <div className="nav">
-        <span className="brand">{t.appName}</span>
-        <a href="/app/settings" aria-current="page">
-          {t.navSettings}
-        </a>
-        <a href="/app/privacy">{t.navPrivacy}</a>
-        <form method="post" action="/auth/logout">
-          <input type="hidden" name="csrf" value={csrfToken} />
-          <button type="submit">{t.signOut}</button>
-        </form>
-      </div>
+      <AppNav lang={saved.settings.language} current="/app/settings" csrfToken={csrfToken} />
 
       <h1>{t.settingsTitle}</h1>
       <p className="lede">{t.settingsLede}</p>
@@ -210,6 +201,9 @@ export function SettingsForm({
               })}
           </ul>
         )}
+        <p>
+          <a href="/app/devices">{t.devicesManage}</a>
+        </p>
       </section>
     </main>
   );

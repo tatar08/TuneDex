@@ -127,6 +127,10 @@ export interface HealthCheck {
 
 /** Lower-case UUID: station ids and diagnostic report ids. */
 const STATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** Deletion tickets: 32 random bytes, base64url. */
+const DELETION_TICKET = /^[A-Za-z0-9_-]{43}$/;
+/** Device ids are UUIDs the phone app generates (any case; the API lower-cases them). */
+const DEVICE_ID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const STATION_ACTIONS = ['publish', 'disable', 'enable', 'check'] as const;
 export type StationAction = (typeof STATION_ACTIONS)[number];
 
@@ -167,6 +171,78 @@ export interface AuditEvent {
   changes: Record<string, unknown>;
   requestId: string | null;
 }
+export type OverviewWindow = '1h' | '24h' | '7d';
+export type IncidentCode = 'api_error_rate' | 'stations_suspect' | 'station_checker_stale' | 'account_deletion_failed' | 'account_deletion_late' | 'no_recent_traffic';
+/** GET /v1/admin/overview: aggregates only, with sample sizes and a stale flag (Doc 17). */
+export interface Overview {
+  window: { id: OverviewWindow; from: string; to: string };
+  generatedAt: string;
+  api: {
+    requests: number;
+    serverErrors: number;
+    clientErrors: number;
+    errorRate: number | null;
+    p50Ms: number | null;
+    p95Ms: number | null;
+    lastRequestAt: string | null;
+    stale: boolean;
+    buckets: { at: string; requests: number; serverErrors: number; p95Ms: number | null }[];
+    topErrors: { route: string; status: number; count: number }[];
+  };
+  stations: {
+    published: number;
+    disabled: number;
+    health: Record<'ok' | 'failing' | 'suspect' | 'unknown', number>;
+    checkerEnabled: boolean;
+    lastCheckAt: string | null;
+  };
+  queues: {
+    accountDeletions: { open: number; failed: number; oldestRequestedAt: string | null; deadlineDays: number };
+    diagnosticReports: number;
+  };
+  incidents: { code: IncidentCode; severity: 'critical' | 'warning'; count: number }[];
+}
+
+/** GET /v1/admin/jobs (Doc 17 /admin/jobs). Ids are opaque hashes; no user ids. */
+export type JobStatus = 'pending' | 'failed' | 'completed';
+export type JobFilter = 'open' | 'failed' | 'completed' | 'all';
+export interface Job {
+  id: string;
+  kind: 'account_deletion';
+  status: JobStatus;
+  requestedAt: string;
+  attempts: number;
+  lastAttemptAt: string | null;
+  completedAt: string | null;
+  deadline: string;
+}
+export interface JobsPage {
+  jobs: Job[];
+  counts: Record<JobStatus, number>;
+  truncated: boolean;
+}
+const JOB_ID = /^[0-9a-f]{64}$/;
+
+/** POST /v1/admin/users/lookup (Doc 17 support lookup): no settings values, stations or roles. */
+export interface UserSupportView {
+  matchedBy: 'user' | 'device' | 'email';
+  user: { id: string; email: string | null; emailVerified: boolean; status: 'active' | 'deleting' | 'deleted' | 'disabled'; createdAt: string; deletedAt: string | null };
+  settings: { revision: number; updatedAt: string | null };
+  devices: {
+    id: string;
+    platform: 'ios' | 'android';
+    osMajor: number;
+    appBuild: string;
+    appliedSettingsRevision: number;
+    inSync: boolean;
+    createdAt: string;
+    lastSeenAt: string;
+    revokedAt: string | null;
+  }[];
+  diagnostics: { reportsLast7Days: number };
+  deletion: { status: 'pending' | 'failed' | 'completed'; requestedAt: string } | null;
+}
+
 export interface AuditPage {
   events: AuditEvent[];
   nextCursor: string | null;
@@ -178,6 +254,8 @@ export const AUDIT_PARAMS = ['from', 'to', 'actor', 'action', 'targetType', 'tar
 export const LOG_PARAMS = ['from', 'to', 'severity', 'service', 'build', 'eventCode', 'requestId', 'status', 'limit', 'cursor'] as const;
 
 const LOGIN_TX_SECONDS = 600;
+/** Clock skew allowed between the IdP and the console when checking a re-authentication's auth_time. */
+const REAUTH_SKEW_SECONDS = 30;
 const REFRESH_SKEW_MS = 30_000;
 const MAX_BODY_BYTES = 16 * 1024;
 
@@ -270,6 +348,8 @@ export function createBff(deps: BffDeps) {
         redirect: 'error',
       });
       if (res.status !== 401) return res;
+      // A step-up demand is not an expired token: hand it back without refreshing or ending the session.
+      if ((await res.clone().json().catch(() => null))?.code === 'REAUTH_REQUIRED') return res;
     }
     await store.delete(ctx.id);
     return null;
@@ -387,6 +467,31 @@ export function createBff(deps: BffDeps) {
       return { status: res.status, field: body.details?.field };
     },
 
+    /** Server-side read for /admin/overview. Null means the user must sign in again. */
+    async loadOverview(ctx: SessionContext, window: string): Promise<{ status: number; overview?: Overview } | null> {
+      const w = ['1h', '24h', '7d'].includes(window) ? window : '24h';
+      const res = await callApi(ctx, `/v1/admin/overview?window=${w}`, { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, overview: (await res.json()) as Overview } : { status: res.status };
+    },
+
+    /** Server-side read for /admin/jobs. Null means the user must sign in again. */
+    async loadJobs(ctx: SessionContext, filter: string): Promise<{ status: number; page?: JobsPage } | null> {
+      const f = ['open', 'failed', 'completed', 'all'].includes(filter) ? filter : 'open';
+      const res = await callApi(ctx, `/v1/admin/jobs?status=${f}`, { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, page: (await res.json()) as JobsPage } : { status: res.status };
+    },
+
+    /** POST /bff/admin/jobs/{id}/retry with `{ reason }`; the API checks the role, the cooldown and records it. */
+    jobRetry: (req: Request, id: string) =>
+      timed(req, '/bff/admin/jobs/:id/retry', async (requestId) =>
+        JOB_ID.test(id) ? adminProxy(req, requestId, `/v1/admin/jobs/${id}/retry`, true) : notFound(requestId),
+      ),
+
+    /** POST /bff/admin/users/lookup with `{ query, reason }`; the API checks the role and records the lookup. */
+    userLookup: (req: Request) => timed(req, '/bff/admin/users/lookup', (requestId) => adminProxy(req, requestId, '/v1/admin/users/lookup', true)),
+
     /** Server-side audit search for /admin/audit. Null means the user must sign in again. */
     async loadAudit(
       ctx: SessionContext,
@@ -403,6 +508,39 @@ export function createBff(deps: BffDeps) {
       const body = (await res.json().catch(() => ({}))) as { details?: { field?: string } };
       return { status: res.status, field: body.details?.field };
     },
+
+    /**
+     * POST /bff/admin/audit/export: the current audit search as CSV, with `{ reason }` in the JSON body.
+     * The API checks the role, bounds the rows and records the export with its reason.
+     */
+    auditExport: (req: Request) =>
+      timed(req, '/bff/admin/audit/export', async (requestId) => {
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
+        if (!req.headers.get('content-type')?.startsWith('application/json')) return error(415, 'UNSUPPORTED_MEDIA_TYPE', requestId);
+        const body = await req.text();
+        if (Buffer.byteLength(body) > MAX_BODY_BYTES) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
+        const incoming = new URL(req.url).searchParams;
+        const qs = new URLSearchParams();
+        for (const k of AUDIT_PARAMS) {
+          const v = incoming.get(k);
+          if (k !== 'cursor' && k !== 'limit' && v && v.length <= 200) qs.set(k, v);
+        }
+        const upstream = await callApi(ctx, `/v1/admin/audit/export?${qs}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body }, requestId);
+        if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        if (!upstream.ok) return passthrough(upstream, requestId);
+        const disposition = upstream.headers.get('content-disposition') ?? '';
+        return new Response(await upstream.arrayBuffer(), {
+          status: 200,
+          headers: {
+            'content-type': 'text/csv; charset=utf-8',
+            'cache-control': 'no-store',
+            'x-request-id': requestId,
+            'content-disposition': /^attachment; filename="[\w.-]{1,64}"$/.test(disposition) ? disposition : 'attachment; filename="tunedeck-audit.csv"',
+          },
+        });
+      }),
 
     /** GET/POST /bff/admin/stations */
     stations: (req: Request) =>
@@ -422,12 +560,24 @@ export function createBff(deps: BffDeps) {
           : notFound(requestId),
       ),
 
-    /** GET /auth/login — starts authorization code + PKCE; the destination is limited to /app/ paths. */
+    /**
+     * GET /auth/login — starts authorization code + PKCE; the destination is limited to /app/ paths.
+     * `reauth=1` makes the provider ask for credentials again, for actions that need a recent sign-in.
+     */
     login: (req: Request) =>
       timed(req, '/auth/login', async () => {
-        const returnTo = safeReturnTo(new URL(req.url).searchParams.get('returnTo'));
-        const tx = { state: randomToken(), nonce: randomToken(), codeVerifier: randomToken(48), returnTo, exp: Date.now() + LOGIN_TX_SECONDS * 1000 };
-        const url = await oidc.authorizeUrl(tx);
+        const params = new URL(req.url).searchParams;
+        const returnTo = safeReturnTo(params.get('returnTo'));
+        const reauth = params.get('reauth') === '1';
+        const tx = {
+          state: randomToken(),
+          nonce: randomToken(),
+          codeVerifier: randomToken(48),
+          returnTo,
+          exp: Date.now() + LOGIN_TX_SECONDS * 1000,
+          ...(reauth ? { reauthSince: Math.floor(Date.now() / 1000) } : {}),
+        };
+        const url = await oidc.authorizeUrl({ ...tx, reauth });
         return redirect(url, 302, [
           serializeCookie(names.tx, sealTransaction(tx, config.sessionSecret), { secure, maxAgeSeconds: LOGIN_TX_SECONDS }),
         ]);
@@ -447,7 +597,12 @@ export function createBff(deps: BffDeps) {
         }
         let tokens: TokenSet;
         try {
-          tokens = await oidc.exchangeCode(code, tx.codeVerifier, tx.nonce);
+          const { authTime, ...issued } = await oidc.exchangeCode(code, tx.codeVerifier, tx.nonce);
+          // A re-authentication must be a fresh sign-in, not the provider quietly reusing its SSO session.
+          if (tx.reauthSince !== undefined && (authTime === undefined || authTime < tx.reauthSince - REAUTH_SKEW_SECONDS)) {
+            return redirect(`${tx.returnTo.split('?')[0]}?reauth=failed`, 302, [clearTx]);
+          }
+          tokens = issued;
         } catch (err) {
           const reason = err instanceof OidcError && err.kind === 'unavailable' ? 'unavailable' : 'signin';
           return redirect(`/login?error=${reason}`, 302, [clearTx]);
@@ -488,6 +643,13 @@ export function createBff(deps: BffDeps) {
       return res.ok ? { status: 200, view: (await res.json()) as SettingsView } : { status: res.status };
     },
 
+    /** Server-side read of GET /v1/me: the account id customers give support. Null means sign in again. */
+    async loadMe(ctx: SessionContext): Promise<{ status: number; userId?: string } | null> {
+      const res = await callApi(ctx, '/v1/me', { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, userId: ((await res.json()) as { userId: string }).userId } : { status: res.status };
+    },
+
     /** Server-side read of the account's devices for the settings page. Null means the user must sign in again. */
     async loadDevices(ctx: SessionContext): Promise<{ status: number; view?: DevicesView } | null> {
       const res = await callApi(ctx, '/v1/me/devices', { method: 'GET' }, `web_${randomUUID()}`);
@@ -522,6 +684,70 @@ export function createBff(deps: BffDeps) {
         if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
         const upstream = await callApi(ctx, '/v1/me/devices', { method: 'GET' }, requestId);
         if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        return passthrough(upstream, requestId);
+      }),
+
+    /**
+     * DELETE /bff/devices/{id}/session: signs one of the account's phones out. The API demands a sign-in from the
+     * last 5 minutes and answers 401 REAUTH_REQUIRED otherwise; that answer passes through with the session intact.
+     */
+    revokeDevice: (req: Request, id: string) =>
+      timed(req, '/bff/devices/:id/session', async (requestId) => {
+        if (!DEVICE_ID.test(id)) return notFound(requestId);
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
+        const upstream = await callApi(ctx, `/v1/me/devices/${id}/session`, { method: 'DELETE' }, requestId);
+        if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        return passthrough(upstream, requestId);
+      }),
+
+    /** GET /bff/account/export: the account's own data as a JSON download (Doc 17). */
+    exportAccount: (req: Request) =>
+      timed(req, '/bff/account/export', async (requestId) => {
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        const upstream = await callApi(ctx, '/v1/me/export', { method: 'GET' }, requestId);
+        if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        if (!upstream.ok) return passthrough(upstream, requestId);
+        const disposition = upstream.headers.get('content-disposition') ?? '';
+        return new Response(await upstream.text(), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'cache-control': 'no-store',
+            'x-request-id': requestId,
+            'content-disposition': /^attachment; filename="[\w.-]{1,64}"$/.test(disposition) ? disposition : 'attachment; filename="tunedeck-export.json"',
+          },
+        });
+      }),
+
+    /**
+     * DELETE /bff/account: asks the API to delete the account (needs a recent sign-in, like device sign-out).
+     * On 202 the web session ends here too and the browser gets the ticket to follow progress with.
+     */
+    deleteAccount: (req: Request) =>
+      timed(req, '/bff/account', async (requestId) => {
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
+        const upstream = await callApi(ctx, '/v1/me/account', { method: 'DELETE' }, requestId);
+        if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        if (upstream.status !== 202) return passthrough(upstream, requestId);
+        const { ticket, status } = (await upstream.json()) as { ticket: string; status: string };
+        await store.delete(ctx.id);
+        return json(202, { ticket, status }, requestId, { 'set-cookie': clearCookie(names.session, secure) });
+      }),
+
+    /** GET /bff/account-deletions/{ticket}: deletion progress. No session: the account can no longer sign in. */
+    deletionStatus: (req: Request, ticket: string) =>
+      timed(req, '/bff/account-deletions/:ticket', async (requestId) => {
+        if (!DELETION_TICKET.test(ticket)) return notFound(requestId);
+        const upstream = await fetchImpl(`${config.apiBaseUrl}/v1/account-deletions/${ticket}`, {
+          headers: { accept: 'application/json', 'x-request-id': requestId },
+          signal: AbortSignal.timeout(10_000),
+          redirect: 'error',
+        });
         return passthrough(upstream, requestId);
       }),
 

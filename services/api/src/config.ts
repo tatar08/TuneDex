@@ -20,6 +20,11 @@ export interface AppConfig {
     /** Express `trust proxy` hop count, so client addresses come from X-Forwarded-For set by our own proxy. */
     trustProxyHops: number;
   };
+  /**
+   * Keycloak admin access used to delete the sign-in identity when an account is deleted. Required in staging
+   * and production; in dev it may be left out and deletion then keeps the Keycloak user.
+   */
+  idpAdmin: { tokenUrl: string; adminBase: string; clientId: string; clientSecret: string } | null;
   /** Scheduled stream checks of published stations (Doc 17). Off unless STATION_CHECK_ENABLED=true. */
   stationCheck: {
     enabled: boolean;
@@ -69,7 +74,29 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       algorithms,
     },
     rateLimit: loadRateLimit(env),
+    idpAdmin: loadIdpAdmin(env, appEnv, required(env, 'OIDC_ISSUER')),
     stationCheck: loadStationCheck(env),
+  };
+}
+
+/** The realm comes from the issuer (`…/realms/<realm>`), so the admin calls always target the realm that signs our tokens. */
+function loadIdpAdmin(env: NodeJS.ProcessEnv, appEnv: AppEnv, issuer: string): AppConfig['idpAdmin'] {
+  const clientId = env.KEYCLOAK_ADMIN_CLIENT_ID?.trim() ?? '';
+  const clientSecret = env.KEYCLOAK_ADMIN_CLIENT_SECRET?.trim() ?? '';
+  if (!clientId && !clientSecret) {
+    if (appEnv !== 'dev') throw new Error('Missing required environment variable KEYCLOAK_ADMIN_CLIENT_ID (account deletion removes the Keycloak user)');
+    return null;
+  }
+  if (!clientId) throw new Error('Missing required environment variable KEYCLOAK_ADMIN_CLIENT_ID');
+  if (!clientSecret) throw new Error('Missing required environment variable KEYCLOAK_ADMIN_CLIENT_SECRET');
+  const m = /^(https?:\/\/[^/]+(?:\/[^/]+)*?)\/realms\/([^/]+)\/?$/.exec(issuer);
+  if (!m) throw new Error('OIDC_ISSUER must be a Keycloak realm URL (…/realms/<realm>) to delete Keycloak users');
+  const [, base, realm] = m;
+  return {
+    tokenUrl: `${base}/realms/${realm}/protocol/openid-connect/token`,
+    adminBase: `${base}/admin/realms/${realm}`,
+    clientId,
+    clientSecret,
   };
 }
 

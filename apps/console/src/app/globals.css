@@ -37,6 +37,8 @@ input[type="radio"] { width: 18px; height: 18px; accent-color: var(--accent); ma
 .btn { font: inherit; border: 1px solid var(--fg); background: var(--fg); color: var(--bg); padding: 8px 20px; border-radius: 4px; cursor: pointer; }
 .btn.secondary { background: transparent; color: var(--fg); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+a.btn { display: inline-block; text-decoration: none; }
 .status { color: var(--muted); font-size: 14px; }
 .notice { border-left: 3px solid var(--warn); padding: 10px 14px; margin: 20px 0; background: color-mix(in srgb, var(--warn) 8%, transparent); }
 .notice.error { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
@@ -50,6 +52,14 @@ input[type="radio"] { width: 18px; height: 18px; accent-color: var(--accent); ma
 .devices { list-style: none; margin: 0; padding: 0; }
 .devices li { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .devices li .status { grid-column: 1 / -1; }
+.devices li .confirm { grid-column: 1 / -1; grid-row: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.devices li .confirm .status { flex-basis: 100%; }
 .device-name { font-weight: 500; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (max-width: 560px) { fieldset { grid-template-columns: 1fr; } }
+.confirm-delete { display: grid; gap: 12px; margin-top: 8px; }
+.confirm-delete label { display: flex; gap: 8px; align-items: center; }
+.confirm-delete .row { display: flex; gap: 10px; flex-wrap: wrap; }
+.support-code { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.support-code code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; overflow-wrap: anywhere; user-select: all; }
+.btn.small { padding: 3px 10px; font-size: 12.5px; }

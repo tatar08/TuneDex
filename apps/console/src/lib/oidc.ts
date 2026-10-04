@@ -61,7 +61,8 @@ export class OidcClient {
     return this.metadataPromise;
   }
 
-  async authorizeUrl(p: { state: string; nonce: string; codeVerifier: string }): Promise<string> {
+  /** With `reauth`, asks the provider to prompt for credentials again even inside a live SSO session (OIDC max_age=0). */
+  async authorizeUrl(p: { state: string; nonce: string; codeVerifier: string; reauth?: boolean }): Promise<string> {
     const m = await this.metadata();
     const url = new URL(m.authorization_endpoint);
     url.search = new URLSearchParams({
@@ -73,11 +74,13 @@ export class OidcClient {
       nonce: p.nonce,
       code_challenge: pkceChallenge(p.codeVerifier),
       code_challenge_method: 'S256',
+      ...(p.reauth ? { prompt: 'login', max_age: '0' } : {}),
     }).toString();
     return url.toString();
   }
 
-  async exchangeCode(code: string, codeVerifier: string, nonce: string): Promise<TokenSet> {
+  /** Returns the tokens and the ID token's `auth_time` (epoch seconds) when it has one. */
+  async exchangeCode(code: string, codeVerifier: string, nonce: string): Promise<TokenSet & { authTime?: number }> {
     const tokens = await this.tokenRequest({
       grant_type: 'authorization_code',
       code,
@@ -85,8 +88,8 @@ export class OidcClient {
       code_verifier: codeVerifier,
     });
     if (!tokens.idToken) throw new OidcError('invalid_response');
-    await this.verifyIdToken(tokens.idToken, nonce);
-    return tokens;
+    const authTime = await this.verifyIdToken(tokens.idToken, nonce);
+    return { ...tokens, authTime };
   }
 
   refresh(refreshToken: string): Promise<TokenSet> {
@@ -103,7 +106,7 @@ export class OidcClient {
     return url.toString();
   }
 
-  private async verifyIdToken(idToken: string, nonce: string): Promise<void> {
+  private async verifyIdToken(idToken: string, nonce: string): Promise<number | undefined> {
     const m = await this.metadata();
     this.jwks ??= createRemoteJWKSet(new URL(m.jwks_uri), { timeoutDuration: 5000, cacheMaxAge: 10 * 60_000 });
     try {
@@ -114,6 +117,7 @@ export class OidcClient {
         requiredClaims: ['sub', 'exp', 'nonce'],
       });
       if (payload.nonce !== nonce) throw new OidcError('invalid_response');
+      return typeof payload.auth_time === 'number' ? payload.auth_time : undefined;
     } catch {
       throw new OidcError('invalid_response');
     }

@@ -1,8 +1,8 @@
-import { Body, Controller, Delete, Get, HttpStatus, Param, Put, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Put, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
-import { ApiError } from '../common/api-error';
-import { parseDeviceId, parseDeviceReport, REAUTH_MAX_AGE_SECONDS } from './devices.schema';
+import { requireRecentSignIn } from '../auth/recent-sign-in';
+import { parseDeviceId, parseDeviceReport } from './devices.schema';
 import { DevicesService, DeviceView } from './devices.service';
 
 @Controller('v1/me/devices')
@@ -32,10 +32,7 @@ export class DevicesController {
   @Delete(':deviceId/session')
   async revoke(@Req() req: Request, @Param('deviceId') deviceId: string): Promise<DeviceView> {
     const id = parseDeviceId(deviceId);
-    const authTime = req.actor!.authTime;
-    if (authTime === undefined || Date.now() / 1000 - authTime > REAUTH_MAX_AGE_SECONDS) {
-      throw new ApiError(HttpStatus.UNAUTHORIZED, 'REAUTH_REQUIRED', { maxAgeSeconds: REAUTH_MAX_AGE_SECONDS });
-    }
-    return this.devices.revoke(req.actor!.userId, id);
+    requireRecentSignIn(req);
+    return this.devices.revoke(req.actor!.userId, id, req.requestId);
   }
 }

@@ -47,4 +47,21 @@ describe('loadConfig', () => {
   ])('refuses %s=%s', (key, value) => {
     expect(() => loadConfig({ ...base, [key]: value })).toThrow(key);
   });
+
+  it('reads the Keycloak admin client and derives its URLs from the issuer realm', () => {
+    expect(loadConfig(base).idpAdmin).toBeNull();
+    const cfg = loadConfig({ ...base, KEYCLOAK_ADMIN_CLIENT_ID: 'api-admin', KEYCLOAK_ADMIN_CLIENT_SECRET: 's3cret', OIDC_ISSUER: 'https://id.example/auth/realms/tunedeck' });
+    expect(cfg.idpAdmin).toEqual({
+      tokenUrl: 'https://id.example/auth/realms/tunedeck/protocol/openid-connect/token',
+      adminBase: 'https://id.example/auth/admin/realms/tunedeck',
+      clientId: 'api-admin',
+      clientSecret: 's3cret',
+    });
+  });
+
+  it('requires the Keycloak admin client outside dev, and both halves of it anywhere', () => {
+    expect(() => loadConfig({ ...base, APP_ENV: 'production' })).toThrow('KEYCLOAK_ADMIN_CLIENT_ID');
+    expect(() => loadConfig({ ...base, KEYCLOAK_ADMIN_CLIENT_ID: 'api-admin' })).toThrow('KEYCLOAK_ADMIN_CLIENT_SECRET');
+    expect(() => loadConfig({ ...base, KEYCLOAK_ADMIN_CLIENT_ID: 'a', KEYCLOAK_ADMIN_CLIENT_SECRET: 'b', OIDC_ISSUER: 'https://id.example/oauth' })).toThrow('OIDC_ISSUER');
+  });
 });
