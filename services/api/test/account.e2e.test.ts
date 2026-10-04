@@ -91,6 +91,9 @@ describe('account export and deletion', () => {
     const fresh = await bearer('acct-delete', now());
     await http().get('/v1/me').set({ Authorization: `Bearer ${await id.token('acct-delete', { email: 'leaver@example.com' })}` }).expect(200);
     const { rows: [user] } = await t.pool.query(`SELECT id FROM users WHERE oidc_subject = 'acct-delete'`);
+    await t.pool.query(`INSERT INTO synced_entities (user_id, entity_id, type, revision, value) VALUES ($1, gen_random_uuid(), 'favorite', 1, '{"stationId":"00000000-0000-4000-8000-000000000000","order":0}')`, [user.id]);
+    await t.pool.query(`INSERT INTO sync_changes (user_id, change_id, body_hash, result) VALUES ($1, gen_random_uuid(), 'h', '{}')`, [user.id]);
+    await t.pool.query(`INSERT INTO sync_horizons (user_id, purged_seq) VALUES ($1, 1)`, [user.id]);
 
     const res = await http().delete('/v1/me/account').set(fresh).expect(202);
     expect(res.body).toEqual({ ticket: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/), status: 'deleting' });
@@ -105,7 +108,7 @@ describe('account export and deletion', () => {
     expect(status.body).toMatchObject({ status: 'completed', completedAt: expect.any(String) });
     expect(new Date(status.body.deadline).getTime() - new Date(status.body.requestedAt).getTime()).toBe(30 * 86_400_000);
 
-    for (const [table, column] of [['account_preferences', 'owner_id'], ['devices', 'user_id'], ['diagnostic_reports', 'user_id'], ['diagnostic_events', 'user_id'], ['staff_roles', 'user_id']]) {
+    for (const [table, column] of [['account_preferences', 'owner_id'], ['devices', 'user_id'], ['diagnostic_reports', 'user_id'], ['diagnostic_events', 'user_id'], ['staff_roles', 'user_id'], ['synced_entities', 'user_id'], ['sync_changes', 'user_id'], ['sync_horizons', 'user_id']]) {
       expect((await t.pool.query(`SELECT 1 FROM ${table} WHERE ${column} = $1`, [user.id])).rows).toEqual([]);
     }
     // A tombstone stays for station history and the audit trail, with no link to the identity.

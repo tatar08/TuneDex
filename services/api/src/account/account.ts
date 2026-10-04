@@ -24,6 +24,7 @@ import { StructuredLogger } from '../common/logger';
 import { Database, PG_POOL } from '../db/database';
 import { DevicesService } from '../devices/devices.service';
 import { IdpError, IdpUsersService } from './idp-users';
+import { SyncService } from '../sync/sync';
 import { SettingsService } from '../settings/settings.service';
 import { subjectHash } from '../users/users.service';
 
@@ -55,6 +56,7 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
     private readonly devices: DevicesService,
     private readonly logger: StructuredLogger,
     private readonly idp: IdpUsersService,
+    private readonly sync: SyncService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -80,9 +82,14 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
       'SELECT id, created_at, locale, email FROM users WHERE id = $1',
       [userId],
     );
-    const [settings, devices, roles, reports, events] = await Promise.all([
+    const [settings, devices, favorites, purchases, roles, reports, events] = await Promise.all([
       this.settings.get(userId),
       this.devices.list(userId),
+      this.sync.favorites(userId),
+      this.db.query<{ store: string; product_id: string; state: string; environment: string; purchased_at: Date | null; verified_at: Date | null; revoked_at: Date | null }>(
+        'SELECT store, product_id, state, environment, purchased_at, verified_at, revoked_at FROM purchases WHERE user_id = $1 ORDER BY created_at',
+        [userId],
+      ),
       this.db.query<{ role: string; granted_at: Date; revoked_at: Date | null }>(
         'SELECT role, granted_at, revoked_at FROM staff_roles WHERE user_id = $1 ORDER BY granted_at',
         [userId],
@@ -119,6 +126,16 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
       account: { id: account.id, email: account.email, createdAt: account.created_at.toISOString(), locale: account.locale },
       settings: settings.revision > 0 ? settings : null,
       devices: devices.devices,
+      favorites: favorites.map(({ stationId, order, updatedAt }) => ({ stationId, order, updatedAt })),
+      purchases: purchases.map((p) => ({
+        store: p.store,
+        productId: p.product_id,
+        state: p.state,
+        environment: p.environment,
+        purchasedAt: p.purchased_at?.toISOString() ?? null,
+        verifiedAt: p.verified_at?.toISOString() ?? null,
+        revokedAt: p.revoked_at?.toISOString() ?? null,
+      })),
       diagnostics: reports.map((r) => ({
         id: r.id,
         deviceId: r.device_id,
@@ -266,6 +283,9 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
       // diagnostic_events has no foreign key to devices; diagnostic_reports cascades to it.
       await query('DELETE FROM diagnostic_reports WHERE user_id = $1', [userId]);
       await query('DELETE FROM diagnostic_events WHERE user_id = $1', [userId]);
+      await query('DELETE FROM synced_entities WHERE user_id = $1', [userId]);
+      await query('DELETE FROM sync_changes WHERE user_id = $1', [userId]);
+      await query('DELETE FROM sync_horizons WHERE user_id = $1', [userId]);
       await query('DELETE FROM devices WHERE user_id = $1', [userId]);
       await query('DELETE FROM account_preferences WHERE owner_id = $1', [userId]);
       await query('DELETE FROM staff_roles WHERE user_id = $1', [userId]);
