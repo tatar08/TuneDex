@@ -1,0 +1,95 @@
+/* TuneDeck: the staff console's Minimal look (soft backdrop, white card, dark pill buttons) on Keycloak's sign-in pages.
+   Fonts are the system's own: these pages never load anything from Google. */
+:root {
+  --td-bg: #eaf3f8; --td-panel: #ffffff; --td-soft: #f1f5f9; --td-fg: #0f172a; --td-muted: #64748b; --td-line: #e2e8f0;
+  --td-ink: #0f172a; --td-ink-t: #ffffff; --td-accent: #02c39a;
+  --pf-v5-global--FontFamily--text: "Sarabun", "Noto Sans Thai", "Leelawadee UI", "Thonburi", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --pf-v5-global--FontFamily--heading: var(--pf-v5-global--FontFamily--text);
+  --pf-v5-global--primary-color--100: var(--td-ink);
+  --pf-v5-global--primary-color--200: #1e293b;
+  --pf-v5-global--link--Color: var(--td-fg);
+  --pf-v5-global--link--Color--hover: var(--td-accent);
+  --pf-v5-global--BorderRadius--sm: 12px;
+}
+.pf-v5-theme-dark {
+  --td-bg: #0b0f19; --td-panel: #131b2e; --td-soft: #1a2439; --td-fg: #e2e8f0; --td-muted: #94a3b8; --td-line: #1f2a44;
+  --td-ink: #02c39a; --td-ink-t: #04241c;
+  --pf-v5-global--primary-color--200: #01a582;
+}
+html, body, .pf-v5-c-login { background: var(--td-bg) !important; color: var(--td-fg); }
+.pf-v5-c-login { background-image: none !important; }
+
+/* Brand above the card: the TuneDeck mark and name instead of the realm's plain text */
+#kc-header-wrapper, .pf-v5-c-login__header .pf-v5-c-brand, div.kc-logo-text {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  font-size: 22px; font-weight: 800; letter-spacing: -0.01em; color: var(--td-fg); text-transform: none;
+}
+#kc-header-wrapper::before {
+  content: ""; width: 44px; height: 44px; flex: none; background: url("../img/logo.svg") center / contain no-repeat;
+}
+div.kc-logo-text { background-image: none; }
+/* keycloak.v2 paints the header text white for its dark backdrop */
+#kc-header-wrapper, #kc-header-wrapper *, .pf-v5-c-login__header, .pf-v5-c-login__header * { color: var(--td-fg) !important; }
+div.kc-logo-text span { display: inline; }
+
+/* The card */
+.pf-v5-c-login__main {
+  background: var(--td-panel) !important; border-radius: 28px; box-shadow: 0 20px 50px -20px rgba(15, 23, 42, 0.18);
+  overflow: hidden; border: 0 !important;
+}
+/* No coloured strip along the top of the card */
+.pf-v5-c-login__main::before, .pf-v5-c-login__main::after { display: none !important; }
+.pf-v5-c-login__main-header { padding-top: 32px; border-top: 0 !important; }
+.pf-v5-c-login__main-header .pf-v5-c-title, #kc-page-title { font-weight: 800; letter-spacing: -0.02em; color: var(--td-fg); }
+.pf-v5-c-login__main-footer-band { background: var(--td-soft); border-top: 0; border-radius: 16px; padding: 16px 20px !important; margin-block: 8px 0; }
+.pf-v5-c-login__main-footer-band-item, .pf-v5-c-login__main-footer-band > * { margin: 0 !important; padding: 0 !important; }
+
+/* Fields: one rounded soft box, a quiet border, the accent on focus (no PatternFly underline or orange ring) */
+.pf-v5-c-form-control {
+  border-radius: 12px; background: var(--td-soft);
+  --pf-v5-c-form-control--before--BorderColor: var(--td-line);
+  --pf-v5-c-form-control--after--BorderColor: transparent;
+  --pf-v5-c-form-control--hover--after--BorderColor: transparent;
+  --pf-v5-c-form-control--focus--after--BorderColor: transparent;
+}
+.pf-v5-c-form-control::before { border: 1px solid var(--td-line) !important; border-radius: 12px; }
+.pf-v5-c-form-control::after { border: 0 !important; }
+.pf-v5-c-form-control:focus-within::before { border-color: var(--td-accent) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--td-accent) 22%, transparent); }
+.pf-v5-c-form-control > input, .pf-v5-c-form-control > select, .pf-v5-c-form-control > textarea { outline: none !important; background: transparent; }
+.pf-v5-c-form__label-text { font-weight: 600; }
+/* Same gap between every field (the code page put its label right under the email line) */
+.pf-v5-c-form__group + .pf-v5-c-form__group, #kc-form-login > div + div, #kc-otp-login-form > div + div { margin-top: 16px; }
+/* The code page shows the signed-in email above its form */
+#kc-otp-login-form { margin-top: 16px; }
+/* Password field and its eye button read as one rounded box */
+.pf-v5-c-input-group > .pf-v5-c-input-group__item:first-child .pf-v5-c-form-control,
+.pf-v5-c-input-group > .pf-v5-c-input-group__item:first-child .pf-v5-c-form-control::before { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control {
+  border-radius: 0 12px 12px 0; background: var(--td-soft); color: var(--td-muted);
+  --pf-v5-c-button--after--BorderColor: var(--td-line); --pf-v5-c-button--after--BorderRadius: 0 12px 12px 0;
+}
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control::after { border: 1px solid var(--td-line) !important; border-left: 0 !important; border-radius: 0 12px 12px 0; }
+.pf-v5-c-input-group > .pf-v5-c-input-group__item:first-child .pf-v5-c-form-control::before { border-right: 0 !important; }
+.pf-v5-c-input-group__item { border: 0 !important; box-shadow: none !important; }
+.pf-v5-c-input-group__item + .pf-v5-c-input-group__item { margin-left: 0 !important; }
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control::before { border: 0 !important; }
+/* Language menu: the same rounded box */
+.pf-v5-c-menu-toggle, #login-select-toggle, #kc-locale select {
+  border-radius: 12px !important; background: var(--td-soft); --pf-v5-c-menu-toggle--before--BorderColor: var(--td-line);
+  --pf-v5-c-menu-toggle--after--BorderColor: transparent;
+}
+.pf-v5-c-menu-toggle::before { border: 1px solid var(--td-line) !important; border-radius: 12px; }
+.pf-v5-c-menu-toggle::after { border: 0 !important; }
+
+/* Buttons */
+.pf-v5-c-button.pf-m-primary { background: var(--td-ink); color: var(--td-ink-t); border-radius: 14px; font-weight: 700; padding-block: 12px; }
+.pf-v5-c-button.pf-m-primary:hover { filter: brightness(1.12); }
+.pf-v5-c-button.pf-m-secondary, .pf-v5-c-button.pf-m-link { border-radius: 14px; }
+
+/* Language menu and footer links stay quiet */
+.pf-v5-c-login__main-header-utilities, #kc-locale { color: var(--td-muted); }
+.pf-v5-c-alert { border-radius: 14px; }
+
+@media (max-width: 640px) {
+  .pf-v5-c-login__main { border-radius: 0; box-shadow: none; }
+}

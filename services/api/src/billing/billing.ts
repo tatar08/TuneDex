@@ -237,10 +237,20 @@ export class BillingService {
     });
   }
 
-  /** True the first time a notification id is seen; a redelivery returns false and is acknowledged without work. */
-  private async firstDelivery(store: Store, id: string, kind: string): Promise<boolean> {
-    const rows = await this.db.query(`INSERT INTO store_notifications (store, digest, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING RETURNING 1`, [store, digestOf(store, id), kind.slice(0, 64)]);
-    return rows.length > 0;
+  /**
+   * Runs `work` the first time a notification id is seen; a redelivery is acknowledged without work.
+   * If the work fails the id is forgotten again, so the store's redelivery retries it (the work is idempotent).
+   */
+  private async once(store: Store, id: string, kind: string, work: () => Promise<void>): Promise<void> {
+    const digest = digestOf(store, id);
+    const rows = await this.db.query(`INSERT INTO store_notifications (store, digest, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING RETURNING 1`, [store, digest, kind.slice(0, 64)]);
+    if (rows.length === 0) return;
+    try {
+      await work();
+    } catch (err) {
+      await this.db.query(`DELETE FROM store_notifications WHERE store = $1 AND digest = $2`, [store, digest]).catch(() => undefined);
+      throw err;
+    }
   }
 
   /** App Store Server Notifications V2. Only REFUND and REVOKE change anything here. */
@@ -258,10 +268,11 @@ export class BillingService {
       throw err;
     }
     if (n.data?.bundleId !== cfg.bundleId || typeof n.notificationUUID !== 'string') throw refused('wrong_app');
-    if (!(await this.firstDelivery('apple', n.notificationUUID, n.notificationType))) return;
-    if ((n.notificationType === 'REFUND' || n.notificationType === 'REVOKE') && tx?.originalTransactionId) {
-      await this.revoke('apple', digestOf('apple', tx.originalTransactionId), n.notificationType.toLowerCase());
-    }
+    await this.once('apple', n.notificationUUID, n.notificationType, async () => {
+      if ((n.notificationType === 'REFUND' || n.notificationType === 'REVOKE') && tx?.originalTransactionId) {
+        await this.revoke('apple', digestOf('apple', tx.originalTransactionId), n.notificationType.toLowerCase());
+      }
+    });
   }
 
   /** Google Play real-time developer notifications via Pub/Sub push. */
@@ -279,8 +290,10 @@ export class BillingService {
     }
     if (n.packageName !== cfg.packageName) throw refused('wrong_app');
     const kind = n.voidedPurchaseNotification ? 'voided' : n.oneTimeProductNotification ? `one_time_${n.oneTimeProductNotification.notificationType}` : 'other';
-    if (!(await this.firstDelivery('google', msg.messageId, kind))) return;
+    await this.once('google', msg.messageId, kind, () => this.googleWork(n, cfg));
+  }
 
+  private async googleWork(n: DeveloperNotification, cfg: NonNullable<AppConfig['billing']['google']>): Promise<void> {
     const voided = n.voidedPurchaseNotification?.purchaseToken;
     if (typeof voided === 'string') {
       await this.revoke('google', digestOf('google', voided), 'voided');

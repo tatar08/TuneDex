@@ -4,7 +4,7 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
-COPY next.config.ts tsconfig.json next-env.d.ts ./
+COPY next.config.ts tsconfig.json ./
 COPY src ./src
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npx next build && npm prune --omit=dev

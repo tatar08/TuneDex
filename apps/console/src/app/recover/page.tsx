@@ -10,13 +10,13 @@ export default async function RecoverPage({ searchParams }: { searchParams: Prom
   const lang = await pageLang();
   const t = strings(lang);
   return (
-    <main className="shell" lang={lang}>
+    <main className="shell auth" lang={lang}>
       <div className="nav"><span className="brand">{t.appName}</span><LangSwitch lang={lang} path="/recover" /></div>
       <h1>{t.recoverTitle}</h1>
       {params.expired && <div className="notice error" role="status">{t.recoverExpired}</div>}
       {params.done && <div className="notice" role="status">{t.recoverDone}</div>}
       <p className="lede">{t.recoverLede}</p>
-      <a className="btn" href="/auth/recover" style={{ display: 'inline-block', textDecoration: 'none' }}>
+      <a className="btn" href="/auth/recover">
         {t.recoverStart}
       </a>
       <p className="auth-links"><a href="/login">{t.backToSignIn}</a></p>

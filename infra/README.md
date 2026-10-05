@@ -17,7 +17,7 @@ cp .env.example .env        # replace every CHANGE_ME, e.g. with `openssl rand -
 docker compose up --build
 ```
 
-- Console: http://localhost:3200. Keycloak: http://keycloak.localhost:8080 (admin console under `/admin`, user `admin`, password from `.env`). API: http://localhost:3100.
+- Console: http://localhost:3200. Keycloak: http://keycloak.localhost:8080 (admin console under `/admin`, user `admin`, password from `.env`). API: http://localhost:3100. Ports differ if you set `API_HOST_PORT` / `CONSOLE_HOST_PORT` in `.env` (set them before the first start: Keycloak takes the console URL from its realm import).
 - Browsers send `*.localhost` to this machine, and inside the compose network the same name points at the Keycloak container, so the browser, the API and the console all see one issuer. Chrome, Edge and Firefox do this without setup. If a browser cannot open `keycloak.localhost`, add `127.0.0.1 keycloak.localhost` to the hosts file.
 - The realm (`keycloak/tunedeck-realm.json`) is imported on the first start only. To start over, run `docker compose down -v`. It contains:
   - The `tunedeck-console` confidential client (PKCE S256, its redirect and logout URLs come from `.env`) with the `tunedeck-api` audience on access tokens.
@@ -27,9 +27,10 @@ docker compose up --build
     - Level 2 (`acr` = `mfa`) also asks for a one-time code (TOTP). A staff member without one sets it up on that screen.
     - The API's `STAFF_MFA_ACR` and the console's `OIDC_MFA_ACR` are both `mfa`.
   - A user profile with only username and email (no name fields), registration by email, a 12-character minimum password, and brute-force protection.
+  - The `tunedeck` login theme (`infra/keycloak/themes/tunedeck`, mounted read-only) and Thai/English pages, Thai by default. The console passes the visitor's language (`ui_locales`). On a realm imported before this, set it once: `docker compose exec keycloak /opt/keycloak/bin/kcadm.sh update realms/tunedeck -s loginTheme=tunedeck -s internationalizationEnabled=true -s 'supportedLocales=["th","en"]' -s defaultLocale=th --server http://localhost:8080 --realm master --user admin --password "$KEYCLOAK_ADMIN_PASSWORD"`.
   - The mobile app's client is not in this file: its redirect URI and client type are Codex's to decide.
 - Staff roles: sign in once, then `docker compose exec api node dist/staff/staff-cli.js grant <subject> admin --by <you> --reason "<why>"`. The subject is the Keycloak user id.
-- Postgres listens on 127.0.0.1:5432 (user `tunedeck`, password from `.env`). Console sessions live in memory here because the base URL is localhost.
+- Postgres listens on 127.0.0.1:5432 (user `tunedeck`, password from `.env`); set `POSTGRES_HOST_PORT` (e.g. 55432) in `.env` when the machine already runs its own Postgres there. Containers still reach it as `postgres:5432`. Console sessions live in memory here because the base URL is localhost.
 
 Checked on 2026-10-04 against Keycloak 26.4, with the API and console on the compose network:
 - A staff member signed in with a password.

@@ -215,6 +215,9 @@ export class DiagnosticsService implements OnApplicationShutdown {
       params.push(opts.only);
       extra = ` AND r.id = $${params.length}`;
     } else if (opts.after) {
+      if (Number.isNaN(Date.parse(opts.after[0])) || !/^[0-9a-f-]{36}$/.test(opts.after[1])) {
+        throw new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', { field: 'cursor', reason: 'malformed' });
+      }
       params.push(opts.after[0], opts.after[1]);
       extra = ` AND (date_trunc('milliseconds', r.received_at), r.id::text) < ($${params.length - 1}::timestamptz, $${params.length})`;
     }

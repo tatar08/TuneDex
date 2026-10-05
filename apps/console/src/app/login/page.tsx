@@ -14,7 +14,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const key = params.expired ? 'expired' : params.signedOut ? 'signedOut' : params.error === 'unavailable' ? 'unavailable' : params.error ? 'signin' : null;
   const returnTo = params.returnTo && safeReturnTo(params.returnTo) === params.returnTo ? `?returnTo=${encodeURIComponent(params.returnTo)}` : '';
   return (
-    <main className="shell" lang={lang}>
+    <main className="shell auth" lang={lang}>
       <div className="nav"><span className="brand">{t.appName}</span><LangSwitch lang={lang} path="/login" /></div>
       <h1>{t.loginTitle}</h1>
       <p className="lede">{t.loginLede}</p>
@@ -23,7 +23,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           {t[MESSAGES[key]]}
         </div>
       )}
-      <a className="btn" href={`/auth/login${returnTo}`} style={{ display: 'inline-block', textDecoration: 'none' }}>
+      <a className="btn" href={`/auth/login${returnTo}`}>
         {t.signIn}
       </a>
       <p className="auth-links">

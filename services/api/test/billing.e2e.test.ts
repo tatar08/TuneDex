@@ -168,11 +168,11 @@ describe('Pro purchase verification (/v1/billing, /v1/webhooks)', () => {
     expect((await verify('tok-pending-1')).body.state).toBe('pending');
     expect(google.acks).toEqual(['tok-paid-0001']);
 
-    const push = async (data: object, token?: string) =>
+    const push = async (data: object, token?: string, messageId: string = randomUUID()) =>
       http()
         .post('/v1/webhooks/google')
         .set('Authorization', `Bearer ${token ?? (await pushToken())}`)
-        .send({ message: { messageId: randomUUID(), data: Buffer.from(JSON.stringify({ packageName: 'app.tunedeck', ...data })).toString('base64') }, subscription: 'projects/p/subscriptions/s' });
+        .send({ message: { messageId, data: Buffer.from(JSON.stringify({ packageName: 'app.tunedeck', ...data })).toString('base64') }, subscription: 'projects/p/subscriptions/s' });
     const pushToken = (o: { aud?: string; email?: string } = {}) =>
       new SignJWT({ email: o.email ?? 'rtdn@test.iam.gserviceaccount.com', email_verified: true })
         .setProtectedHeader({ alg: 'RS256', kid: 'g1' })
@@ -186,7 +186,12 @@ describe('Pro purchase verification (/v1/billing, /v1/webhooks)', () => {
     expect((await push({ testNotification: {} })).status).toBe(204);
 
     google.purchases.get('tok-pending-1')!.purchaseState = 0;
-    expect((await push({ oneTimeProductNotification: { notificationType: 1, purchaseToken: 'tok-pending-1', sku: 'pro_lifetime' } })).status).toBe(204);
+    // Play is down for the first delivery: the notification is not swallowed, Pub/Sub's redelivery completes it.
+    const completed = { oneTimeProductNotification: { notificationType: 1, purchaseToken: 'tok-pending-1', sku: 'pro_lifetime' } };
+    google.down = true;
+    expect((await push(completed, undefined, 'msg-retry-1')).status).toBe(503);
+    google.down = false;
+    expect((await push(completed, undefined, 'msg-retry-1')).status).toBe(204);
     expect(google.acks).toEqual(['tok-paid-0001', 'tok-pending-1']);
     expect((await push({ voidedPurchaseNotification: { purchaseToken: 'tok-paid-0001', productType: 2 } })).status).toBe(204);
     const ent = (await http().get('/v1/me/entitlements').set(d)).body;

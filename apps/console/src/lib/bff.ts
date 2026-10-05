@@ -434,6 +434,9 @@ export const LOG_PARAMS = ['from', 'to', 'severity', 'service', 'build', 'eventC
 
 /** The W3C trace of the BFF request being served; API calls made while serving it join that trace. */
 const traceScope = new AsyncLocalStorage<{ traceId: string }>();
+/** The language picked with the switch before sign-in (lang.ts LANG_COOKIE), for the provider's pages. */
+const visitorLang = (req: Request) => (readCookie(req.headers.get('cookie'), 'td_lang') === 'en' ? 'en' : 'th');
+
 const newTraceId = () => randomBytes(16).toString('hex');
 /** `traceparent` for one API call: the current trace (a new one outside a BFF request) and a fresh span id. */
 const traceparent = () => `00-${traceScope.getStore()?.traceId ?? newTraceId()}-${randomBytes(8).toString('hex')}-01`;
@@ -870,14 +873,14 @@ export function createBff(deps: BffDeps) {
           ...(reauth ? { reauthSince: Math.floor(Date.now() / 1000) } : {}),
         };
         const register = params.get('register') === '1';
-        const url = await oidc.authorizeUrl({ ...tx, reauth, mfa, register });
+        const url = await oidc.authorizeUrl({ ...tx, reauth, mfa, register, locale: visitorLang(req) });
         return redirect(url, 302, [
           serializeCookie(names.tx, sealTransaction(tx, config.sessionSecret), { secure, maxAgeSeconds: LOGIN_TX_SECONDS }),
         ]);
       }),
 
     /** GET /auth/recover — hands over to the provider's password reset; no email ever passes through the console. */
-    recover: (req: Request) => timed(req, '/auth/recover', async () => redirect(oidc.passwordResetUrl(), 302)),
+    recover: (req: Request) => timed(req, '/auth/recover', async () => redirect(oidc.passwordResetUrl(visitorLang(req)), 302)),
 
     /** GET /auth/callback — checks state, exchanges the code, verifies the ID token, starts a fresh session. */
     callback: (req: Request) =>

@@ -10,12 +10,12 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
   const lang = await pageLang();
   const t = strings(lang);
   return (
-    <main className="shell" lang={lang}>
+    <main className="shell auth" lang={lang}>
       <div className="nav"><span className="brand">{t.appName}</span><LangSwitch lang={lang} path="/register" /></div>
       <h1>{t.registerTitle}</h1>
       <p className="lede">{t.registerLede}</p>
       {params.error && <div className="notice error" role="status">{t.registerError}</div>}
-      <a className="btn" href="/auth/login?register=1" style={{ display: 'inline-block', textDecoration: 'none' }}>
+      <a className="btn" href="/auth/login?register=1">
         {t.registerStart}
       </a>
       <p className="auth-links"><a href="/login">{t.backToSignIn}</a></p>

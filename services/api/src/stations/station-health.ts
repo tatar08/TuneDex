@@ -237,7 +237,10 @@ export class StationHealthService implements OnApplicationBootstrap, OnApplicati
       [id, MANUAL_COOLDOWN_SECONDS],
     );
     if (!s) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
-    if (s.last) throw new ApiError(HttpStatus.TOO_MANY_REQUESTS, 'CHECK_TOO_SOON', { retryAfterSeconds: MANUAL_COOLDOWN_SECONDS });
+    if (s.last) {
+      const left = Math.max(1, Math.ceil(MANUAL_COOLDOWN_SECONDS - (Date.now() - s.last.getTime()) / 1000));
+      throw new ApiError(HttpStatus.TOO_MANY_REQUESTS, 'CHECK_TOO_SOON', { retryAfterSeconds: left });
+    }
     const target = s.published_url ? 'published' : 'draft';
     const byWorker = this.config.stationCheck.runner === 'worker';
     const result = byWorker ? await this.viaWorker(id, target) : await probeStream(s.published_url ?? s.draft_url, this.probe);
@@ -309,6 +312,7 @@ export class StationHealthService implements OnApplicationBootstrap, OnApplicati
   }
 
   async history(id: string): Promise<HealthCheck[]> {
+    if (!(await this.db.query('SELECT 1 FROM radio_stations WHERE id = $1', [id])).length) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
     const rows = await this.db.query<RecentRow & { target: 'published' | 'draft' }>(
       `SELECT check_region, checked_at, status, reason, http_status, latency_ms, target
          FROM station_health WHERE station_id = $1 ORDER BY checked_at DESC, id DESC LIMIT $2`,

@@ -120,4 +120,14 @@ describe('Idempotency-Key on mutations (Doc 17)', () => {
     // The older deletion path keeps working without one, for app builds made before the key.
     await http().get('/v1/me/settings').set(auth).expect(200);
   });
+
+  it('never stores an answer that carries a secret: a repeated support-code request mints a new code', async () => {
+    const auth = await bearer('idem-secret');
+    const first = await http().post('/v1/me/support-access/codes').set(auth).set('Idempotency-Key', 'key-secret-0001').expect(201);
+    const second = await http().post('/v1/me/support-access/codes').set(auth).set('Idempotency-Key', 'key-secret-0001').expect(201);
+    expect(second.headers['idempotent-replayed']).toBeUndefined();
+    expect(second.body.code).not.toBe(first.body.code);
+    const { rows } = await t.pool.query(`SELECT response_body::text AS body FROM idempotency_keys`);
+    expect(rows.map((r) => r.body).join(' ')).not.toContain(first.body.code);
+  });
 });

@@ -147,6 +147,11 @@ describe('stream health checks', () => {
     const again = await http().post(`/v1/admin/stations/${sid}/check`).set(as('editor'));
     expect(again.status).toBe(429);
     expect(again.body.code).toBe('CHECK_TOO_SOON');
+    // The wait left, in the body and the standard header.
+    const wait = again.body.details.retryAfterSeconds;
+    expect(wait).toBeGreaterThan(0);
+    expect(wait).toBeLessThanOrEqual(60);
+    expect(again.headers['retry-after']).toBe(String(wait));
     const audit = await t.pool.query(`SELECT actor, changes FROM audit_events WHERE action = 'station.check' AND target_id = $1`, [sid]);
     expect(audit.rows).toEqual([{ actor: expect.stringMatching(/^user:/), changes: { target: 'published', result: 'ok' } }]);
   });
@@ -158,6 +163,7 @@ describe('stream health checks', () => {
     expect((await view(sid)).health.state).toBe('unknown');
     const history = (await http().get(`/v1/admin/stations/${sid}/health`).set(as('editor')).expect(200)).body.checks;
     expect(history).toEqual([expect.objectContaining({ target: 'draft', ok: true, reason: 'ok', region: 'test-region' })]);
+    await http().get('/v1/admin/stations/7c2e9d10-3b4a-4f5e-8a6b-9c0d1e2f3a4b/health').set(as('editor')).expect(404);
   });
 
   it('keeps health routes to catalog staff', async () => {

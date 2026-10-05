@@ -31,7 +31,8 @@ export class DevicesController {
 
   /** Signs a device out of the account. Requires the user to have signed in within the last 5 minutes. */
   @Delete(':deviceId/session')
-  async revoke(@Req() req: Request, @Param('deviceId') deviceId: string): Promise<DeviceView> {
+  async revoke(@Req() req: Request, @Param('deviceId') deviceId: string, @Res({ passthrough: true }) res: Response): Promise<DeviceView> {
+    res.setHeader('Cache-Control', 'no-store');
     const id = parseDeviceId(deviceId);
     requireRecentSignIn(req);
     return this.devices.revoke(req.actor!.userId, id, req.requestId);
