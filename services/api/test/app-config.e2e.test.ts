@@ -47,7 +47,7 @@ describe('remote app config (/v1/config, /v1/admin/config)', () => {
       targets: { ios: { include: true, minBuild: null, maxBuild: null }, android: { include: true, minBuild: null, maxBuild: null } },
       publishedAt: null,
       expiresAt: null,
-      config: { minSupportedBuild: { ios: null, android: null }, features: { catalogBrowse: true, playlistImport: true, diagnosticsUpload: true, radioDirectory: true, videoPlayback: true, webBrowser: true }, catalogRefreshHours: 24 },
+      config: { minSupportedBuild: { ios: null, android: null }, features: { catalogBrowse: true, playlistImport: true, diagnosticsUpload: true, radioDirectory: true, videoPlayback: true, webBrowser: true, carScreenVideo: true }, catalogRefreshHours: 24 },
     });
     expect(res.headers.etag).toMatch(/^"d-production-/);
     await http().get('/v1/config').set('If-None-Match', res.headers.etag).expect(304);

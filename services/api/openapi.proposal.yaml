@@ -1904,15 +1904,16 @@ components:
         features:
           type: object
           additionalProperties: false
-          required: [catalogBrowse, playlistImport, diagnosticsUpload, radioDirectory, videoPlayback, webBrowser]
+          required: [catalogBrowse, playlistImport, diagnosticsUpload, radioDirectory, videoPlayback, webBrowser, carScreenVideo]
           description: Disable-only switches. true = the build's default (on); false turns a shipped feature off
           properties:
             catalogBrowse: { type: boolean }
             playlistImport: { type: boolean }
             diagnosticsUpload: { type: boolean }
             radioDirectory: { type: boolean, description: Search of the community radio directory (GET /v1/directory/radio) }
-            videoPlayback: { type: boolean, description: 'Video channels from playlists the user imported, on the phone or TV box only (never in CarPlay or Android Auto)' }
-            webBrowser: { type: boolean, description: 'In-app web browser (e.g. YouTube, Bilibili, TikTok sites), on the phone or TV box only' }
+            videoPlayback: { type: boolean, description: 'Video channels from playlists the user imported' }
+            webBrowser: { type: boolean, description: 'In-app web browser (e.g. YouTube, Bilibili, TikTok sites)' }
+            carScreenVideo: { type: boolean, description: 'Video channels and the in-app browser on the CarPlay or Android Auto screen. The user also has their own setting for it; false hides it for everyone.' }
         catalogRefreshHours: { type: integer, minimum: 1, maximum: 168, description: How often the app refreshes the radio catalog in the foreground }
     ConfigTarget:
       type: object
@@ -2475,9 +2476,9 @@ components:
             android: { type: [integer, 'null'], minimum: 1, maximum: 2147483647 }
         features:
           type: object
-          required: [catalogBrowse, playlistImport, diagnosticsUpload, radioDirectory, videoPlayback, webBrowser]
+          required: [catalogBrowse, playlistImport, diagnosticsUpload, radioDirectory, videoPlayback, webBrowser, carScreenVideo]
           description: 'Disable-only switches: true = the build''s default, false turns a shipped feature off'
-          properties: { catalogBrowse: { type: boolean }, playlistImport: { type: boolean }, diagnosticsUpload: { type: boolean }, radioDirectory: { type: boolean }, videoPlayback: { type: boolean }, webBrowser: { type: boolean } }
+          properties: { catalogBrowse: { type: boolean }, playlistImport: { type: boolean }, diagnosticsUpload: { type: boolean }, radioDirectory: { type: boolean }, videoPlayback: { type: boolean }, webBrowser: { type: boolean }, carScreenVideo: { type: boolean } }
         catalogRefreshHours: { type: integer, minimum: 1, maximum: 168 }
     AdminConfigTargets:
       type: object
@@ -2507,7 +2508,7 @@ components:
         features:
           type: object
           additionalProperties: false
-          properties: { catalogBrowse: { type: boolean }, playlistImport: { type: boolean }, diagnosticsUpload: { type: boolean }, radioDirectory: { type: boolean }, videoPlayback: { type: boolean }, webBrowser: { type: boolean } }
+          properties: { catalogBrowse: { type: boolean }, playlistImport: { type: boolean }, diagnosticsUpload: { type: boolean }, radioDirectory: { type: boolean }, videoPlayback: { type: boolean }, webBrowser: { type: boolean }, carScreenVideo: { type: boolean } }
         catalogRefreshHours: { type: integer, minimum: 1, maximum: 168 }
         targets:
           type: object
