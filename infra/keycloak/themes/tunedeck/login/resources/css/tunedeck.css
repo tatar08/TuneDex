@@ -59,6 +59,8 @@ div.kc-logo-text span { display: inline; }
 .pf-v5-c-form__label-text { font-weight: 600; }
 /* Same gap between every field (the code page put its label right under the email line) */
 .pf-v5-c-form__group + .pf-v5-c-form__group, #kc-form-login > div + div, #kc-otp-login-form > div + div { margin-top: 16px; }
+/* The code page shows the signed-in email above its form */
+#kc-otp-login-form { margin-top: 16px; }
 /* Password field and its eye button read as one rounded box */
 .pf-v5-c-input-group > .pf-v5-c-input-group__item:first-child .pf-v5-c-form-control,
 .pf-v5-c-input-group > .pf-v5-c-input-group__item:first-child .pf-v5-c-form-control::before { border-top-right-radius: 0; border-bottom-right-radius: 0; }
@@ -68,6 +70,9 @@ div.kc-logo-text span { display: inline; }
 }
 .pf-v5-c-input-group .pf-v5-c-button.pf-m-control::after { border: 1px solid var(--td-line) !important; border-left: 0 !important; border-radius: 0 12px 12px 0; }
 .pf-v5-c-input-group > .pf-v5-c-input-group__item:first-child .pf-v5-c-form-control::before { border-right: 0 !important; }
+.pf-v5-c-input-group__item { border: 0 !important; box-shadow: none !important; }
+.pf-v5-c-input-group__item + .pf-v5-c-input-group__item { margin-left: 0 !important; }
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control::before { border: 0 !important; }
 /* Language menu: the same rounded box */
 .pf-v5-c-menu-toggle, #login-select-toggle, #kc-locale select {
   border-radius: 12px !important; background: var(--td-soft); --pf-v5-c-menu-toggle--before--BorderColor: var(--td-line);
