@@ -1933,7 +1933,7 @@ components:
         android: { $ref: '#/components/schemas/ConfigTarget' }
     ConfigDocument:
       type: object
-      required: [jws, schemaVersion, release, environment, targets, publishedAt, expiresAt, config]
+      required: [jws, schemaVersion, release, environment, targets, publishedAt, expiresAt, issuedAt, validUntil, config]
       description: Everything except jws is a convenience copy of the JWS payload, for debugging; apps act only on the verified payload, which holds exactly these fields without jws
       properties:
         jws: { type: string, description: 'Compact JWS, header {alg: EdDSA, kid, typ: tunedeck-config+jws}' }
@@ -1943,6 +1943,8 @@ components:
         targets: { $ref: '#/components/schemas/ConfigTargets' }
         publishedAt: { type: string, format: date-time, nullable: true, description: null for release 0 }
         expiresAt: { type: string, format: date-time, nullable: true, description: 'null for release 0; after it apps use their built-in defaults' }
+        issuedAt: { type: string, format: date-time, description: When this copy was signed (re-signed about every hour) }
+        validUntil: { type: string, format: date-time, description: 'Apps refuse a newly fetched copy whose validUntil has passed (a replayed old copy), and never move to a lower release than one they already verified. At most issuedAt + 24 h, never after expiresAt' }
         config: { $ref: '#/components/schemas/ConfigPayload' }
     DirectoryStation:
       type: object

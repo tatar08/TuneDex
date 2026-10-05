@@ -40,8 +40,19 @@ export interface SignedConfig {
   targets: Targets;
   publishedAt: string | null;
   expiresAt: string | null;
+  /**
+   * When this copy was signed, and until when an app may accept it as fresh (at most a day, never past
+   * expiresAt). A captured old copy cannot be replayed later to roll apps back to an older release.
+   */
+  issuedAt: string;
+  validUntil: string;
   config: AppConfigPayload;
 }
+
+/** A signed copy is re-signed after this long, so validUntil keeps moving forward. */
+const RESIGN_AFTER_MS = 60 * 60_000;
+/** How long an app may accept one signed copy. */
+const SIGNED_COPY_VALID_MS = 24 * 60 * 60_000;
 
 export interface ReleaseView {
   release: number;
@@ -160,7 +171,7 @@ const releaseView = (r: ReleaseRow, viewer: string): ReleaseView => ({
 @Injectable()
 export class AppConfigService {
   /** Signed documents by release (0 = defaults, per channel); a release never changes, so entries never go stale. */
-  private readonly cache = new Map<string, { body: { jws: string } & SignedConfig; etag: string }>();
+  private readonly cache = new Map<string, { body: { jws: string } & SignedConfig; etag: string; signedAt: number }>();
 
   constructor(
     private readonly db: Database,
@@ -401,7 +412,9 @@ export class AppConfigService {
     const release = row ? Number(row.release) : 0;
     const key = row ? `r${release}` : `d-${client.channel}`;
     const hit = this.cache.get(key);
-    if (hit) return hit;
+    const now = Date.now();
+    if (hit && now - hit.signedAt < RESIGN_AFTER_MS) return hit;
+    const expires = row?.expires_at.getTime() ?? Infinity;
     const doc: SignedConfig = {
       schemaVersion: row?.schema_version ?? CONFIG_SCHEMA_VERSION,
       release,
@@ -409,12 +422,14 @@ export class AppConfigService {
       targets: row ? normalizeTargets(row.targets) : DEFAULT_TARGETS,
       publishedAt: row?.published_at.toISOString() ?? null,
       expiresAt: row?.expires_at.toISOString() ?? null,
+      issuedAt: new Date(now).toISOString(),
+      validUntil: new Date(Math.min(now + SIGNED_COPY_VALID_MS, expires)).toISOString(),
       config: row ? normalize(row.payload) : DEFAULT_CONFIG,
     };
     const jws = await new CompactSign(new TextEncoder().encode(JSON.stringify(doc)))
       .setProtectedHeader({ alg: 'EdDSA', kid: this.signer.keyId, typ: 'tunedeck-config+jws' })
       .sign(this.signer.key);
-    const entry = { body: { jws, ...doc }, etag: `"${key}-${this.signer.keyId}"` };
+    const entry = { body: { jws, ...doc }, etag: `"${key}-${this.signer.keyId}-${now.toString(36)}"`, signedAt: now };
     if (this.cache.size > 200) this.cache.clear();
     this.cache.set(key, entry);
     return entry;
