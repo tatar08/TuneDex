@@ -395,3 +395,34 @@ test('sign-in links to register and recover, each with its states, in Thai or En
   await page.goto(`${base}/login`);
   await expect(page.getByRole('heading', { name: 'Sign in to TuneDeck' })).toBeVisible();
 });
+
+test('pages run only scripts carrying the per-request nonce, and nothing the policy blocks', async ({ browser }) => {
+  idp.setUser('e2e-csp');
+  const page = await (await browser.newContext()).newPage();
+  const blocked: string[] = [];
+  page.on('console', (m) => {
+    if (/Content Security Policy|Refused to (execute|load|apply)/i.test(m.text())) blocked.push(m.text());
+  });
+  const first = await page.goto(`${base}/login`);
+  const csp = first!.headers()['content-security-policy'];
+  expect(csp).toMatch(/script-src 'self' 'nonce-[A-Za-z0-9+/=]+' 'strict-dynamic'/);
+  expect(csp).toContain("frame-ancestors 'none'");
+  const again = (await page.goto(`${base}/login`))!.headers()['content-security-policy'];
+  expect(again).not.toBe(csp);
+  // Hydrated pages still work: sign in and save a setting.
+  await page.getByRole('link', { name: 'เข้าสู่ระบบ' }).click();
+  await expect(page.getByRole('heading', { name: 'การตั้งค่า' })).toBeVisible();
+  await page.getByRole('radio', { name: 'มืด' }).check();
+  await page.getByRole('button', { name: 'บันทึก' }).click();
+  await expect(page.getByTestId('saved-revision')).toHaveText('บันทึกแล้ว · revision 1');
+  expect(blocked).toEqual([]);
+  // Markup injected into the page (the usual XSS shape) cannot run its inline handler.
+  await page.evaluate(() => {
+    const div = document.createElement('div');
+    div.innerHTML = '<img src="data:," onerror="window.__injected = true">';
+    document.body.appendChild(div);
+  });
+  await page.waitForTimeout(300);
+  const ran = await page.evaluate(() => (window as unknown as { __injected?: boolean }).__injected === true);
+  expect(ran).toBe(false);
+});
