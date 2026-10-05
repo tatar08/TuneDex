@@ -294,6 +294,7 @@ export type IncidentCode =
   | 'stations_suspect'
   | 'station_checker_stale'
   | 'station_rights_expiring'
+  | 'backup_stale'
   | 'account_deletion_failed'
   | 'account_deletion_stuck'
   | 'account_deletion_late'

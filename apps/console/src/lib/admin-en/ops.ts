@@ -24,6 +24,8 @@ export const EN_OPS: Record<string, string> = {
   'ตัวตรวจสตรีมไม่ได้รัน': 'Stream checker is not running',
   'ไม่มีผลตรวจใหม่นานเกิน 2.5 รอบ': 'No new check results for over 2.5 rounds',
   'สิทธิ์เผยแพร่ใกล้หมด': 'Station rights ending soon',
+  'ไม่มี backup ใหม่': 'No recent backup',
+  'backup ล่าสุดเมื่อ {0} ชั่วโมงก่อน เกิน 24 ชั่วโมง ตรวจงาน backup.sh': 'Last backup {0} hours ago, over 24 hours; check the backup.sh job',
   '{0} รายงานจาก {1} เครื่อง · {2} เหตุการณ์': '{0} reports from {1} devices · {2} events',
   '{0} ล่าสุด · เฉพาะผู้ที่ยินยอมส่ง': 'Last {0} · only people who agreed to send',
   '{0} เหตุการณ์ · ล้มเหลว {1}': '{0} events · {1} failed',

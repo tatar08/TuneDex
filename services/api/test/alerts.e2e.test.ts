@@ -180,4 +180,16 @@ describe('Doc 17 alerts', () => {
     await alerts().run(new Date());
     expect(await open()).not.toContain('station_rights_expiring');
   });
+
+  it('alerts when the newest recorded backup is over 26 hours old, and stays quiet where backup.sh never ran', async () => {
+    await alerts().run(new Date());
+    expect(await open()).not.toContain('backup_stale');
+    await t.pool.query(`INSERT INTO backup_runs (finished_at, tables, bytes) VALUES (now() - interval '30 hours', 30, 1000)`);
+    await alerts().run(new Date());
+    expect(await open()).toContain('backup_stale');
+    expect((await t.pool.query(`SELECT severity, value FROM alerts WHERE code = 'backup_stale' AND resolved_at IS NULL`)).rows).toEqual([{ severity: 'critical', value: 30 }]);
+    await t.pool.query(`INSERT INTO backup_runs (tables, bytes) VALUES (30, 1000)`);
+    await alerts().run(new Date());
+    expect(await open()).not.toContain('backup_stale');
+  });
 });

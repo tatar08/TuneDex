@@ -29,6 +29,7 @@ const INCIDENTS: Record<IncidentCode, { title: string; detail: string; href?: st
   api_latency: { title: 'API ตอบช้า', detail: 'p95 {0} ms เกิน 1 วินาที ใน 10 นาทีล่าสุด', href: '/admin/logs' },
   stations_suspect: { title: 'สถานีน่าสงสัย', detail: '{0} สถานีตรวจไม่ผ่าน 3 ครั้งติด รอแอดมินตรวจ', href: '/admin/stations' },
   station_checker_stale: { title: 'ตัวตรวจสตรีมไม่ได้รัน', detail: 'ไม่มีผลตรวจใหม่นานเกิน 2.5 รอบ' },
+  backup_stale: { title: 'ไม่มี backup ใหม่', detail: 'backup ล่าสุดเมื่อ {0} ชั่วโมงก่อน เกิน 24 ชั่วโมง ตรวจงาน backup.sh' },
   station_rights_expiring: { title: 'สิทธิ์เผยแพร่ใกล้หมด', detail: '{0} สถานีสิทธิ์จะหมดใน 14 วัน ต้องเพิ่มหลักฐานใหม่ ไม่อย่างนั้นจะหายจากแอป', href: '/admin/stations' },
   no_recent_traffic: { title: 'ไม่มีคำขอเข้ามาเลย', detail: 'ไม่มีคำขอใน 15 นาทีล่าสุด ตัวเลขอาจไม่ใช่สถานะตอนนี้' },
 };
