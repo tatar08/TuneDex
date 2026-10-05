@@ -75,6 +75,11 @@ export interface AppConfig {
     region: string;
     runner: 'api' | 'worker';
   };
+  /**
+   * Community radio directory search (Radio Browser, decided by Tar 2026-10-05). Off unless RADIO_BROWSER_BASE_URL
+   * is set to one Radio Browser server, e.g. https://de1.api.radio-browser.info.
+   */
+  radioDirectory: { baseUrl: string } | null;
 }
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
@@ -126,6 +131,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     corsAllowedOrigins: loadCorsOrigins(env, appEnv),
     alerts: loadAlerts(env),
     stationCheck: loadStationCheck(env),
+    radioDirectory: loadRadioDirectory(env),
   };
 }
 
@@ -214,6 +220,19 @@ function loadAlerts(env: NodeJS.ProcessEnv): AppConfig['alerts'] {
     if (u.protocol !== 'https:' || u.username || u.password) throw new Error('ALERT_WEBHOOK_URL must be an https URL');
   }
   return { enabled: flag(env, 'ALERTS_ENABLED', true), webhookUrl: raw || null };
+}
+
+function loadRadioDirectory(env: NodeJS.ProcessEnv): AppConfig['radioDirectory'] {
+  const raw = env.RADIO_BROWSER_BASE_URL?.trim() ?? '';
+  if (!raw) return null;
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error('RADIO_BROWSER_BASE_URL must be an https URL');
+  }
+  if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash) throw new Error('RADIO_BROWSER_BASE_URL must be an https URL');
+  return { baseUrl: u.origin + u.pathname.replace(/\/+$/, '') };
 }
 
 function loadCorsOrigins(env: NodeJS.ProcessEnv, appEnv: AppEnv): string[] {

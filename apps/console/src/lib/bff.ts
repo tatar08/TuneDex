@@ -377,7 +377,34 @@ export interface JobsPage {
 const JOB_ID = /^(?:[0-9a-f]{64}|ex_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|se_[0-9a-f]{64})$/;
 
 /** GET /v1/admin/config (Doc 17 /admin/config): the draft, the current and recent releases. */
-export type ConfigFeature = 'catalogBrowse' | 'playlistImport' | 'diagnosticsUpload';
+/** A community station from Radio Browser (GET /v1/directory/radio). */
+export interface DirectoryStation {
+  id: string;
+  name: string;
+  country: string | null;
+  language: string | null;
+  genres: string[];
+  streamUrl: string;
+  codec: 'mp3' | 'aac' | 'hls';
+  bitrateKbps: number | null;
+  logoUrl: string | null;
+  homepageUrl: string | null;
+}
+export interface DirectorySearch {
+  stations: DirectoryStation[];
+  nextOffset: number | null;
+  attribution: string;
+}
+export interface DirectoryBlock {
+  id: string;
+  kind: 'station' | 'host';
+  value: string;
+  reason: string;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export type ConfigFeature = 'catalogBrowse' | 'playlistImport' | 'diagnosticsUpload' | 'radioDirectory';
 export interface AppConfigPayload {
   minSupportedBuild: { ios: number | null; android: number | null };
   features: Record<ConfigFeature, boolean>;
@@ -758,6 +785,28 @@ export function createBff(deps: BffDeps) {
     jobRetry: (req: Request, id: string) =>
       timed(req, '/bff/admin/jobs/:id/retry', async (requestId) =>
         JOB_ID.test(id) ? adminProxy(req, requestId, `/v1/admin/jobs/${id}/retry`, true) : notFound(requestId),
+      ),
+
+    /** Server-side read for /admin/directory: the blocks, and what users would find for `q`. Null means sign in again. */
+    async loadDirectory(
+      ctx: SessionContext,
+      q: string,
+    ): Promise<{ status: number; blocks?: DirectoryBlock[]; search?: DirectorySearch | null; searchStatus?: number } | null> {
+      const res = await callApi(ctx, '/v1/admin/directory/blocks', { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      if (!res.ok) return { status: res.status };
+      const { blocks } = (await res.json()) as { blocks: DirectoryBlock[] };
+      const query = q.trim().slice(0, 80);
+      if (!query) return { status: 200, blocks, search: null };
+      const found = await callApi(ctx, `/v1/directory/radio?${new URLSearchParams({ q: query, limit: '50' })}`, { method: 'GET' }, `web_${randomUUID()}`);
+      if (!found) return null;
+      return found.ok ? { status: 200, blocks, search: (await found.json()) as DirectorySearch } : { status: 200, blocks, search: null, searchStatus: found.status };
+    },
+    /** POST /bff/admin/directory/blocks and …/{id}/remove, each with a reason; the API checks roles and audits. */
+    directoryBlock: (req: Request) => timed(req, '/bff/admin/directory/blocks', (requestId) => adminProxy(req, requestId, '/v1/admin/directory/blocks', true)),
+    directoryUnblock: (req: Request, id: string) =>
+      timed(req, '/bff/admin/directory/blocks/:id/remove', async (requestId) =>
+        /^[1-9]\d{0,17}$/.test(id) ? adminProxy(req, requestId, `/v1/admin/directory/blocks/${id}/remove`, true) : notFound(requestId),
       ),
 
     /** Server-side read for /admin/config. Null means the user must sign in again. */

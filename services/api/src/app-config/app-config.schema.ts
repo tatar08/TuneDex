@@ -8,7 +8,7 @@ import { ApiError } from '../common/api-error';
  */
 export const CONFIG_SCHEMA_VERSION = 1;
 
-export const FEATURES = ['catalogBrowse', 'playlistImport', 'diagnosticsUpload'] as const;
+export const FEATURES = ['catalogBrowse', 'playlistImport', 'diagnosticsUpload', 'radioDirectory'] as const;
 export type Feature = (typeof FEATURES)[number];
 
 export interface AppConfigPayload {
@@ -23,7 +23,7 @@ export interface AppConfigPayload {
 /** What the apps use when there is no release yet, or the last one expired. Same as the builds' own defaults. */
 export const DEFAULT_CONFIG: AppConfigPayload = {
   minSupportedBuild: { ios: null, android: null },
-  features: { catalogBrowse: true, playlistImport: true, diagnosticsUpload: true },
+  features: { catalogBrowse: true, playlistImport: true, diagnosticsUpload: true, radioDirectory: true },
   catalogRefreshHours: 24,
 };
 
