@@ -120,4 +120,5 @@ a.btn { display: inline-block; text-decoration: none; }
 .shell.auth .nav { border-bottom: 0; padding-bottom: 0; }
 .shell.auth h1 { margin-top: 36px; font-size: 28px; }
 .shell.auth > .btn { display: block; width: 100%; text-align: center; padding: 13px 22px; }
-@media (max-width: 640px) { .shell.auth { margin-top: 0; padding-top: 24px; } }
+/* On a phone the short sign-in card sits in the middle of the screen, not at the top */
+@media (max-width: 640px) { .shell.auth { margin-top: 0; padding-top: 24px; display: flex; flex-direction: column; justify-content: center; } .shell.auth .nav { margin-bottom: auto; } .shell.auth > :last-child { margin-bottom: auto; } }

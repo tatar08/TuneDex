@@ -28,21 +28,50 @@ html, body, .pf-v5-c-login { background: var(--td-bg) !important; color: var(--t
   content: ""; width: 44px; height: 44px; flex: none; background: url("../img/logo.svg") center / contain no-repeat;
 }
 div.kc-logo-text { background-image: none; }
+/* keycloak.v2 paints the header text white for its dark backdrop */
+#kc-header-wrapper, #kc-header-wrapper *, .pf-v5-c-login__header, .pf-v5-c-login__header * { color: var(--td-fg) !important; }
 div.kc-logo-text span { display: inline; }
 
 /* The card */
 .pf-v5-c-login__main {
   background: var(--td-panel) !important; border-radius: 28px; box-shadow: 0 20px 50px -20px rgba(15, 23, 42, 0.18);
-  overflow: hidden; border: 0;
+  overflow: hidden; border: 0 !important;
 }
+/* No coloured strip along the top of the card */
+.pf-v5-c-login__main::before, .pf-v5-c-login__main::after { display: none !important; }
 .pf-v5-c-login__main-header { padding-top: 32px; }
 .pf-v5-c-login__main-header .pf-v5-c-title, #kc-page-title { font-weight: 800; letter-spacing: -0.02em; color: var(--td-fg); }
-.pf-v5-c-login__main-footer-band { background: var(--td-soft); border-top: 0; }
+.pf-v5-c-login__main-footer-band { background: var(--td-soft); border-top: 0; border-radius: 16px; padding: 16px 20px !important; margin-block: 8px 0; }
+.pf-v5-c-login__main-footer-band-item, .pf-v5-c-login__main-footer-band > * { margin: 0 !important; padding: 0 !important; }
 
-/* Fields */
-.pf-v5-c-form-control { border-radius: 12px; --pf-v5-c-form-control--before--BorderColor: var(--td-line); --pf-v5-c-form-control--after--BorderColor: transparent; background: var(--td-soft); }
-.pf-v5-c-form-control:focus-within { --pf-v5-c-form-control--after--BorderColor: var(--td-accent); }
+/* Fields: one rounded soft box, a quiet border, the accent on focus (no PatternFly underline or orange ring) */
+.pf-v5-c-form-control {
+  border-radius: 12px; background: var(--td-soft);
+  --pf-v5-c-form-control--before--BorderColor: var(--td-line);
+  --pf-v5-c-form-control--after--BorderColor: transparent;
+  --pf-v5-c-form-control--hover--after--BorderColor: transparent;
+  --pf-v5-c-form-control--focus--after--BorderColor: transparent;
+}
+.pf-v5-c-form-control::before { border: 1px solid var(--td-line) !important; border-radius: 12px; }
+.pf-v5-c-form-control::after { border: 0 !important; }
+.pf-v5-c-form-control:focus-within::before { border-color: var(--td-accent) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--td-accent) 22%, transparent); }
+.pf-v5-c-form-control > input, .pf-v5-c-form-control > select, .pf-v5-c-form-control > textarea { outline: none !important; background: transparent; }
 .pf-v5-c-form__label-text { font-weight: 600; }
+/* Password field and its eye button read as one rounded box */
+.pf-v5-c-input-group > .pf-v5-c-input-group__item:first-child .pf-v5-c-form-control,
+.pf-v5-c-input-group > .pf-v5-c-input-group__item:first-child .pf-v5-c-form-control::before { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control {
+  border-radius: 0 12px 12px 0; background: var(--td-soft); color: var(--td-muted);
+  --pf-v5-c-button--after--BorderColor: var(--td-line); --pf-v5-c-button--after--BorderRadius: 0 12px 12px 0;
+}
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control::after { border: 1px solid var(--td-line) !important; border-left: 0 !important; border-radius: 0 12px 12px 0; }
+/* Language menu: the same rounded box */
+.pf-v5-c-menu-toggle, #login-select-toggle, #kc-locale select {
+  border-radius: 12px !important; background: var(--td-soft); --pf-v5-c-menu-toggle--before--BorderColor: var(--td-line);
+  --pf-v5-c-menu-toggle--after--BorderColor: transparent;
+}
+.pf-v5-c-menu-toggle::before { border: 1px solid var(--td-line) !important; border-radius: 12px; }
+.pf-v5-c-menu-toggle::after { border: 0 !important; }
 
 /* Buttons */
 .pf-v5-c-button.pf-m-primary { background: var(--td-ink); color: var(--td-ink-t); border-radius: 14px; font-weight: 700; padding-block: 12px; }
