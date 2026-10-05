@@ -110,9 +110,11 @@ describe('Pro purchase verification (/v1/billing, /v1/webhooks)', () => {
     expect((await verifyApple('buyer', signed)).body.state).toBe('verified');
     expect((await http().get('/v1/me/entitlements').set(await bearer('buyer'))).body.pro).toEqual({ apple: 'verified', google: 'none' });
 
-    // The same purchase sent by another account: refused, whether or not the app set the account token.
-    expect((await verifyApple('other', await sign(tx()))).status).toBe(409);
+    // The same purchase sent by another account is refused: it names the buyer, or it names no account at all.
     expect((await verifyApple('other', signed)).body).toMatchObject({ code: 'PURCHASE_INVALID', details: { reason: 'account_mismatch' } });
+    expect((await verifyApple('other', await sign(tx()))).body).toMatchObject({ code: 'PURCHASE_INVALID', details: { reason: 'account_unbound' } });
+    // Even a receipt claiming the other account cannot take a purchase a live account already holds.
+    expect((await verifyApple('other', await sign(tx({ appAccountToken: userId.other })))).status).toBe(409);
 
     const audit = await t.pool.query(`SELECT action, changes FROM audit_events WHERE target_type = 'purchase'`);
     expect(audit.rows).toEqual([{ action: 'purchase.verified', changes: { store: 'apple', productId: 'tunedeck.pro.lifetime', environment: 'production' } }]);
@@ -159,23 +161,37 @@ describe('Pro purchase verification (/v1/billing, /v1/webhooks)', () => {
     expect(restored.rows).toEqual([{ actor: 'system:apple', changes: { store: 'apple', productId: 'tunedeck.pro.lifetime', reason: 'refund_reversed' } }]);
   });
 
+  it('keeps a purchase refunded before it was ever verified revoked, and a reversed refund lifts that', async () => {
+    const notify = async (type: string, t2: object) =>
+      http().post('/v1/webhooks/apple').send({ signedPayload: await sign({ notificationType: type, notificationUUID: randomUUID(), data: { bundleId: 'app.tunedeck', environment: 'Production', signedTransactionInfo: await sign(t2) } }) });
+    const early = tx({ originalTransactionId: '3000000001', appAccountToken: userId.other });
+    expect((await notify('REFUND', early)).status).toBe(200);
+    // The old, pre-refund signed transaction cannot grant Pro afterwards.
+    expect((await verifyApple('other', await sign(early))).body.state).toBe('revoked');
+    expect((await http().get('/v1/me/entitlements').set(await bearer('other'))).body.pro.apple).toBe('revoked');
+    expect((await notify('REFUND_REVERSED', early)).status).toBe(200);
+    expect((await http().get('/v1/me/entitlements').set(await bearer('other'))).body.pro.apple).toBe('verified');
+    // Only a digest is kept for the tombstone.
+    expect(JSON.stringify((await t.pool.query('SELECT * FROM purchase_revocations')).rows)).not.toContain('3000000001');
+  });
+
   it('verifies a Google purchase with the Play API, acknowledges it after storing, and handles pending and voided purchases', async () => {
     const d = await bearer('droid');
     const verify = (purchaseToken: string, productId = 'pro_lifetime') => http().post('/v1/billing/verify').set(d).send({ store: 'google', productId, purchaseToken });
-    google.purchases.set('tok-paid-0001', { purchaseState: 0, acknowledgementState: 0 });
+    google.purchases.set('tok-paid-0001', { purchaseState: 0, acknowledgementState: 0, obfuscatedExternalAccountId: userId.droid });
     expect((await verify('tok-paid-0001')).body).toMatchObject({ store: 'google', state: 'verified' });
     expect(google.acks).toEqual(['tok-paid-0001']);
     expect((await verify('tok-unknown-01')).body.details).toEqual({ reason: 'unknown_purchase' });
     expect((await verify('tok-paid-0001', 'coins_100')).body.details).toEqual({ reason: 'unknown_product' });
 
     // A store outage grants nothing new.
-    google.purchases.set('tok-outage-01', { purchaseState: 0, acknowledgementState: 0 });
+    google.purchases.set('tok-outage-01', { purchaseState: 0, acknowledgementState: 0, obfuscatedExternalAccountId: userId.droid });
     google.down = true;
     expect((await verify('tok-outage-01')).status).toBe(503);
     google.down = false;
 
     // Pending: no Pro and no acknowledgement until Google says it completed.
-    google.purchases.set('tok-pending-1', { purchaseState: 2, acknowledgementState: 0 });
+    google.purchases.set('tok-pending-1', { purchaseState: 2, acknowledgementState: 0, obfuscatedExternalAccountId: userId.droid });
     expect((await verify('tok-pending-1')).body.state).toBe('pending');
     expect(google.acks).toEqual(['tok-paid-0001']);
 
