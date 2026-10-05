@@ -36,6 +36,7 @@ export type IncidentCode =
   | 'account_export_stuck'
   | 'idp_session_end_stuck'
   | 'job_dead_letter'
+  | 'station_rights_expiring'
   | 'no_recent_traffic';
 
 export interface Incident {

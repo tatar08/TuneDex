@@ -18,7 +18,8 @@ export type AlertCode =
   | 'account_export_stuck'
   | 'idp_session_end_stuck'
   | 'job_dead_letter'
-  | 'station_checker_stale';
+  | 'station_checker_stale'
+  | 'station_rights_expiring';
 type Severity = 'critical' | 'warning';
 
 export interface Reading {
@@ -48,6 +49,8 @@ export const RULES = {
    */
   queueStuckMs: 5 * 60_000,
   deletionLateDays: 25,
+  /** Doc 14 rights expiry: a visible station whose rights end this soon needs a renewed record or it leaves the catalog. */
+  rightsExpiringDays: 14,
 } as const;
 const EVERY_MS = 60_000;
 const LOCK_KEY = 7_421_031;
@@ -62,6 +65,7 @@ const DESCRIBE: Record<AlertCode, (v: number | null, n: number | null) => string
   job_dead_letter: (v) => `งานเบื้องหลังลองครบ 5 ครั้งแล้วไม่สำเร็จ ${v} งาน รอทีมงานสั่งลองใหม่`,
   account_deletion_late: (v) => `คำขอลบบัญชีค้างเกิน 25 วัน ${v} คำขอ (กำหนด 30 วัน)`,
   station_checker_stale: () => 'ตัวตรวจสตรีมไม่ได้รันเกิน 2.5 รอบ',
+  station_rights_expiring: (v) => `สิทธิ์เผยแพร่ของ ${v} สถานีจะหมดใน 14 วัน ต่ออายุหลักฐานก่อน ไม่อย่างนั้นสถานีจะหายจากแอป`,
 };
 
 /**
@@ -115,7 +119,7 @@ export class AlertService implements OnApplicationBootstrap, OnApplicationShutdo
     const at = now.toISOString();
     const req = `FROM operational_logs WHERE event_code = 'HTTP_REQUEST' AND logged_at >= $1 AND logged_at < $2`;
     const since = (ms: number) => new Date(now.getTime() - ms).toISOString();
-    const [[errors], [latency], [deletions], queues, [lastCheck], [live]] = await Promise.all([
+    const [[errors], [latency], [deletions], queues, [lastCheck], [live], [expiring]] = await Promise.all([
       this.db.query<{ n: string; s5: string }>(`SELECT count(*) AS n, count(*) FILTER (WHERE status >= 500) AS s5 ${req}`, [since(RULES.errorRate.windowMs), at]),
       this.db.query<{ n: string; p95: number | null }>(`SELECT count(*) AS n, percentile_disc(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95 ${req}`, [
         since(RULES.latency.windowMs),
@@ -134,6 +138,11 @@ export class AlertService implements OnApplicationBootstrap, OnApplicationShutdo
       ),
       this.db.query<{ at: Date | null }>(`SELECT max(checked_at) AS at FROM station_health WHERE target = 'published'`),
       this.db.query<{ n: string }>(`SELECT count(*) AS n FROM radio_stations WHERE published IS NOT NULL AND disabled_at IS NULL`),
+      this.db.query<{ n: string }>(
+        `SELECT count(*) AS n FROM radio_stations
+          WHERE published IS NOT NULL AND disabled_at IS NULL AND rights_expires_at > $1 AND rights_expires_at <= $1::timestamptz + make_interval(days => $2)`,
+        [at, RULES.rightsExpiringDays],
+      ),
     ]);
 
     const n = Number(errors.n);
@@ -161,6 +170,7 @@ export class AlertService implements OnApplicationBootstrap, OnApplicationShutdo
       count('account_deletion_late', 'critical', Number(deletions.late)),
       count('account_export_stuck', 'warning', stuck('account_export')),
       count('job_dead_letter', 'critical', queues.reduce((n, q) => n + Number(q.dead), 0)),
+      count('station_rights_expiring', 'warning', Number(expiring.n)),
     ];
     // Without a Keycloak admin client no session end is ever attempted, so that queue has nothing to say.
     if (this.config.idpAdmin) readings.push(count('idp_session_end_stuck', 'warning', stuck('idp_session_end')));

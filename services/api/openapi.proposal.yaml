@@ -2146,7 +2146,7 @@ components:
             type: object
             required: [code, severity, count]
             properties:
-              code: { type: string, enum: [api_error_rate, api_latency, stations_suspect, station_checker_stale, account_deletion_failed, account_deletion_stuck, account_deletion_late, account_export_stuck, idp_session_end_stuck, job_dead_letter, no_recent_traffic] }
+              code: { type: string, enum: [api_error_rate, api_latency, stations_suspect, station_checker_stale, account_deletion_failed, account_deletion_stuck, account_deletion_late, account_export_stuck, idp_session_end_stuck, job_dead_letter, station_rights_expiring, no_recent_traffic] }
               severity: { type: string, enum: [critical, warning] }
               count: { type: integer, description: 'Affected things (stations, requests, deletions; p95 ms for api_latency); meaning depends on code' }
               since: { type: string, format: date-time, description: Present when the incident is an open alert }

@@ -146,4 +146,38 @@ describe('Doc 17 alerts', () => {
     await alerts().run(new Date());
     expect((await open()).filter((c) => c.includes('session') || c.startsWith('job_') || c.startsWith('account_'))).toEqual([]);
   });
+
+  it('warns while a visible station has rights ending within 14 days, never naming the station', async () => {
+    const [{ id: author }] = (await t.pool.query(`SELECT id FROM users LIMIT 1`)).rows;
+    const draft = { name: 'Rights Ending FM', country: 'TH', language: 'th', genres: ['jazz'], streamUrl: 'https://radio.test/r', codec: 'mp3', bitrateKbps: 128 };
+    const add = async (endsInDays: number | null, disabled = false) =>
+      (
+        await t.pool.query(
+          `INSERT INTO radio_stations (draft, created_by, updated_by, published, published_revision, published_by, published_at, rights_expires_at, disabled_at)
+           VALUES ($1, $2, $2, $1, 1, $2, now(), CASE WHEN $3::int IS NULL THEN NULL ELSE now() + make_interval(days => $3::int) END, CASE WHEN $4 THEN now() END) RETURNING id`,
+          [draft, author, endsInDays, disabled],
+        )
+      ).rows[0].id as string;
+    await add(60);
+    await add(null);
+    await add(5, true);
+    await alerts().run(new Date());
+    expect(await open()).not.toContain('station_rights_expiring');
+
+    const soon = await add(5);
+    const before = posts.length;
+    await alerts().run(new Date());
+    expect(await open()).toContain('station_rights_expiring');
+    const [row] = (await t.pool.query(`SELECT value FROM alerts WHERE code = 'station_rights_expiring' AND resolved_at IS NULL`)).rows;
+    expect(row.value).toBe(1);
+    const sent = posts.slice(before).map((p) => p.text).join('\n');
+    expect(sent).toContain('[station_rights_expiring]');
+    expect(sent).not.toContain('Rights Ending FM');
+    expect(sent).not.toContain(soon);
+
+    // A renewed record moves the end out of the window and the alert resolves.
+    await t.pool.query(`UPDATE radio_stations SET rights_expires_at = now() + interval '200 days' WHERE id = $1`, [soon]);
+    await alerts().run(new Date());
+    expect(await open()).not.toContain('station_rights_expiring');
+  });
 });

@@ -23,6 +23,8 @@ export const EN_OPS: Record<string, string> = {
   '{0} สถานีตรวจไม่ผ่าน 3 ครั้งติด รอแอดมินตรวจ': '{0} stations failed 3 checks in a row and wait for an admin',
   'ตัวตรวจสตรีมไม่ได้รัน': 'Stream checker is not running',
   'ไม่มีผลตรวจใหม่นานเกิน 2.5 รอบ': 'No new check results for over 2.5 rounds',
+  'สิทธิ์เผยแพร่ใกล้หมด': 'Station rights ending soon',
+  '{0} สถานีสิทธิ์จะหมดใน 14 วัน ต้องเพิ่มหลักฐานใหม่ ไม่อย่างนั้นจะหายจากแอป': '{0} stations have rights ending within 14 days; add new evidence or they leave the apps',
   'ไม่มีคำขอเข้ามาเลย': 'No requests coming in',
   'ไม่มีคำขอใน 15 นาทีล่าสุด ตัวเลขอาจไม่ใช่สถานะตอนนี้': 'No requests in the last 15 minutes; the figures may not reflect the current state',
   'ตั้งแต่ {0}': 'since {0}',
