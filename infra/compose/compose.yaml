@@ -35,7 +35,7 @@ services:
       KC_HOSTNAME: http://keycloak.localhost:8080
       KC_HEALTH_ENABLED: "true"
       # Placeholders in keycloak/tunedeck-realm.json.
-      TUNEDECK_CONSOLE_BASE_URL: http://localhost:3200
+      TUNEDECK_CONSOLE_BASE_URL: http://localhost:${CONSOLE_HOST_PORT:-3200}
       TUNEDECK_CONSOLE_CLIENT_SECRET: ${CONSOLE_CLIENT_SECRET:?set CONSOLE_CLIENT_SECRET in .env}
       TUNEDECK_API_ADMIN_CLIENT_SECRET: ${API_ADMIN_CLIENT_SECRET:?set API_ADMIN_CLIENT_SECRET in .env}
     volumes:
@@ -67,7 +67,7 @@ services:
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${API_ADMIN_CLIENT_SECRET}
       STAFF_MFA_ACR: mfa
     ports:
-      - "127.0.0.1:3100:3100"
+      - "127.0.0.1:${API_HOST_PORT:-3100}:3100"
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_healthy }
@@ -76,7 +76,7 @@ services:
     build: ../../apps/console
     environment:
       <<: *oidc
-      CONSOLE_BASE_URL: http://localhost:3200
+      CONSOLE_BASE_URL: http://localhost:${CONSOLE_HOST_PORT:-3200}
       API_BASE_URL: http://api:3100
       APP_ENV: dev
       BUILD_VERSION: local
@@ -86,7 +86,7 @@ services:
       OIDC_MFA_ACR: mfa
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env (32+ characters)}
     ports:
-      - "127.0.0.1:3200:3200"
+      - "127.0.0.1:${CONSOLE_HOST_PORT:-3200}:3200"
     depends_on:
       api: { condition: service_started }
 
