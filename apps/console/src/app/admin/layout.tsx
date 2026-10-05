@@ -5,6 +5,7 @@ import { translator } from '@/lib/admin-i18n';
 import { pageLang } from '@/lib/lang';
 import { getBff } from '@/lib/runtime';
 import { AdminShell } from './AdminShell';
+import { MfaSignInLink } from './MfaSignInLink';
 import { fontVariables } from './fonts';
 import './admin.css';
 
@@ -45,7 +46,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         <main>
           <h1>{t('หน้าทีมงานต้องเข้าสู่ระบบด้วย MFA')}</h1>
           <p>{t('เข้าสู่ระบบอีกครั้งพร้อมรหัสยืนยันตัวตนแบบใช้ครั้งเดียว แล้วระบบจะพากลับมาที่หน้านี้')}</p>
-          <a href="/auth/login?mfa=1&returnTo=/admin">{t('เข้าสู่ระบบด้วย MFA')}</a>
+          <MfaSignInLink label={t('เข้าสู่ระบบด้วย MFA')} />
         </main>
       </div>
     );
