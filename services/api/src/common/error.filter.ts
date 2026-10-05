@@ -22,6 +22,9 @@ export class ErrorEnvelopeFilter implements ExceptionFilter {
         errorCode: typeof err?.code === 'string' ? err.code : undefined,
       });
     }
+    // Any answer that tells the client how long to wait also says it in the standard header.
+    const wait = (details as { retryAfterSeconds?: unknown } | undefined)?.retryAfterSeconds;
+    if (typeof wait === 'number' && wait > 0 && !res.getHeader('Retry-After')) res.setHeader('Retry-After', String(Math.ceil(wait)));
     res
       .status(status)
       .setHeader('Cache-Control', 'no-store')

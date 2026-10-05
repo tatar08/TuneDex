@@ -207,6 +207,7 @@ paths:
           description: Revoked
           headers:
             Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Only on a replay }
+            Cache-Control: { schema: { type: string, example: no-store } }
           content: { application/json: { schema: { $ref: '#/components/schemas/Device' } } }
         '400': { description: 'VALIDATION_FAILED, field deviceId (must_be_uuid) or Idempotency-Key', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: 'AUTH_REQUIRED, or REAUTH_REQUIRED with details.maxAgeSeconds = 300', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -866,7 +867,7 @@ paths:
       - { $ref: '#/components/parameters/StationId' }
     get:
       summary: The last 20 stream checks of the station, newest first (catalog_editor, admin)
-      description: 'Roles: catalog_editor or admin. Result codes only, never URLs. Scheduled and manual checks, of the published or (before the first publish) the draft stream. An unknown station gives an empty list, not 404.'
+      description: 'Roles: catalog_editor or admin. Result codes only, never URLs. Scheduled and manual checks, of the published or (before the first publish) the draft stream. An unknown station is 404.'
       responses:
         '200':
           description: Checks
@@ -875,6 +876,7 @@ paths:
         '400': { $ref: '#/components/responses/Error' }
         '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { $ref: '#/components/responses/Error' }
   /v1/admin/stations/{stationId}/check:
     parameters:
       - { $ref: '#/components/parameters/StationId' }
@@ -893,7 +895,7 @@ paths:
         '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { $ref: '#/components/responses/Error' }
         '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '429': { description: 'CHECK_TOO_SOON with details.retryAfterSeconds 60 (always the full minute; no Retry-After header)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: 'CHECK_TOO_SOON: at most one manual check per station per minute; details.retryAfterSeconds and the Retry-After header give the seconds left', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '503': { description: 'CHECKER_UNAVAILABLE: worker mode and the checker did not answer within 15 s', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/admin/stations/{stationId}/rights:
     parameters:
@@ -1137,7 +1139,7 @@ paths:
         '404': { description: 'NOT_FOUND: unknown or malformed id, an idp_session_end job without a Keycloak admin client, or an export that is gone', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { description: 'JOB_RETRY_LIMIT with details {limit: 3, windowHours: 24}; JOB_BUSY while a background run holds the job; JOB_SUPERSEDED for a dead-lettered export whose account asked for a new one; or IDEMPOTENCY_KEY_REUSED / IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '413': { $ref: '#/components/responses/Error' }
-        '429': { description: 'JOB_RETRY_TOO_SOON within 60 s of the last attempt, with details.retryAfterSeconds (the seconds left; no Retry-After header)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: 'JOB_RETRY_TOO_SOON within 60 s of the last attempt, with details.retryAfterSeconds and the Retry-After header (the seconds left)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/admin/users/lookup:
     post:
       summary: Support lookup of one account by user id, device id or email (support, admin)

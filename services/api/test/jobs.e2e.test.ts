@@ -78,6 +78,7 @@ describe('/v1/admin/jobs', () => {
     const soon = await http().post(`/v1/admin/jobs/${job.id}/retry`).set(ops).send(reason);
     expect(soon.status).toBe(429);
     expect(soon.body.code).toBe('JOB_RETRY_TOO_SOON');
+    expect(soon.headers['retry-after']).toBe(String(soon.body.details.retryAfterSeconds));
 
     await t.pool.query(`UPDATE account_deletions SET last_attempt_at = now() - interval '5 minutes'`);
     expect((await http().post(`/v1/admin/jobs/${job.id}/retry`).set(ops).send(reason).expect(200)).body).toEqual({ status: 'retrying' });

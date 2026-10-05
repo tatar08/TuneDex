@@ -89,7 +89,8 @@ describe('/v1/me/devices', () => {
     expect((await list(a)).body.devices[0].platform).toBe('ios');
     // B cannot revoke A's device: it only ever sees and revokes its own.
     const fresh = await id.token('dev-iso-b', { authTime: now() });
-    await http().delete(`/v1/me/devices/${D2}/session`).set('Authorization', `Bearer ${fresh}`).expect(200);
+    const revoked = await http().delete(`/v1/me/devices/${D2}/session`).set('Authorization', `Bearer ${fresh}`).expect(200);
+    expect(revoked.headers['cache-control']).toBe('no-store');
     expect((await list(a)).body.devices[0].revokedAt).toBeNull();
   });
 
