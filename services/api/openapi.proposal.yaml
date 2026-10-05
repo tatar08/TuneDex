@@ -721,12 +721,14 @@ paths:
       parameters:
         - { name: cursor, in: query, schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,1024}$' }, description: Opaque; from nextCursor }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: q, in: query, schema: { type: string, minLength: 1, maxLength: 80 }, description: 'Part of the draft name, any case; % and _ are plain characters. Trimmed; blank after trimming is 400' }
+        - { name: status, in: query, schema: { type: string, enum: [draft, published, changes_pending, disabled] }, description: Only stations with this status }
       responses:
         '200':
           description: One page of stations, each with its stream health
           headers: { Cache-Control: { schema: { type: string, example: no-store } } }
           content: { application/json: { schema: { $ref: '#/components/schemas/AdminStationPage' } } }
-        '400': { description: 'VALIDATION_FAILED: details.field limit (out_of_range, max) or cursor (malformed)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '400': { description: 'VALIDATION_FAILED: details.field limit (out_of_range, max), cursor (malformed), q (out_of_range, max 80) or status (invalid)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200} when this Keycloak session did not sign in with MFA in the last 12 hours', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     post:
@@ -749,6 +751,27 @@ paths:
         '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { description: 'IDEMPOTENCY_KEY_REUSED, or IDEMPOTENCY_IN_PROGRESS (Retry-After: 1)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '413': { $ref: '#/components/responses/Error' }
+  /v1/admin/stations/summary:
+    get:
+      summary: Catalog counts for the console header (catalog_editor, admin)
+      description: 'Roles: catalog_editor or admin. visible counts what GET /v1/catalog/radio serves right now; pending, drafts and disabled use the same rules as AdminStation.status. Cache-Control: no-store.'
+      responses:
+        '200':
+          description: Counts
+          headers: { Cache-Control: { schema: { type: string, example: no-store } } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [total, visible, pending, drafts, disabled]
+                properties:
+                  total: { type: integer, minimum: 0 }
+                  visible: { type: integer, minimum: 0 }
+                  pending: { type: integer, minimum: 0, description: Status changes_pending }
+                  drafts: { type: integer, minimum: 0 }
+                  disabled: { type: integer, minimum: 0 }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/admin/stations/{stationId}:
     parameters:
       - { $ref: '#/components/parameters/StationId' }

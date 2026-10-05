@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { ConsoleConfig } from './config';
+import type { CatalogSummary } from './admin';
 import {
   clearCookie,
   cookieNames,
@@ -675,22 +676,37 @@ export function createBff(deps: BffDeps) {
     sessionFromCookie,
     loadStaff,
 
-    /** Server-side read for staff pages: list (no id) or one station. Null means the user must sign in again. */
-    async loadStations(ctx: SessionContext): Promise<{ status: number; stations?: AdminStation[] } | null> {
+    /**
+     * Server-side read for staff pages: the catalog by name, or only names containing `q`. Null means the user
+     * must sign in again. `truncated` is set when the list stopped at STATION_PAGES_MAX pages.
+     */
+    async loadStations(
+      ctx: SessionContext,
+      opts: { q?: string } = {},
+    ): Promise<{ status: number; stations?: AdminStation[]; truncated?: boolean } | null> {
       // The API pages by 100 at most (Doc 17); the catalog screens show the whole list, so follow the pages.
       const stations: AdminStation[] = [];
+      const q = opts.q?.trim().slice(0, 80);
       let cursor: string | null = null;
       for (let page = 0; page < STATION_PAGES_MAX; page++) {
-        const qs = `?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
-        const res = await callApi(ctx, `/v1/admin/stations${qs}`, { method: 'GET' }, `web_${randomUUID()}`);
+        const qs = new URLSearchParams({ limit: '100' });
+        if (q) qs.set('q', q);
+        if (cursor) qs.set('cursor', cursor);
+        const res = await callApi(ctx, `/v1/admin/stations?${qs}`, { method: 'GET' }, `web_${randomUUID()}`);
         if (!res) return null;
         if (!res.ok) return { status: res.status };
         const body = (await res.json()) as { stations: AdminStation[]; nextCursor?: string | null };
         stations.push(...body.stations);
         cursor = body.nextCursor ?? null;
-        if (!cursor) break;
+        if (!cursor) return { status: 200, stations, truncated: false };
       }
-      return { status: 200, stations };
+      return { status: 200, stations, truncated: true };
+    },
+    /** Catalog counts for the staff header, one API call. Null means the user must sign in again. */
+    async loadStationSummary(ctx: SessionContext): Promise<{ status: number; summary?: CatalogSummary } | null> {
+      const res = await callApi(ctx, '/v1/admin/stations/summary', { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, summary: (await res.json()) as CatalogSummary } : { status: res.status };
     },
     async loadStation(ctx: SessionContext, id: string): Promise<{ status: number; station?: AdminStation } | null> {
       if (!STATION_ID.test(id)) return { status: 404 };

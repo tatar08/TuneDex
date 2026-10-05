@@ -896,3 +896,8 @@
 }
 .adm .cf-targets { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .adm .cf-target { display: flex; flex-direction: column; gap: 6px; }
+
+/* Notice above a list that stopped at the console's page limit */
+.adm .adm-note { border-left: 4px solid var(--w); padding: 10px 14px; margin: 12px 0; background: color-mix(in srgb, var(--w) 10%, var(--p)); border-radius: var(--r); display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.adm .adm-note form { display: inline-flex; gap: 6px; }
+.adm .adm-note input { font: inherit; color: var(--t); background: var(--p); border: 1px solid var(--l); border-radius: 6px; padding: 5px 8px; min-width: 200px; }

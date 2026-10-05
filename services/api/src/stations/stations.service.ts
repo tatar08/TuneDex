@@ -116,6 +116,31 @@ function toAdminView(r: Row, actor: StationActor, records: RightsRow[], today = 
   };
 }
 
+/** The same rules as statusOf, for filtering in SQL. */
+const STATUS_SQL: Record<StationStatus, string> = {
+  disabled: 'disabled_at IS NOT NULL',
+  draft: 'disabled_at IS NULL AND published_revision IS NULL',
+  published: 'disabled_at IS NULL AND published_revision = revision',
+  changes_pending: 'disabled_at IS NULL AND published_revision <> revision',
+};
+/** What the public catalog serves (see publicPage). */
+const VISIBLE_SQL = 'published IS NOT NULL AND disabled_at IS NULL AND (rights_expires_at IS NULL OR rights_expires_at > now())';
+
+export interface StationListFilter {
+  /** Part of the draft name, any case. */
+  q?: string;
+  status?: StationStatus;
+}
+
+export interface CatalogSummary {
+  total: number;
+  /** Served by the public catalog right now. */
+  visible: number;
+  pending: number;
+  drafts: number;
+  disabled: number;
+}
+
 const HISTORY_ACTIONS = `(a.action LIKE 'station.%' OR a.action LIKE 'rights.%')`;
 
 const PUBLIC_PAGE_MAX = 100;
@@ -169,13 +194,29 @@ export class StationsService implements OnApplicationBootstrap, OnApplicationShu
   }
 
   /** One page by name, then id (Doc 17: cursor pages of at most 100). */
-  async list(actor: StationActor, after: string[] | null, limit: number): Promise<{ stations: AdminStationView[]; nextCursor: string | null }> {
-    const rows = after
-      ? await this.db.query<Row>(
-          `SELECT ${COLUMNS} FROM radio_stations WHERE (draft->>'name', id::text) > ($1, $2) ORDER BY draft->>'name', id::text LIMIT $3`,
-          [after[0], after[1], limit + 1],
-        )
-      : await this.db.query<Row>(`SELECT ${COLUMNS} FROM radio_stations ORDER BY draft->>'name', id::text LIMIT $1`, [limit + 1]);
+  async list(
+    actor: StationActor,
+    after: string[] | null,
+    limit: number,
+    filter: StationListFilter = {},
+  ): Promise<{ stations: AdminStationView[]; nextCursor: string | null }> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (after) {
+      params.push(after[0], after[1]);
+      where.push(`(draft->>'name', id::text) > ($1, $2)`);
+    }
+    if (filter.q) {
+      params.push(`%${filter.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+      where.push(`draft->>'name' ILIKE $${params.length}`);
+    }
+    if (filter.status) where.push(STATUS_SQL[filter.status]);
+    params.push(limit + 1);
+    const rows = await this.db.query<Row>(
+      `SELECT ${COLUMNS} FROM radio_stations ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+        ORDER BY draft->>'name', id::text LIMIT $${params.length}`,
+      params,
+    );
     const page = rows.slice(0, limit);
     const last = page.at(-1);
     const records = await this.records(page.map((r) => r.id));
@@ -184,6 +225,19 @@ export class StationsService implements OnApplicationBootstrap, OnApplicationShu
       stations: page.map((r) => toAdminView(r, actor, records.get(r.id)!, today)),
       nextCursor: rows.length > limit && last ? encodeCursor([last.draft.name, last.id]) : null,
     };
+  }
+
+  /** Catalog counts for the console header, without reading every station. */
+  async summary(): Promise<CatalogSummary> {
+    const [r] = await this.db.query<Record<keyof CatalogSummary, string>>(
+      `SELECT count(*) AS total,
+              count(*) FILTER (WHERE ${VISIBLE_SQL}) AS visible,
+              count(*) FILTER (WHERE ${STATUS_SQL.changes_pending}) AS pending,
+              count(*) FILTER (WHERE ${STATUS_SQL.draft}) AS drafts,
+              count(*) FILTER (WHERE ${STATUS_SQL.disabled}) AS disabled
+         FROM radio_stations`,
+    );
+    return { total: Number(r.total), visible: Number(r.visible), pending: Number(r.pending), drafts: Number(r.drafts), disabled: Number(r.disabled) };
   }
 
   async get(actor: StationActor, id: string): Promise<AdminStationView> {

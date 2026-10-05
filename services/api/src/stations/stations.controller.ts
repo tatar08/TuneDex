@@ -9,11 +9,30 @@ import { RequireRoles, StaffGuard } from '../staff/staff';
 import { parseRightsRecord, RightsRecordView } from './rights';
 import { parseNewStation, parsePublish, parseReason, parseStationId, parseStationPatch } from './stations.schema';
 import { HealthCheck, StationHealth, StationHealthService } from './station-health';
-import { AdminStationView, HistoryEntry, StationActor, StationsService } from './stations.service';
+import { AdminStationView, CatalogSummary, HistoryEntry, StationActor, StationListFilter, StationStatus, StationsService } from './stations.service';
 
 const actorOf = (req: Request): StationActor => ({ userId: req.actor!.userId, roles: req.actor!.roles ?? [], requestId: req.requestId });
 
 type WithHealth = AdminStationView & { health: StationHealth };
+
+const STATUSES: readonly StationStatus[] = ['draft', 'published', 'changes_pending', 'disabled'];
+
+/** `q`: 1-80 characters of the name; `status`: one of the four. Anything else is 400. */
+function parseListFilter(q: unknown, status: unknown): StationListFilter {
+  const out: StationListFilter = {};
+  if (q !== undefined && q !== '') {
+    const text = typeof q === 'string' ? q.trim() : '';
+    if (!text || text.length > 80) throw new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', { field: 'q', reason: 'out_of_range', max: 80 });
+    out.q = text;
+  }
+  if (status !== undefined && status !== '') {
+    if (typeof status !== 'string' || !STATUSES.includes(status as StationStatus)) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', { field: 'status', reason: 'invalid' });
+    }
+    out.status = status as StationStatus;
+  }
+  return out;
+}
 
 /** Staff catalog management (Doc 17 /admin/stations). Editors draft; a different admin publishes. */
 @Controller('v1/admin/stations')
@@ -32,14 +51,28 @@ export class AdminStationsController {
   }
 
   @Get()
-  async list(@Req() req: Request, @Query('cursor') cursor: unknown, @Query('limit') limit: unknown, @Res({ passthrough: true }) res: Response) {
+  async list(
+    @Req() req: Request,
+    @Query('cursor') cursor: unknown,
+    @Query('limit') limit: unknown,
+    @Query('q') q: unknown,
+    @Query('status') status: unknown,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     res.setHeader('Cache-Control', 'no-store');
-    const page = await this.stations.list(actorOf(req), decodeCursor(cursor, 2), parseLimit(limit));
+    const page = await this.stations.list(actorOf(req), decodeCursor(cursor, 2), parseLimit(limit), parseListFilter(q, status));
     const health = await this.health.summaries(page.stations.map((v) => v.id));
     return {
       stations: page.stations.map((v): WithHealth => ({ ...v, health: health.get(v.id) ?? { state: 'unknown', regions: [] } })),
       nextCursor: page.nextCursor,
     };
+  }
+
+  /** Counts for the console header and menu badge. */
+  @Get('summary')
+  async summary(@Res({ passthrough: true }) res: Response): Promise<CatalogSummary> {
+    res.setHeader('Cache-Control', 'no-store');
+    return this.stations.summary();
   }
 
   @Get(':id')

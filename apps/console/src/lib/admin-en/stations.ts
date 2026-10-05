@@ -1,6 +1,9 @@
 /** English for the staff console (stations), keyed by the Thai text. `{0}`, `{1}` … are filled in by t(). */
 export const EN_STATIONS: Record<string, string> = {
   'เปิดดู': 'open',
+  'ผลค้นหา “{0}” จากทั้งแคตตาล็อก {1} สถานี': 'Search “{0}” across the whole catalog: {1} stations',
+  'แคตตาล็อกยาวเกินกว่าจะแสดงทั้งหมด หน้านี้แสดง {0} สถานีแรกตามชื่อ ค้นหาชื่อเพื่อดูสถานีอื่น': 'The catalog is too long to show at once. This page shows the first {0} stations by name; search by name to find the others.',
+  'ล้างการค้นหา': 'Clear search',
   'บัญชีนี้ไม่มีสิทธิ์ดูรายการสถานี': "This account can't view the station list",
   'ไม่พบสถานีนี้': 'Station not found',
   'โหลดข้อมูลไม่ได้ในขณะนี้ ลองโหลดหน้าใหม่': "Couldn't load the data right now. Try reloading the page.",
