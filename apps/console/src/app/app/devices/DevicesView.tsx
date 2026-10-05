@@ -109,6 +109,31 @@ export function DevicesView({
     }
   }
 
+  /** Doc 17 /app/devices "reset override": the device goes back to the account settings. */
+  async function resetOverrides(d: DeviceView) {
+    setBusy(true);
+    setProblem(null);
+    try {
+      const res = await fetch(`/bff/devices/${d.id}/preferences`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', 'if-match': `"${d.preferencesRevision}"`, 'x-csrf-token': csrfToken },
+        body: JSON.stringify({ overrides: {} }),
+      });
+      if (res.ok) {
+        const v = (await res.json()) as { revision: number };
+        setDevices((all) => all.map((x) => (x.id === d.id ? { ...x, overrides: {}, preferencesRevision: v.revision } : x)));
+        setAnnounce(t.overrideSaved);
+      } else if (res.status === 412) {
+        // Changed elsewhere: reload the page's data rather than guess.
+        window.location.reload();
+      } else setProblem({ kind: res.status === 401 ? 'expired' : res.status === 429 ? 'rateLimited' : 'unavailable' });
+    } catch {
+      setProblem({ kind: 'unavailable' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const reauthHref = (deviceId?: string) =>
     `/auth/login?reauth=1&returnTo=${encodeURIComponent(deviceId ? `/app/devices?revoke=${deviceId}` : '/app/devices')}`;
 
@@ -160,6 +185,14 @@ export function DevicesView({
                   </button>
                 )}
                 <span className="status">{t.deviceSeen(d.appBuild, fmt.format(new Date(d.lastSeenAt)))}</span>
+                {Object.keys(d.overrides ?? {}).length > 0 && (
+                  <span className="status">
+                    <span className="chip">{t.overrideChip}</span>{' '}
+                    <button type="button" className="btn secondary" disabled={busy} onClick={() => void resetOverrides(d)}>
+                      {t.overrideReset}
+                    </button>
+                  </span>
+                )}
                 <SupportCode label={t.supportDeviceId} code={d.id} lang={lang} />
               </li>
             ))}

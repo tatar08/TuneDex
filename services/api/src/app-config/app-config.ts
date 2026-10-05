@@ -1,5 +1,5 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, KeyObject } from 'node:crypto';
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Inject, Injectable, Param, Patch, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Inject, Injectable, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { CompactSign } from 'jose';
 import { writeAudit } from '../audit/audit';
@@ -13,18 +13,31 @@ import { RequireRoles, StaffGuard } from '../staff/staff';
 import {
   AppConfigPayload,
   applyPatch,
+  applyTargetsPatch,
   changedFields,
+  changedTargets,
+  Channel,
   CONFIG_SCHEMA_VERSION,
   DEFAULT_CONFIG,
+  DEFAULT_TARGETS,
+  fits,
   normalize,
+  normalizeTargets,
+  parseClientQuery,
+  parsePublishRelease,
   parseRelease,
   parseReleaseId,
+  Platform,
+  Targets,
 } from './app-config.schema';
 
 /** The signed document the apps receive. `release` 0 means "no release yet: built-in defaults". */
 export interface SignedConfig {
   schemaVersion: number;
   release: number;
+  /** The channel this release was published on, and the platforms and builds it is for. */
+  environment: Channel;
+  targets: Targets;
   publishedAt: string | null;
   expiresAt: string | null;
   config: AppConfigPayload;
@@ -33,7 +46,14 @@ export interface SignedConfig {
 export interface ReleaseView {
   release: number;
   schemaVersion: number;
+  environment: Channel;
+  targets: Targets;
   config: AppConfigPayload;
+  /** For a production release: the staging release it promoted. */
+  stagedRelease: number | null;
+  /** Whether a different admin approved it (false for staging, rollbacks and emergencies). */
+  reviewed: boolean;
+  emergency: boolean;
   rollbackOf: number | null;
   draftRevision: number | null;
   publishedAt: string;
@@ -44,8 +64,14 @@ export interface ReleaseView {
 }
 
 export interface AdminConfigView {
-  draft: { config: AppConfigPayload; revision: number; updatedAt: string | null; changedSinceRelease: string[] };
+  draft: { config: AppConfigPayload; targets: Targets; revision: number; updatedAt: string | null; changedSinceRelease: string[] };
+  /** The production release everyone without a narrower target gets. */
   current: ReleaseView | null;
+  /** The newest staging release, and whether it is the draft as it is now (required before production). */
+  staged: ReleaseView | null;
+  stagedIsDraft: boolean;
+  /** Why the viewer cannot stage the draft right now; empty when they can. */
+  stageBlockers: string[];
   releases: ReleaseView[];
   /** Why the viewer cannot publish the draft right now; empty when they can. */
   publishBlockers: string[];
@@ -55,6 +81,7 @@ export interface AdminConfigView {
 
 interface DraftRow {
   payload: AppConfigPayload;
+  targets: Targets;
   revision: string;
   updated_at: Date;
   pending_authors: string[];
@@ -69,8 +96,16 @@ interface ReleaseRow {
   published_at: Date;
   expires_at: Date;
   reason: string;
+  environment: Channel;
+  targets: Targets;
+  staged_release: string | null;
+  authors: string[];
+  reviewed_by: string | null;
+  emergency: boolean;
 }
-const RELEASE_COLUMNS = 'release, schema_version, payload, draft_revision, rollback_of, published_by, published_at, expires_at, reason';
+const RELEASE_COLUMNS =
+  'release, schema_version, payload, draft_revision, rollback_of, published_by, published_at, expires_at, reason, environment, targets, staged_release, authors, reviewed_by, emergency';
+const DRAFT_COLUMNS = 'payload, targets, revision, updated_at, pending_authors';
 
 export interface ConfigActor {
   userId: string;
@@ -103,7 +138,12 @@ export function createConfigSigner(pem: string | null): ConfigSigner {
 const releaseView = (r: ReleaseRow, viewer: string): ReleaseView => ({
   release: Number(r.release),
   schemaVersion: r.schema_version,
+  environment: r.environment,
+  targets: normalizeTargets(r.targets),
   config: normalize(r.payload),
+  stagedRelease: r.staged_release === null ? null : Number(r.staged_release),
+  reviewed: r.reviewed_by !== null,
+  emergency: r.emergency,
   rollbackOf: r.rollback_of === null ? null : Number(r.rollback_of),
   draftRevision: r.draft_revision === null ? null : Number(r.draft_revision),
   publishedAt: r.published_at.toISOString(),
@@ -119,7 +159,8 @@ const releaseView = (r: ReleaseRow, viewer: string): ReleaseView => ({
  */
 @Injectable()
 export class AppConfigService {
-  private cache: { release: number; body: { jws: string } & SignedConfig; etag: string } | null = null;
+  /** Signed documents by release (0 = defaults, per channel); a release never changes, so entries never go stale. */
+  private readonly cache = new Map<string, { body: { jws: string } & SignedConfig; etag: string }>();
 
   constructor(
     private readonly db: Database,
@@ -127,42 +168,65 @@ export class AppConfigService {
   ) {}
 
   private async draftRow(query = this.db.query.bind(this.db), lock = false): Promise<DraftRow> {
-    const [row] = await query<DraftRow>(`SELECT payload, revision, updated_at, pending_authors FROM app_config_draft WHERE id = 1${lock ? ' FOR UPDATE' : ''}`);
+    const [row] = await query<DraftRow>(`SELECT ${DRAFT_COLUMNS} FROM app_config_draft WHERE id = 1${lock ? ' FOR UPDATE' : ''}`);
     if (row) return row;
     // First use: the draft starts from the defaults at revision 0.
     await query(`INSERT INTO app_config_draft (id, payload) VALUES (1, $1) ON CONFLICT (id) DO NOTHING`, [JSON.stringify(DEFAULT_CONFIG)]);
-    const [created] = await query<DraftRow>(`SELECT payload, revision, updated_at, pending_authors FROM app_config_draft WHERE id = 1${lock ? ' FOR UPDATE' : ''}`);
+    const [created] = await query<DraftRow>(`SELECT ${DRAFT_COLUMNS} FROM app_config_draft WHERE id = 1${lock ? ' FOR UPDATE' : ''}`);
     return created;
   }
 
-  private async latest(query = this.db.query.bind(this.db)): Promise<ReleaseRow | null> {
-    const [row] = await query<ReleaseRow>(`SELECT ${RELEASE_COLUMNS} FROM app_config_releases ORDER BY release DESC LIMIT 1`);
+  /** The newest release on a channel. */
+  private async latest(query = this.db.query.bind(this.db), environment: Channel = 'production'): Promise<ReleaseRow | null> {
+    const [row] = await query<ReleaseRow>(`SELECT ${RELEASE_COLUMNS} FROM app_config_releases WHERE environment = $1 ORDER BY release DESC LIMIT 1`, [environment]);
     return row ?? null;
   }
 
-  private blockers(draft: DraftRow, current: ReleaseRow | null, actor: ConfigActor): string[] {
+  /** Draft fields that differ from a release (or from the defaults when there is none). */
+  private changes(draft: DraftRow, release: ReleaseRow | null): string[] {
+    return [
+      ...changedFields(release ? normalize(release.payload) : DEFAULT_CONFIG, normalize(draft.payload)),
+      ...changedTargets(release ? normalizeTargets(release.targets) : DEFAULT_TARGETS, normalizeTargets(draft.targets)),
+    ];
+  }
+
+  private stageBlockers(draft: DraftRow, current: ReleaseRow | null, staged: ReleaseRow | null, actor: ConfigActor): string[] {
+    const out: string[] = [];
+    if (!actor.roles.includes('admin')) out.push('admin_role_required');
+    if (staged && Number(staged.draft_revision) === Number(draft.revision)) out.push('already_staged');
+    if (this.changes(draft, current).length === 0) out.push('no_changes');
+    return out;
+  }
+
+  /** Production needs the draft staged as it is now, and a different admin from everyone who changed it. */
+  private blockers(draft: DraftRow, current: ReleaseRow | null, staged: ReleaseRow | null, actor: ConfigActor): string[] {
     const out: string[] = [];
     if (!actor.roles.includes('admin')) out.push('admin_role_required');
     if (draft.pending_authors.includes(actor.userId)) out.push('own_change');
-    if (changedFields(normalize(draft.payload), current ? normalize(current.payload) : DEFAULT_CONFIG).length === 0) out.push('no_changes');
+    if (this.changes(draft, current).length === 0) out.push('no_changes');
+    else if (!staged || Number(staged.draft_revision) !== Number(draft.revision)) out.push('not_staged');
     return out;
   }
 
   async view(actor: ConfigActor): Promise<AdminConfigView> {
     const draft = await this.draftRow();
     const releases = await this.db.query<ReleaseRow>(`SELECT ${RELEASE_COLUMNS} FROM app_config_releases ORDER BY release DESC LIMIT 20`);
-    const current = releases[0] ?? null;
-    const config = normalize(draft.payload);
+    const current = await this.latest();
+    const staged = await this.latest(undefined, 'staging');
     return {
       draft: {
-        config,
+        config: normalize(draft.payload),
+        targets: normalizeTargets(draft.targets),
         revision: Number(draft.revision),
         updatedAt: Number(draft.revision) === 0 ? null : draft.updated_at.toISOString(),
-        changedSinceRelease: changedFields(current ? normalize(current.payload) : DEFAULT_CONFIG, config),
+        changedSinceRelease: this.changes(draft, current),
       },
       current: current ? releaseView(current, actor.userId) : null,
+      staged: staged ? releaseView(staged, actor.userId) : null,
+      stagedIsDraft: !!staged && Number(staged.draft_revision) === Number(draft.revision),
+      stageBlockers: this.stageBlockers(draft, current, staged, actor),
       releases: releases.map((r) => releaseView(r, actor.userId)),
-      publishBlockers: this.blockers(draft, current, actor),
+      publishBlockers: this.blockers(draft, current, staged, actor),
       defaults: DEFAULT_CONFIG,
       signingKeyId: this.signer.keyId,
     };
@@ -175,30 +239,36 @@ export class AppConfigService {
         throw new ApiError(HttpStatus.PRECONDITION_FAILED, 'REVISION_MISMATCH', { currentRevision: Number(draft.revision) });
       }
       const before = normalize(draft.payload);
-      const next = applyPatch(before, body);
-      const fields = changedFields(before, next);
+      const beforeTargets = normalizeTargets(draft.targets);
+      const { targets: targetsPatch, ...configPatch } = (typeof body === 'object' && body !== null && !Array.isArray(body) ? body : { body }) as Record<string, unknown>;
+      const next = applyPatch(before, configPatch);
+      const nextTargets = targetsPatch === undefined ? beforeTargets : applyTargetsPatch(beforeTargets, targetsPatch);
+      const fields = [...changedFields(before, next), ...changedTargets(beforeTargets, nextTargets)];
       if (fields.length === 0) return;
       const [r] = await query<{ revision: string }>(
         `UPDATE app_config_draft
-            SET payload = $1, revision = revision + 1, updated_by = $2, updated_at = now(),
+            SET payload = $1, targets = $3, revision = revision + 1, updated_by = $2, updated_at = now(),
                 pending_authors = CASE WHEN $2::uuid = ANY(pending_authors) THEN pending_authors ELSE pending_authors || $2::uuid END
           WHERE id = 1 RETURNING revision`,
-        [JSON.stringify(next), actor.userId],
+        [JSON.stringify(next), actor.userId, JSON.stringify(nextTargets)],
       );
       await writeAudit(query, {
         actor: `user:${actor.userId}`,
         action: 'config.update',
         targetType: 'config',
         targetId: 'draft',
-        changes: { fields, revision: Number(r.revision), values: Object.fromEntries(fields.map((f) => [f, pick(next, f)])) },
+        changes: { fields, revision: Number(r.revision), values: Object.fromEntries(fields.map((f) => [f, f.startsWith('targets.') ? pick(nextTargets, f.slice(8)) : pick(next, f)])) },
         requestId: actor.requestId,
       });
     });
     return this.view(actor);
   }
 
-  /** Releases exactly the draft revision the reviewer looked at. The reviewer must not have changed it. */
-  async publish(actor: ConfigActor, expectedRevision: number, body: unknown): Promise<AdminConfigView> {
+  /**
+   * Doc 17 staging step: releases the draft to the staging channel (internal test builds) so it can be tried
+   * before review. Any admin may stage, including the author. Production later promotes exactly this release.
+   */
+  async stage(actor: ConfigActor, expectedRevision: number, body: unknown): Promise<AdminConfigView> {
     const { reason, validDays } = parseRelease(body);
     await this.db.transaction(async (query) => {
       const draft = await this.draftRow(query, true);
@@ -206,26 +276,78 @@ export class AppConfigService {
         throw new ApiError(HttpStatus.PRECONDITION_FAILED, 'REVISION_MISMATCH', { currentRevision: Number(draft.revision) });
       }
       const current = await this.latest(query);
-      const reasons = this.blockers(draft, current, actor);
+      const staged = await this.latest(query, 'staging');
+      const reasons = this.stageBlockers(draft, current, staged, actor);
       if (reasons.length) throw new ApiError(HttpStatus.CONFLICT, 'PUBLISH_BLOCKED', { reasons });
-      const config = normalize(draft.payload);
       const [r] = await query<{ release: string }>(
-        `INSERT INTO app_config_releases (schema_version, payload, draft_revision, published_by, expires_at, reason)
-         VALUES ($1, $2, $3, $4, now() + make_interval(days => $5), $6) RETURNING release`,
-        [CONFIG_SCHEMA_VERSION, JSON.stringify(config), Number(draft.revision), actor.userId, validDays, reason],
+        `INSERT INTO app_config_releases (schema_version, payload, targets, environment, draft_revision, authors, published_by, expires_at, reason)
+         VALUES ($1, $2, $3, 'staging', $4, $5, $6, now() + make_interval(days => $7), $8) RETURNING release`,
+        [CONFIG_SCHEMA_VERSION, JSON.stringify(normalize(draft.payload)), JSON.stringify(normalizeTargets(draft.targets)), Number(draft.revision), draft.pending_authors, actor.userId, validDays, reason],
+      );
+      await writeAudit(query, {
+        actor: `user:${actor.userId}`,
+        action: 'config.stage',
+        targetType: 'config',
+        targetId: r.release,
+        reason,
+        changes: { draftRevision: Number(draft.revision), fields: this.changes(draft, current), validDays },
+        requestId: actor.requestId,
+      });
+    });
+    return this.view(actor);
+  }
+
+  /**
+   * Promotes the staged draft to production. The reviewer must not have changed the draft, and it must be staged
+   * exactly as they reviewed it. With `emergency`, an author may do it alone (Doc 17 exception, audited apart).
+   */
+  async publish(actor: ConfigActor, expectedRevision: number, body: unknown): Promise<AdminConfigView> {
+    const { reason, validDays, emergency } = parsePublishRelease(body);
+    await this.db.transaction(async (query) => {
+      const draft = await this.draftRow(query, true);
+      if (Number(draft.revision) !== expectedRevision) {
+        throw new ApiError(HttpStatus.PRECONDITION_FAILED, 'REVISION_MISMATCH', { currentRevision: Number(draft.revision) });
+      }
+      const current = await this.latest(query);
+      const staged = await this.latest(query, 'staging');
+      const all = this.blockers(draft, current, staged, actor);
+      const bypassed = emergency && all.includes('own_change');
+      const reasons = emergency ? all.filter((b) => b !== 'own_change') : all;
+      if (reasons.length) throw new ApiError(HttpStatus.CONFLICT, 'PUBLISH_BLOCKED', { reasons });
+      const config = normalize(staged!.payload);
+      const targets = normalizeTargets(staged!.targets);
+      const [r] = await query<{ release: string }>(
+        `INSERT INTO app_config_releases
+           (schema_version, payload, targets, environment, draft_revision, staged_release, authors, reviewed_by, emergency, published_by, expires_at, reason)
+         VALUES ($1, $2, $3, 'production', $4, $5, $6, $7, $8, $9, now() + make_interval(days => $10), $11) RETURNING release`,
+        [
+          CONFIG_SCHEMA_VERSION,
+          JSON.stringify(config),
+          JSON.stringify(targets),
+          Number(draft.revision),
+          staged!.release,
+          draft.pending_authors,
+          bypassed ? null : actor.userId,
+          bypassed,
+          actor.userId,
+          validDays,
+          reason,
+        ],
       );
       await query(`UPDATE app_config_draft SET pending_authors = '{}' WHERE id = 1`);
       await writeAudit(query, {
         actor: `user:${actor.userId}`,
-        action: 'config.publish',
+        action: bypassed ? 'config.publish_emergency' : 'config.publish',
         targetType: 'config',
         targetId: r.release,
         reason,
         changes: {
           draftRevision: Number(draft.revision),
+          stagedRelease: Number(staged!.release),
           previousRelease: current ? Number(current.release) : null,
-          fields: changedFields(current ? normalize(current.payload) : DEFAULT_CONFIG, config),
+          fields: this.changes(draft, current),
           validDays,
+          ...(bypassed ? { emergency: true, reviewer: 'none' } : {}),
         },
         requestId: actor.requestId,
       });
@@ -244,14 +366,15 @@ export class AppConfigService {
       await this.draftRow(query, true);
       const [old] = await query<ReleaseRow>(`SELECT ${RELEASE_COLUMNS} FROM app_config_releases WHERE release = $1`, [target]);
       if (!old) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
+      if (old.environment !== 'production') throw new ApiError(HttpStatus.CONFLICT, 'PUBLISH_BLOCKED', { reasons: ['not_production'] });
       const current = await this.latest(query);
       if (current && Number(current.release) === target) throw new ApiError(HttpStatus.CONFLICT, 'PUBLISH_BLOCKED', { reasons: ['already_current'] });
       if (old.schema_version !== CONFIG_SCHEMA_VERSION) throw new ApiError(HttpStatus.CONFLICT, 'PUBLISH_BLOCKED', { reasons: ['schema_changed'] });
       const config = normalize(old.payload);
       const [r] = await query<{ release: string }>(
-        `INSERT INTO app_config_releases (schema_version, payload, rollback_of, published_by, expires_at, reason)
-         VALUES ($1, $2, $3, $4, now() + make_interval(days => $5), $6) RETURNING release`,
-        [CONFIG_SCHEMA_VERSION, JSON.stringify(config), target, actor.userId, validDays, reason],
+        `INSERT INTO app_config_releases (schema_version, payload, targets, environment, rollback_of, published_by, expires_at, reason)
+         VALUES ($1, $2, $3, 'production', $4, $5, now() + make_interval(days => $6), $7) RETURNING release`,
+        [CONFIG_SCHEMA_VERSION, JSON.stringify(config), JSON.stringify(normalizeTargets(old.targets)), target, actor.userId, validDays, reason],
       );
       await writeAudit(query, {
         actor: `user:${actor.userId}`,
@@ -267,16 +390,23 @@ export class AppConfigService {
   }
 
   /**
-   * What the apps receive: the newest release (or the defaults as release 0) as a compact JWS signed with
-   * EdDSA, plus the same fields in the clear for logging and debugging. Apps must act only on the verified JWS.
+   * What the apps receive: the newest release on the channel that fits the client's platform and build (or the
+   * defaults as release 0) as a compact JWS signed with EdDSA, plus the same fields in the clear for logging and
+   * debugging. Apps must act only on the verified JWS.
    */
-  async signedCurrent(): Promise<{ body: { jws: string } & SignedConfig; etag: string }> {
-    const row = await this.latest();
+  async signedCurrent(client: { channel: Channel; platform: Platform | null; build: number | null } = { channel: 'production', platform: null, build: null }): Promise<{ body: { jws: string } & SignedConfig; etag: string }> {
+    // Releases are few; the newest 50 on the channel are plenty to find the one that fits.
+    const rows = await this.db.query<ReleaseRow>(`SELECT ${RELEASE_COLUMNS} FROM app_config_releases WHERE environment = $1 ORDER BY release DESC LIMIT 50`, [client.channel]);
+    const row = rows.find((r) => fits(normalizeTargets(r.targets), client.platform, client.build)) ?? null;
     const release = row ? Number(row.release) : 0;
-    if (this.cache?.release === release) return this.cache;
+    const key = row ? `r${release}` : `d-${client.channel}`;
+    const hit = this.cache.get(key);
+    if (hit) return hit;
     const doc: SignedConfig = {
       schemaVersion: row?.schema_version ?? CONFIG_SCHEMA_VERSION,
       release,
+      environment: client.channel,
+      targets: row ? normalizeTargets(row.targets) : DEFAULT_TARGETS,
       publishedAt: row?.published_at.toISOString() ?? null,
       expiresAt: row?.expires_at.toISOString() ?? null,
       config: row ? normalize(row.payload) : DEFAULT_CONFIG,
@@ -284,13 +414,14 @@ export class AppConfigService {
     const jws = await new CompactSign(new TextEncoder().encode(JSON.stringify(doc)))
       .setProtectedHeader({ alg: 'EdDSA', kid: this.signer.keyId, typ: 'tunedeck-config+jws' })
       .sign(this.signer.key);
-    const etag = `"r${release}-${this.signer.keyId}"`;
-    this.cache = { release, body: { jws, ...doc }, etag };
-    return this.cache;
+    const entry = { body: { jws, ...doc }, etag: `"${key}-${this.signer.keyId}"` };
+    if (this.cache.size > 200) this.cache.clear();
+    this.cache.set(key, entry);
+    return entry;
   }
 }
 
-function pick(p: AppConfigPayload, path: string): unknown {
+function pick(p: AppConfigPayload | Targets, path: string): unknown {
   return path.split('.').reduce<unknown>((v, k) => (v as Record<string, unknown>)[k], p);
 }
 
@@ -316,6 +447,16 @@ export class AdminConfigController {
   @RequireRoles('admin')
   async update(@Req() req: Request, @Headers('if-match') ifMatch: string | undefined, @Body() body: unknown, @Res({ passthrough: true }) res: Response) {
     return this.send(res, await this.configs.updateDraft(actorOf(req), parseIfMatch(ifMatch), body));
+  }
+
+  /** Releases the draft to the staging channel. If-Match names the draft revision being staged. */
+  @Post('stage')
+  @HttpCode(HttpStatus.OK)
+  @RequireRoles('admin')
+  async stage(@Req() req: Request, @Headers('if-match') ifMatch: string | undefined, @Body() body: unknown, @Res({ passthrough: true }) res: Response) {
+    const expected = parseIfMatch(ifMatch);
+    requireRecentMfa(req);
+    return this.send(res, await this.configs.stage(actorOf(req), expected, body));
   }
 
   /** If-Match names the draft revision the admin reviewed, so a later edit cannot slip into the release. */
@@ -347,8 +488,8 @@ export class PublicConfigController {
   ) {}
 
   @Get()
-  async get(@Headers('if-none-match') ifNoneMatch: string | undefined, @Res({ passthrough: true }) res: Response) {
-    const { body, etag } = await this.configs.signedCurrent();
+  async get(@Query() query: Record<string, unknown>, @Headers('if-none-match') ifNoneMatch: string | undefined, @Res({ passthrough: true }) res: Response) {
+    const { body, etag } = await this.configs.signedCurrent(parseClientQuery(query));
     res.setHeader('ETag', etag);
     res.setHeader('Cache-Control', this.app.env === 'dev' ? 'no-cache' : 'public, max-age=300');
     if (ifNoneMatch === etag) {

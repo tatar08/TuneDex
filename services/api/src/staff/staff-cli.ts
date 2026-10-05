@@ -19,11 +19,11 @@ export async function runStaffCli(argv: string[], db: Database, out: (line: stri
   };
 
   if (command === 'list') {
-    const rows = await db.query<{ oidc_subject: string; role: string; granted_by: string; granted_at: Date }>(
-      `SELECT u.oidc_subject, r.role, r.granted_by, r.granted_at FROM staff_roles r JOIN users u ON u.id = r.user_id
+    const rows = await db.query<{ oidc_subject: string; role: string; scope: string; granted_by: string; granted_at: Date }>(
+      `SELECT u.oidc_subject, r.role, r.scope, r.granted_by, r.granted_at FROM staff_roles r JOIN users u ON u.id = r.user_id
         WHERE r.revoked_at IS NULL ORDER BY u.oidc_subject, r.role`,
     );
-    for (const r of rows) out(`${r.oidc_subject}\t${r.role}\tgranted by ${r.granted_by} at ${r.granted_at.toISOString()}`);
+    for (const r of rows) out(`${r.oidc_subject}\t${r.role}\t${r.scope}\tgranted by ${r.granted_by} at ${r.granted_at.toISOString()}`);
     return 0;
   }
 
@@ -45,7 +45,7 @@ export async function runStaffCli(argv: string[], db: Database, out: (line: stri
     const changed =
       command === 'grant'
         ? await query('INSERT INTO staff_roles (user_id, role, granted_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING RETURNING id', [user.id, role as StaffRole, by])
-        : await query('UPDATE staff_roles SET revoked_at = now() WHERE user_id = $1 AND role = $2 AND revoked_at IS NULL RETURNING id', [user.id, role]);
+        : await query('UPDATE staff_roles SET revoked_at = now(), revoked_by = $3 WHERE user_id = $1 AND role = $2 AND revoked_at IS NULL RETURNING id', [user.id, role, by]);
     if (changed.length === 0) {
       out(command === 'grant' ? `already has ${role}` : `does not have ${role}`);
       return 1;

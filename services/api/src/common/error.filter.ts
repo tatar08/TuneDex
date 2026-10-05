@@ -17,6 +17,7 @@ export class ErrorEnvelopeFilter implements ExceptionFilter {
       this.logger.log('ERROR', {
         eventCode: 'UNHANDLED_ERROR',
         requestId: req.requestId,
+        traceId: req.traceId,
         errorName: err?.name,
         errorCode: typeof err?.code === 'string' ? err.code : undefined,
       });

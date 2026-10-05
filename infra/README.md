@@ -44,9 +44,14 @@ Do not reuse the local stack as is. In particular:
 - Run Keycloak with `start` (not `start-dev`), on https with its own PostgreSQL database, and set `KC_HOSTNAME` to the public https URL.
 - Import the realm with real values for the placeholders. Set the console's redirect to its public https URL.
 - Configure SMTP for email verification and password reset, and decide whether `verifyEmail` should be on.
-- API: `APP_ENV=staging` or `production`, `STAFF_MFA_ACR=mfa`, `CONFIG_SIGNING_KEY`, `KEYCLOAK_ADMIN_CLIENT_*`. Turn on `STATION_CHECK_ENABLED=true` once the network egress rules from Doc 17 are in place. The API refuses to start without the first three.
+- API: `APP_ENV=staging` or `production`, `STAFF_MFA_ACR=mfa`, `CONFIG_SIGNING_KEY`, `KEYCLOAK_ADMIN_CLIENT_*`. Turn on `STATION_CHECK_ENABLED=true` once the network egress rules from Doc 17 are in place: run `npm run checker` (same image, same `DATABASE_URL` and `STATION_CHECK_*` keys) as its own service with outbound HTTPS on 443, set `STATION_CHECK_RUNNER=worker` on both, and give the API no outbound access to stream hosts. The API refuses to start without the first three.
 - Console: an https `CONSOLE_BASE_URL`, `SESSION_DATABASE_URL`, `OIDC_MFA_ACR=mfa`.
 - The API and console must reach Keycloak at the same issuer URL the browsers use.
+- Alerts: the API covers traffic, latency, the background queues (oldest due job over 5 minutes per queue, any dead letter) and late deletions (set `ALERT_WEBHOOK_URL` for chat messages). The hosting platform has to cover what the API cannot see: database connection pool above 80% for 10 minutes, disk above 80%, and no successful backup for 24 hours (Doc 17).
+
+## Load test (`infra/load`)
+
+The Doc 17 envelope (100 req/s + 20 diagnostic batches/s, p95 reads ≤ 300 ms, writes ≤ 500 ms) as a runnable tool, with a script for the throwaway test accounts it needs. Steps and the first local numbers are in `infra/load/README.md`. The 30-minute run on staging is still required before any capacity claim.
 
 ## Backup and restore (`infra/backup`)
 
@@ -57,7 +62,10 @@ Doc 17 targets: RPO 15 minutes, RTO 4 hours after an authorised restore, backups
 - **Restore drill:** `ADMIN_DATABASE_URL=<scratch server>/postgres ./restore-drill.sh <dump>` restores into a throwaway database. It then reports the time taken, the latest migration, row counts for the main tables, that the audit table is still append-only, and how many accounts are waiting for deletion. Afterwards it drops the database. Keep each drill's output as evidence.
 - **Real restore:** stop the API (the deletion and retention jobs run inside it), restore, run migrations, then start the API.
   - Accounts that were mid-deletion resume on their own.
-  - **Known gap:** accounts whose deletion finished *after* the backup was taken come back with their data, while their Keycloak user is already gone.
-  - Until a re-purge step exists, list active users whose Keycloak user returns 404 (`GET /admin/realms/tunedeck/users/<subject>`) and delete those accounts again before reopening.
+  - Accounts whose deletion finished *after* the backup was taken come back with their data, while their Keycloak user is already gone. Before reopening, run the reconcile tool with the API's environment:
+    - `docker compose run --rm api node dist/account/restore-reconcile-cli.js` (or `npm run restore-reconcile` in `services/api`) lists the accounts whose Keycloak user no longer exists, and changes nothing.
+    - Add `--apply --by <you> --reason "<why>"` to queue them for deletion again. They are locked out and their devices signed out at once, each one is audited as `account.restore_repurge`, and the API's deletion queue finishes the purge.
+    - If any Keycloak lookup fails, nothing changes. If more than 5% of accounts (and more than 3) look deleted, `--apply` stops unless you add `--allow-many`, because that usually means the database and Keycloak belong to different environments.
+  - The reverse case is not covered: a Keycloak restored to an *older* point than the database still has users the app already deleted. Restore both from the same point in time.
 
 Neither script prints connection strings. Both need `pg_dump`/`pg_restore` 16 or newer.

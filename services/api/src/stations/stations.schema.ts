@@ -5,9 +5,9 @@ import { ApiError } from '../common/api-error';
 /**
  * Station fields catalog staff can edit. Only publicly reachable, publisher-reviewed
  * stream endpoints belong here (Doc 17); private playlists stay on the user's device.
+ * Rights are not draft fields: they live in rights records (rights.ts).
  */
 export const CODECS = ['mp3', 'aac', 'hls'] as const;
-export const RIGHTS_BASES = ['owner_permission', 'broadcaster_terms', 'licensed_aggregator', 'owned_demo'] as const;
 
 export interface StationDraft {
   name: string;
@@ -17,28 +17,23 @@ export interface StationDraft {
   streamUrl: string;
   codec: (typeof CODECS)[number];
   bitrateKbps: number | null;
-  rightsBasis: (typeof RIGHTS_BASES)[number] | null;
-  /** Where the evidence lives (contract number, ticket, email thread id). Not the evidence itself. */
-  rightsReference: string | null;
-  rightsExpiresAt: string | null;
 }
 
-export const EMPTY_RIGHTS = { rightsBasis: null, rightsReference: null, rightsExpiresAt: null, bitrateKbps: null };
 const REQUIRED: (keyof StationDraft)[] = ['name', 'country', 'language', 'streamUrl', 'codec'];
-const FIELDS: (keyof StationDraft)[] = [...REQUIRED, 'genres', 'bitrateKbps', 'rightsBasis', 'rightsReference', 'rightsExpiresAt'];
+const FIELDS: (keyof StationDraft)[] = [...REQUIRED, 'genres', 'bitrateKbps'];
 
-const invalid = (field: string, reason: string) => new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', { field, reason });
+export const invalid = (field: string, reason: string) => new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', { field, reason });
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-export function parseStationId(id: string): string {
-  if (!UUID.test(id)) throw invalid('stationId', 'must_be_uuid');
+export function parseStationId(id: string, field = 'stationId'): string {
+  if (!UUID.test(id)) throw invalid(field, 'must_be_uuid');
   return id.toLowerCase();
 }
 
 // Control characters and bidi overrides never belong in a display name.
 const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/;
 
-function text(field: string, v: unknown, max: number): string {
+export function text(field: string, v: unknown, max: number): string {
   if (typeof v !== 'string') throw invalid(field, 'must_be_string');
   const s = v.normalize('NFC').trim();
   if (s.length === 0 || s.length > max) throw invalid(field, 'length');
@@ -93,18 +88,6 @@ function parseField(field: keyof StationDraft, v: unknown): unknown {
       if (v === null) return null;
       if (!Number.isInteger(v) || (v as number) < 8 || (v as number) > 512) throw invalid(field, 'out_of_range');
       return v;
-    case 'rightsBasis':
-      if (v === null) return null;
-      if (typeof v !== 'string' || !(RIGHTS_BASES as readonly string[]).includes(v)) throw invalid(field, 'value_not_allowed');
-      return v;
-    case 'rightsReference':
-      return v === null ? null : text(field, v, 200);
-    case 'rightsExpiresAt':
-      if (v === null) return null;
-      if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(Date.parse(`${v}T00:00:00Z`))) {
-        throw invalid(field, 'date_yyyy_mm_dd');
-      }
-      return v;
   }
 }
 
@@ -120,7 +103,7 @@ function asObject(body: unknown): Record<string, unknown> {
 export function parseNewStation(body: unknown): StationDraft {
   const b = asObject(body);
   for (const f of REQUIRED) if (!(f in b)) throw invalid(f, 'required');
-  const out: Record<string, unknown> = { genres: [], ...EMPTY_RIGHTS };
+  const out: Record<string, unknown> = { genres: [], bitrateKbps: null };
   for (const [k, v] of Object.entries(b)) out[k] = parseField(k as keyof StationDraft, v);
   return out as unknown as StationDraft;
 }
@@ -140,10 +123,19 @@ export function parseReason(body: unknown): string {
   return text('reason', b.reason, 500);
 }
 
-/** Why a draft cannot be published yet, or null when it can. */
-export function publishBlocker(d: StationDraft, today = new Date()): string | null {
-  if (!d.rightsBasis) return 'rights_basis_missing';
-  if (!d.rightsReference) return 'rights_reference_missing';
-  if (d.rightsExpiresAt && Date.parse(`${d.rightsExpiresAt}T23:59:59Z`) < today.getTime()) return 'rights_expired';
-  return null;
+/** Doc 17: an emergency publish by a single admin needs a reason others can review later. */
+export const EMERGENCY_REASON_MIN = 20;
+
+/**
+ * Publish body: `{ reason, emergency? }`. `emergency: true` lets an admin publish their own change alone
+ * (Doc 17 emergency single-admin exception); it needs a longer reason and is audited separately.
+ */
+export function parsePublish(body: unknown): { reason: string; emergency: boolean } {
+  const b = (typeof body === 'object' && body !== null && !Array.isArray(body) ? body : {}) as Record<string, unknown>;
+  for (const key of Object.keys(b)) if (key !== 'reason' && key !== 'emergency') throw invalid(key, 'unknown_field');
+  if (b.emergency !== undefined && typeof b.emergency !== 'boolean') throw invalid('emergency', 'must_be_boolean');
+  const reason = text('reason', b.reason, 500);
+  const emergency = b.emergency === true;
+  if (emergency && reason.length < EMERGENCY_REASON_MIN) throw invalid('reason', 'too_short');
+  return { reason, emergency };
 }

@@ -36,8 +36,6 @@ test('an editor drafts a station and a different admin publishes it', async ({ b
   await editor.getByLabel('ชื่อสถานี').fill('Bangkok Jazz 24');
   await editor.getByLabel('แนวเพลง').fill('jazz');
   await editor.getByLabel('ลิงก์สตรีม').fill('https://10.0.0.1/live.mp3');
-  await editor.getByLabel('ที่มาของสิทธิ์').selectOption('owner_permission');
-  await editor.getByLabel('เลขอ้างอิงหลักฐาน').fill('CONTRACT-2026-014');
   await editor.getByRole('button', { name: 'สร้างร่าง' }).click();
   // The API's URL rule shows up next to the field, in Thai.
   await expect(editor.locator('.adm-alert')).toContainText('ใช้ชื่อโดเมน ห้ามใช้เลข IP');
@@ -45,6 +43,18 @@ test('an editor drafts a station and a different admin publishes it', async ({ b
   await editor.getByRole('button', { name: 'สร้างร่าง' }).click();
   await expect(editor).toHaveURL(/\/admin\/stations\/[0-9a-f-]{36}$/);
   await expect(editor.getByText('ร่าง revision 1')).toBeVisible();
+  // Rights are records on the station page now: none yet blocks publishing; the editor adds one.
+  await expect(editor.getByText('ยังไม่มีหลักฐานสิทธิ์ที่ใช้งานอยู่')).toBeVisible();
+  await editor.getByText('เพิ่มหลักฐานสิทธิ์', { exact: true }).click();
+  const addRights = editor.getByRole('form', { name: 'เพิ่มหลักฐานสิทธิ์' });
+  await addRights.getByLabel('เจ้าของสิทธิ์').fill('Bangkok Jazz Co., Ltd.');
+  await addRights.getByLabel('ที่มาของสิทธิ์').selectOption('owner_permission');
+  await addRights.getByLabel('เลขอ้างอิงหลักฐาน').fill('CONTRACT-2026-014');
+  await addRights.getByLabel(/รหัสไฟล์หลักฐาน/).fill('rights/2026/contract-014.pdf');
+  await addRights.getByRole('button', { name: 'เพิ่มหลักฐาน' }).click();
+  await expect(editor.getByText('เพิ่มหลักฐานสิทธิ์แล้ว มีผลทันที')).toBeVisible();
+  await expect(editor.getByText('ยังไม่มีหลักฐานสิทธิ์ที่ใช้งานอยู่')).toHaveCount(0);
+  await expect(editor.getByRole('region', { name: 'ประวัติเวอร์ชัน' })).toContainText('เพิ่มหลักฐานสิทธิ์สถานี');
   await expect(editor.getByText('ต้องเป็นแอดมินจึงจะเผยแพร่ได้')).toBeVisible();
   await expect(editor.getByText('คุณแก้ร่างนี้เอง')).toBeVisible();
   const stationUrl = editor.url();
@@ -98,10 +108,13 @@ async function seed() {
     const s = await call('e2e-editor', '/v1/admin/stations', 'POST', {
       name, language, country, genres: [genre], codec: 'aac', bitrateKbps: 96,
       streamUrl: `https://stream.example.com/${genre}.aac`,
-      rightsBasis: state === 'draft' && !expires ? null : 'broadcaster_terms',
-      rightsReference: state === 'draft' && !expires ? null : `REF-${genre.toUpperCase()}`,
-      rightsExpiresAt: expires,
     });
+    // Rights are records now; the draft without an expiry date stays without one.
+    if (state !== 'draft' || expires) {
+      await call('e2e-editor', `/v1/admin/stations/${s.id}/rights`, 'POST', {
+        holder: `${name} owner`, basis: 'broadcaster_terms', reference: `REF-${genre.toUpperCase()}`, territories: [country], validFrom: '2026-01-01', expiresAt: expires,
+      });
+    }
     if (state === 'draft') continue;
     await call('e2e-admin', `/v1/admin/stations/${s.id}/publish`, 'POST', { reason: 'seed' }, 1);
     if (state === 'disable') await call('e2e-admin', `/v1/admin/stations/${s.id}/disable`, 'POST', { reason: 'seed' });
@@ -209,6 +222,10 @@ test('the log page has its own layout in each theme', async ({ browser }) => {
   for (const [theme, selector] of Object.entries(layouts)) {
     await picker.selectOption(theme);
     await expect(page.locator(selector).first()).toBeVisible();
+    // Every theme offers the trace and error-code filters and the audited export.
+    await expect(page.getByLabel('traceId')).toBeVisible();
+    await expect(page.getByLabel('รหัสข้อผิดพลาด')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'ส่งออก CSV' })).toBeVisible();
     if (theme === 'workbench') {
       // j moves to the next line and the detail pane follows.
       const second = await page.locator('.lg-it').nth(1).locator('small').innerText();
@@ -391,17 +408,18 @@ test('operators see the overview in every theme; editors cannot', async ({ brows
 });
 
 test('operators retry a failed account deletion with a reason, in every theme', async ({ browser }) => {
-  // A deletion whose last background attempt failed five minutes ago (the purge itself works in tests).
+  // A deletion whose last background attempt failed five minutes ago (the purge itself works in tests). Its next
+  // automatic try is an hour away, so the background worker leaves it for the operator here.
   await stack.api.sql(
     `WITH u AS (INSERT INTO users (oidc_subject, status) VALUES ('e2e-jobs-leaver', 'deleting') RETURNING id)
-     INSERT INTO account_deletions (ticket_hash, user_id, subject_hash, status, attempts, last_attempt_at, requested_at)
-     SELECT repeat('ab', 32), id, 's-e2e', 'failed', 3, now() - interval '5 minutes', now() - interval '2 days' FROM u`,
+     INSERT INTO account_deletions (ticket_hash, user_id, subject_hash, status, attempts, last_attempt_at, next_attempt_at, last_error_code, requested_at)
+     SELECT repeat('ab', 32), id, 's-e2e', 'failed', 3, now() - interval '5 minutes', now() + interval '1 hour', 'IDP_DELETE_FAILED', now() - interval '2 days' FROM u`,
   );
   const page = await signInAs(browser, 'e2e-ops', '/admin/jobs');
   const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
   const layouts: Record<string, string> = {
     'control-room': '.t-control-room .cr-page .jb-kpis + .pn .jb-table',
-    'broadcast-rack': '.t-broadcast-rack .jb-rack li.jb-failed',
+    'broadcast-rack': '.t-broadcast-rack .jb-rack li.jb-retrying',
     'daylight-bento': '.t-daylight-bento .jb-bento .b-job',
     workbench: '.t-workbench .split .jb-it.sel',
     minimal: '.t-minimal .fv-logstats + .fv-card .jb-list',
@@ -410,6 +428,7 @@ test('operators retry a failed account deletion with a reason, in every theme', 
     await picker.selectOption(theme);
     await expect(page.locator(selector).first()).toBeVisible();
     await expect(page.getByText('ไม่สำเร็จ กำลังลองใหม่อัตโนมัติ').first()).toBeVisible();
+    await expect(page.getByText('IDP_DELETE_FAILED').first()).toBeVisible();
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/jobs-${theme}.png`, fullPage: true });
   }
 
@@ -477,6 +496,63 @@ test('support looks up a customer by email or device id with a reason, in every 
   await expect(ops.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์ดูข้อมูลผู้ใช้');
 });
 
+test('a customer reads a one-time code to support, who then sees their diagnostic reports in every theme until it is withdrawn', async ({ browser }) => {
+  const customer = await signInAs(browser, 'e2e-diag-nok', '/app/privacy');
+  const { rows: [u] } = (await stack.api.sql(`SELECT id FROM users WHERE oidc_subject = 'e2e-diag-nok'`)) as { rows: { id: string }[] };
+  // Test constants only, so inlining them into the SQL is safe here.
+  await stack.api.sql(
+    `WITH d AS (INSERT INTO devices (user_id, id, platform, os_major, app_build) VALUES ('${u.id}', 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', 'ios', 18, '1.0.0+42') RETURNING user_id, id),
+          r AS (INSERT INTO diagnostic_reports (user_id, device_id, batch_id, consented, event_count) SELECT user_id, id, gen_random_uuid(), true, 1 FROM d RETURNING id, user_id)
+     INSERT INTO diagnostic_events (report_id, user_id, event_id, event_name, schema_version, monotonic_ms, session_random_id, duration_ms, result_code, network_class, app_build, os_major, device_class)
+     SELECT id, user_id, gen_random_uuid(), 'playback_error', 1, 1500, 'sess-e2e', NULL, 'stream_timeout', 'cellular', '1.0.0+42', 18, 'phone' FROM r`,
+  );
+  await customer.getByRole('button', { name: 'สร้างรหัสให้ทีม support' }).click();
+  const code = (await customer.getByTestId('support-code').locator('code').textContent())!;
+  expect(code).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+
+  const page = await signInAs(browser, 'e2e-support', '/admin/users');
+  const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
+  const lookup = async () => {
+    await page.getByLabel('อีเมล รหัสผู้ใช้ หรือรหัสเครื่อง').fill(u.id);
+    await page.getByLabel('เหตุผล (จะถูกบันทึกไว้ในประวัติ)').fill('ลูกค้าแจ้งว่าเล่นวิทยุไม่ได้ เคส #77');
+    await page.getByRole('button', { name: 'ค้นหา' }).click();
+  };
+  await picker.selectOption('minimal');
+  await lookup();
+  await page.getByLabel('รหัสจากลูกค้า').fill(code.toLowerCase());
+  await page.getByLabel('เหตุผลที่ขอดูรายงาน (จะถูกบันทึกไว้ในประวัติ)').fill('ลูกค้าแจ้งว่าเล่นวิทยุไม่ได้ เคส #77');
+  await page.getByRole('button', { name: 'ขอดูรายงาน' }).click();
+  await expect(page.getByTestId('support-report')).toContainText('stream_timeout');
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/users-diagnostics-minimal.png`, fullPage: true });
+
+  for (const theme of ['control-room', 'broadcast-rack', 'daylight-bento', 'workbench']) {
+    await picker.selectOption(theme);
+    await lookup();
+    if (theme === 'workbench') await page.getByRole('button', { name: 'รายงานวินิจฉัย' }).click();
+    await page.getByRole('button', { name: 'เปิดดูรายงาน' }).click();
+    await expect(page.getByTestId('support-report')).toContainText('stream_timeout');
+    await expect(page.locator('body')).not.toContainText('sess-e2e');
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/users-diagnostics-${theme}.png`, fullPage: true });
+  }
+
+  // The customer sees who has access and withdraws it; support is back to asking for a code.
+  await customer.reload();
+  await expect(customer.getByTestId('support-grant')).toHaveCount(1);
+  await customer.getByRole('button', { name: 'ยกเลิกสิทธิ์' }).click();
+  await expect(customer.getByText('ยังไม่มีเจ้าหน้าที่คนไหนดูรายงานได้')).toBeVisible();
+  await picker.selectOption('minimal');
+  await lookup();
+  await expect(page.getByLabel('รหัสจากลูกค้า')).toBeVisible();
+
+  const logged = (await stack.api.sql(`SELECT action FROM audit_events WHERE action LIKE 'support.%' ORDER BY id`)) as { rows: { action: string }[] };
+  expect(logged.rows.map((r) => r.action)).toEqual([
+    'support.code_created',
+    'support.access_granted',
+    ...Array(5).fill('support.diagnostics_read'),
+    'support.access_revoked',
+  ]);
+});
+
 test('an admin drafts the app config, a second admin publishes it signed, in every theme', async ({ browser }) => {
   const author = await signInAs(browser, 'e2e-admin', '/admin/config');
   await expect(author.getByText('ยังไม่เคยเผยแพร่ แอปใช้ค่าเริ่มต้นของแอปเอง').first()).toBeVisible();
@@ -486,6 +562,13 @@ test('an admin drafts the app config, a second admin publishes it signed, in eve
   await expect(author.getByText('บันทึกร่างแล้ว')).toBeVisible();
   await expect(author.getByText('คุณแก้ร่างนี้เอง ต้องให้แอดมินอีกคนตรวจและเผยแพร่')).toBeVisible();
   await expect(author.getByText('build ขั้นต่ำ iOS, นำเข้าเพลย์ลิสต์').first()).toBeVisible();
+  // Staging first: test builds try it before a second admin approves it for everyone.
+  await author.locator('#cf-stage-reason').fill('ลอง build 42 ขั้นต่ำกับเครื่องทดสอบ');
+  await author.getByRole('button', { name: 'ส่งร่าง r1 ขึ้น staging' }).click();
+  await expect(author.getByText('ส่งขึ้น staging แล้ว')).toBeVisible();
+  await expect(author.getByText('Staging: รุ่น 1 จากร่าง r1 (ตรงกับร่างนี้)')).toBeVisible();
+  const staged = await (await fetch(`${stack.api.url}/v1/config?channel=staging`)).json();
+  expect(staged).toMatchObject({ release: 1, environment: 'staging' });
 
   const reviewer = await signInAs(browser, 'e2e-admin2', '/admin/config');
   await reviewer.locator('#cf-reason').fill('build 41 ล่มตอนนำเข้า บังคับ 42 และปิดนำเข้าชั่วคราว');
@@ -493,11 +576,11 @@ test('an admin drafts the app config, a second admin publishes it signed, in eve
   if (SHOTS) await reviewer.screenshot({ path: `${SHOTS}/config-publish.png`, fullPage: true });
   await reviewer.getByRole('button', { name: 'เผยแพร่ร่าง r1' }).click();
   await expect(reviewer.getByText('เผยแพร่แล้ว')).toBeVisible();
-  await expect(reviewer.getByText('แอปใช้ รุ่น 1').first()).toBeVisible();
+  await expect(reviewer.getByText('แอปใช้ รุ่น 2').first()).toBeVisible();
 
-  // What the apps get: release 1, signed (the JWS payload carries the same document).
+  // What the apps get: release 2 (promoted from staging release 1), signed (the JWS payload carries the same document).
   const served = await (await fetch(`${stack.api.url}/v1/config`)).json();
-  expect(served).toMatchObject({ release: 1, config: { minSupportedBuild: { ios: 42, android: null }, features: { playlistImport: false } } });
+  expect(served).toMatchObject({ release: 2, environment: 'production', config: { minSupportedBuild: { ios: 42, android: null }, features: { playlistImport: false } } });
   expect(served.jws.split('.')).toHaveLength(3);
 
   const picker = reviewer.getByLabel('เลือกธีมหน้าทีมงาน');
@@ -511,7 +594,7 @@ test('an admin drafts the app config, a second admin publishes it signed, in eve
   for (const [theme, selector] of Object.entries(layouts)) {
     await picker.selectOption(theme);
     await expect(reviewer.locator(selector)).toBeVisible();
-    await expect(reviewer.getByText('รุ่น 1').first()).toBeVisible();
+    await expect(reviewer.getByText('รุ่น 2').first()).toBeVisible();
     if (SHOTS) await reviewer.screenshot({ path: `${SHOTS}/config-${theme}.png`, fullPage: true });
   }
 
@@ -524,6 +607,6 @@ test('an admin drafts the app config, a second admin publishes it signed, in eve
   await expect(editor.getByRole('link', { name: 'ตั้งค่าแอป' })).toHaveCount(0);
 
   const audit = (await stack.api.sql(`SELECT action FROM audit_events WHERE target_type = 'config' ORDER BY id`)) as { rows: { action: string }[] };
-  expect(audit.rows.map((r) => r.action)).toEqual(['config.update', 'config.publish']);
+  expect(audit.rows.map((r) => r.action)).toEqual(['config.update', 'config.stage', 'config.publish']);
 });
 

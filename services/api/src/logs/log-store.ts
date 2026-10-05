@@ -8,7 +8,7 @@ const MAX_BUFFER = 2000;
 const BATCH = 200;
 const FLUSH_MS = 1000;
 const PRUNE_EVERY_MS = 60 * 60 * 1000;
-const COLUMNS = 14;
+const COLUMNS = 15;
 
 /** Health probes run every few seconds; they stay on stdout but are not worth keeping for search. */
 const kept = (l: LogLine) => !(l.eventCode === 'HTTP_REQUEST' && l.route?.startsWith('/health'));
@@ -75,11 +75,11 @@ export class PgLogStore implements LogSink, OnApplicationShutdown {
   private async insert(batch: LogLine[]): Promise<void> {
     const params: unknown[] = [];
     const rows = batch.map((l, i) => {
-      params.push(l.timestamp, l.severity, l.service, l.environment, l.build, l.eventCode, l.requestId ?? null, l.method ?? null, l.route ?? null, l.status ?? null, l.durationMs ?? null, l.actorId ?? null, l.errorName ?? null, l.errorCode ?? null);
+      params.push(l.timestamp, l.severity, l.service, l.environment, l.build, l.eventCode, l.requestId ?? null, l.traceId ?? null, l.method ?? null, l.route ?? null, l.status ?? null, l.durationMs ?? null, l.actorId ?? null, l.errorName ?? null, l.errorCode ?? null);
       return `(${Array.from({ length: COLUMNS }, (_, j) => `$${i * COLUMNS + j + 1}`).join(', ')})`;
     });
     await this.pool.query(
-      `INSERT INTO operational_logs (logged_at, severity, service, environment, build, event_code, request_id, method, route, status, duration_ms, actor_id, error_name, error_code)
+      `INSERT INTO operational_logs (logged_at, severity, service, environment, build, event_code, request_id, trace_id, method, route, status, duration_ms, actor_id, error_name, error_code)
        VALUES ${rows.join(', ')}`,
       params,
     );

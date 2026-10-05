@@ -146,4 +146,23 @@ describe('/v1/me/devices', () => {
     expect(results.filter((r) => r.status === 409)).toHaveLength(5);
     expect((await list(token)).body.devices).toHaveLength(20);
   });
+
+  it('pages the list with a cursor, active devices first, without repeats', async () => {
+    const token = await id.token('dev-pages');
+    const ids = Array.from({ length: 5 }, (_, i) => `10000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+    for (const d of ids) await put(token, d, report).expect(200);
+    await t.pool.query(`UPDATE devices SET revoked_at = now() WHERE id = $1`, [ids[0]]);
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const res: request.Response = await http().get('/v1/me/devices').query({ limit: 2, ...(cursor ? { cursor } : {}) }).set('Authorization', `Bearer ${token}`).expect(200);
+      expect(res.body.devices.length).toBeLessThanOrEqual(2);
+      seen.push(...res.body.devices.map((d: { id: string }) => d.id));
+      cursor = res.body.nextCursor;
+    } while (cursor);
+    expect([...seen].sort()).toEqual([...ids].sort());
+    expect(seen.at(-1)).toBe(ids[0]);
+    expect((await http().get('/v1/me/devices?limit=101').set('Authorization', `Bearer ${token}`)).status).toBe(400);
+    expect((await http().get('/v1/me/devices?cursor=bad!').set('Authorization', `Bearer ${token}`)).status).toBe(400);
+  });
 });

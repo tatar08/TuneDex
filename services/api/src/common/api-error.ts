@@ -5,6 +5,8 @@ export type ErrorCode =
   | 'AUTH_FORBIDDEN'
   | 'VALIDATION_FAILED'
   | 'NOT_FOUND'
+  | 'EXPORT_NOT_READY'
+  | 'IDEMPOTENCY_KEY_REQUIRED'
   | 'PRECONDITION_REQUIRED'
   | 'REVISION_MISMATCH'
   | 'PAYLOAD_TOO_LARGE'
@@ -15,14 +17,21 @@ export type ErrorCode =
   | 'ROLE_REQUIRED'
   | 'PUBLISH_BLOCKED'
   | 'CHECK_TOO_SOON'
+  | 'CHECKER_UNAVAILABLE'
+  | 'RIGHTS_ALREADY_REVOKED'
   | 'API_RATE_LIMITED'
   | 'ACCOUNT_DELETING'
   | 'JOB_RETRY_TOO_SOON'
   | 'JOB_BUSY'
+  | 'JOB_RETRY_LIMIT'
+  | 'JOB_SUPERSEDED'
   | 'SYNC_RESET_REQUIRED'
   | 'PURCHASE_INVALID'
   | 'PURCHASE_CONFLICT'
   | 'MFA_REQUIRED'
+  | 'IDEMPOTENCY_KEY_REUSED'
+  | 'IDEMPOTENCY_IN_PROGRESS'
+  | 'SUPPORT_ACCESS_REQUIRED'
   | 'INTERNAL';
 
 export const MESSAGE_KEYS: Record<ErrorCode, string> = {
@@ -30,6 +39,8 @@ export const MESSAGE_KEYS: Record<ErrorCode, string> = {
   AUTH_FORBIDDEN: 'errors.auth.forbidden',
   VALIDATION_FAILED: 'errors.request.invalid',
   NOT_FOUND: 'errors.request.notFound',
+  EXPORT_NOT_READY: 'errors.export.notReady',
+  IDEMPOTENCY_KEY_REQUIRED: 'errors.request.idempotencyKeyRequired',
   PRECONDITION_REQUIRED: 'errors.request.ifMatchRequired',
   REVISION_MISMATCH: 'errors.settings.revisionMismatch',
   PAYLOAD_TOO_LARGE: 'errors.request.tooLarge',
@@ -40,14 +51,21 @@ export const MESSAGE_KEYS: Record<ErrorCode, string> = {
   ROLE_REQUIRED: 'errors.auth.roleRequired',
   PUBLISH_BLOCKED: 'errors.stations.publishBlocked',
   CHECK_TOO_SOON: 'errors.stations.checkTooSoon',
+  CHECKER_UNAVAILABLE: 'errors.stations.checkerUnavailable',
+  RIGHTS_ALREADY_REVOKED: 'errors.stations.rightsAlreadyRevoked',
   API_RATE_LIMITED: 'errors.request.rateLimited',
   ACCOUNT_DELETING: 'errors.account.deleting',
   JOB_RETRY_TOO_SOON: 'errors.jobs.retryTooSoon',
   JOB_BUSY: 'errors.jobs.busy',
+  JOB_RETRY_LIMIT: 'errors.jobs.retryLimit',
+  JOB_SUPERSEDED: 'errors.jobs.superseded',
   SYNC_RESET_REQUIRED: 'errors.sync.resetRequired',
   PURCHASE_INVALID: 'errors.billing.invalid',
   PURCHASE_CONFLICT: 'errors.billing.ownedByAnotherAccount',
   MFA_REQUIRED: 'errors.auth.mfaRequired',
+  IDEMPOTENCY_KEY_REUSED: 'errors.request.idempotencyKeyReused',
+  IDEMPOTENCY_IN_PROGRESS: 'errors.request.inProgress',
+  SUPPORT_ACCESS_REQUIRED: 'errors.support.accessRequired',
   INTERNAL: 'errors.service.internal',
 };
 

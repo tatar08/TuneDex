@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { countByHealth, healthLine } from '@/lib/admin';
+import { countByHealth, healthLine, logApiParams, logHref, logSearchFrom, rightsDaysLeft, rightsLine, rightsSoon, visibleInApps } from '@/lib/admin';
 import type { AdminStation } from '@/lib/bff';
 import { loadConfig } from '@/lib/config';
 import { openTransaction, safeReturnTo, sealTransaction } from '@/lib/cookies';
+import { createLogger, traceIdFrom } from '@/lib/log';
 import { MemorySessionStore } from '@/lib/session';
+import { langFrom } from '@/lib/lang';
 
 const env = {
   CONSOLE_BASE_URL: 'https://console.tunedeck.test',
@@ -34,6 +36,40 @@ describe('config', () => {
     expect(() => loadConfig({ ...env, SESSION_DATABASE_URL: '' })).toThrow('SESSION_DATABASE_URL');
     expect(() => loadConfig({ ...env, SESSION_DATABASE_URL: 'redis://x' })).toThrow('SESSION_DATABASE_URL');
     expect(loadConfig({ ...env, SESSION_DATABASE_URL: '', CONSOLE_BASE_URL: 'http://localhost:3200' }).sessionDatabaseUrl).toBeNull();
+  });
+  it('reads the environment and build for log lines', () => {
+    expect(loadConfig(env)).toMatchObject({ environment: 'unknown', build: 'unknown' });
+    expect(loadConfig({ ...env, APP_ENV: 'staging', BUILD_VERSION: '1.4.0+52' })).toMatchObject({ environment: 'staging', build: '1.4.0+52' });
+    expect(() => loadConfig({ ...env, APP_ENV: 'Prod "x"' })).toThrow('APP_ENV');
+    expect(() => loadConfig({ ...env, BUILD_VERSION: 'a b' })).toThrow('BUILD_VERSION');
+  });
+});
+
+describe('log lines and trace context', () => {
+  const TRACE = '4bf92f3577b34da6a3ce929d0e0e4736';
+  it('writes environment, build and trace id on each line', () => {
+    const lines: string[] = [];
+    createLogger((l) => lines.push(l), { environment: 'staging', build: '1.4.0+52' })('INFO', {
+      eventCode: 'BFF_REQUEST', requestId: 'web_1', traceId: TRACE, method: 'GET', route: '/bff/settings', status: 200, durationMs: 3,
+    });
+    expect(JSON.parse(lines[0])).toMatchObject({ service: 'console', environment: 'staging', build: '1.4.0+52', traceId: TRACE });
+  });
+  it('accepts only valid traceparent headers', () => {
+    expect(traceIdFrom(`00-${TRACE}-00f067aa0ba902b7-01`)).toBe(TRACE);
+    expect(traceIdFrom(`01-${TRACE}-00f067aa0ba902b7-01-later`)).toBe(TRACE);
+    for (const bad of [null, '', 'x', `ff-${TRACE}-00f067aa0ba902b7-01`, `00-${'0'.repeat(32)}-00f067aa0ba902b7-01`, `00-${TRACE}-${'0'.repeat(16)}-01`, `00-${TRACE.toUpperCase()}-00f067aa0ba902b7-01`, `00-${TRACE}-00f067aa0ba902b7-01-x`]) {
+      expect(traceIdFrom(bad)).toBeNull();
+    }
+  });
+});
+
+describe('log search form', () => {
+  it('keeps the window at 24 hours at most and passes traceId and errorCode on', () => {
+    const s = logSearchFrom({ range: '7d', traceId: ' 4BF92F3577B34DA6A3CE929D0E0E4736 ', errorCode: 'IDP_DELETE_FAILED' });
+    expect(s.range).toBe('1h');
+    const p = logApiParams({ ...s, range: '24h' }, Date.parse('2026-10-04T12:00:00Z'));
+    expect(p).toMatchObject({ from: '2026-10-03T12:00:00.000Z', to: '2026-10-04T12:00:00.000Z', traceId: '4bf92f3577b34da6a3ce929d0e0e4736', errorCode: 'IDP_DELETE_FAILED', limit: '50' });
+    expect(logHref({ traceId: 'abc', range: '24h' })).toBe('/admin/logs?traceId=abc&range=24h');
   });
 });
 
@@ -90,5 +126,39 @@ describe('stream health helpers', () => {
       failing: 0,
       suspect: 1,
     });
+  });
+});
+
+describe('station rights in lists', () => {
+  const now = Date.parse('2026-10-04T12:00:00Z');
+  const s = (rights: Partial<AdminStation['rights']>, published = true) =>
+    ({ published: published ? {} : null, disabledAt: null, rights: { state: 'current', expiresAt: null, reference: null, liveUntil: null, ...rights } }) as unknown as AdminStation;
+
+  it('reads the rights records summary, not draft fields', () => {
+    expect(rightsLine(s({}))).toBe('สิทธิ์ไม่มีวันหมดอายุ');
+    expect(rightsLine(s({ expiresAt: '2027-04-30' }))).toMatch(/^สิทธิ์ถึง /);
+    expect(rightsLine(s({ state: 'missing' }))).toBe('ยังไม่มีข้อมูลสิทธิ์');
+    expect(rightsLine(s({ state: 'territory' }))).toBe('สิทธิ์ไม่ครอบคลุมประเทศนี้');
+    expect(rightsSoon(s({ expiresAt: '2026-10-20' }), now)).toBe(true);
+    expect(rightsSoon(s({ expiresAt: '2027-10-20' }), now)).toBe(false);
+    expect(rightsSoon(s({ state: 'missing' }), now)).toBe(true);
+    expect(rightsDaysLeft(s({ expiresAt: '2026-10-14' }), now)).toBe(11);
+    expect(rightsDaysLeft(s({ state: 'not_yet_valid', expiresAt: '2027-01-01' }), now)).toBeNull();
+  });
+
+  it('counts a published station as visible only while its public rights window is open', () => {
+    expect(visibleInApps(s({}), now)).toBe(true);
+    expect(visibleInApps(s({ liveUntil: '2026-12-31T23:59:59.999Z' }), now)).toBe(true);
+    expect(visibleInApps(s({ liveUntil: '2026-10-04T11:00:00.000Z' }), now)).toBe(false);
+    expect(visibleInApps(s({}, false), now)).toBe(false);
+  });
+});
+
+describe('page language', () => {
+  it('is Thai unless the switch chose English', () => {
+    expect(langFrom('en')).toBe('en');
+    expect(langFrom('th')).toBe('th');
+    expect(langFrom(undefined)).toBe('th');
+    expect(langFrom('xx')).toBe('th');
   });
 });

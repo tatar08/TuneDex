@@ -28,6 +28,8 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Prom
       view={'view' in diagnostics && diagnostics.view ? diagnostics.view : null}
       // Back from a re-authentication started by "delete this account".
       pendingDelete={sp.delete === '1'}
+      // Back from a re-authentication started by "prepare my data".
+      pendingExport={sp.export === '1'}
       reauthFailed={sp.reauth === 'failed'}
     />
   );

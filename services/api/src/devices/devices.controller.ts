@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Put, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { requireRecentSignIn } from '../auth/recent-sign-in';
+import { decodeCursor, parseLimit } from '../common/pagination';
 import { parseDeviceId, parseDeviceReport } from './devices.schema';
 import { DevicesService, DeviceView } from './devices.service';
 
@@ -11,9 +12,9 @@ export class DevicesController {
   constructor(private readonly devices: DevicesService) {}
 
   @Get()
-  async list(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  async list(@Req() req: Request, @Query('cursor') cursor: unknown, @Query('limit') limit: unknown, @Res({ passthrough: true }) res: Response) {
     res.setHeader('Cache-Control', 'no-store');
-    return this.devices.list(req.actor!.userId);
+    return this.devices.list(req.actor!.userId, decodeCursor(cursor, 3), parseLimit(limit));
   }
 
   /** Called by the phone app at sign-in and on each sync to report its build and applied settings revision. */

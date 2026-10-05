@@ -82,6 +82,7 @@ describe('account export and deletion', () => {
     await seed('acct-stale');
     const res = await http().delete('/v1/me/account').set(await bearer('acct-stale', now() - 301));
     expect(res.status).toBe(401);
+    expect((await http().delete('/v1/me').set('Idempotency-Key', crypto.randomUUID()).set(await bearer('acct-stale', now() - 301))).body.code).toBe('REAUTH_REQUIRED');
     expect(res.body).toMatchObject({ code: 'REAUTH_REQUIRED', details: { maxAgeSeconds: 300 } });
     await http().get('/v1/me/settings').set(await bearer('acct-stale')).expect(200);
   });
@@ -102,6 +103,8 @@ describe('account export and deletion', () => {
     expect(blocked.status).toBe(403);
     expect(blocked.body.code).toBe('ACCOUNT_DELETING');
     await http().delete('/v1/me/account').set(fresh).expect(403);
+    // DELETE /v1/me is the Doc 17 path for the same request.
+    await http().delete('/v1/me').set('Idempotency-Key', crypto.randomUUID()).set(fresh).expect(403);
 
     await t.app.get(AccountService).processQueue();
     const status = await http().get(`/v1/account-deletions/${res.body.ticket}`).expect(200);
@@ -135,7 +138,7 @@ describe('account export and deletion', () => {
     expect((await http().get('/v1/me/settings').set(again).expect(200)).body.revision).toBe(0);
   });
 
-  it('keeps retrying a failed purge and reports it as failed meanwhile', async () => {
+  it('retries a failed purge once its backoff ends and reports it as failed meanwhile', async () => {
     await seed('acct-retry');
     const res = await http().delete('/v1/me/account').set(await bearer('acct-retry', now())).expect(202);
     const service = t.app.get(AccountService);
@@ -153,6 +156,12 @@ describe('account export and deletion', () => {
       await t.pool.query('DROP TRIGGER fail_purge ON users');
       await t.pool.query('DROP FUNCTION fail_purge()');
     }
+    // The next try waits for the first backoff step (1 minute), then runs.
+    const { rows: [after] } = await t.pool.query(`SELECT status, attempts, last_error_code, extract(epoch FROM next_attempt_at - now()) AS wait FROM account_deletions WHERE user_id = $1`, [user.user_id]);
+    expect(after).toMatchObject({ status: 'failed', last_error_code: 'DB_P0001' });
+    expect(Number(after.wait)).toBeGreaterThan(50);
+    expect(await service.processQueue()).toBe(0);
+    await t.pool.query(`UPDATE account_deletions SET next_attempt_at = now() WHERE user_id = $1`, [user.user_id]);
     expect(await service.processQueue()).toBe(1);
     expect((await http().get(`/v1/account-deletions/${res.body.ticket}`).expect(200)).body.status).toBe('completed');
   });
@@ -176,6 +185,8 @@ describe('account export and deletion', () => {
     } finally {
       t.idp.state.failDeletes = false;
     }
+    expect((await t.pool.query(`SELECT last_error_code FROM account_deletions WHERE status = 'failed'`)).rows).toEqual([{ last_error_code: 'IDP_DELETE_FAILED' }]);
+    await t.pool.query(`UPDATE account_deletions SET next_attempt_at = now() WHERE status = 'failed'`);
     expect(await t.app.get(AccountService).processQueue()).toBe(1);
     expect((await http().get(`/v1/account-deletions/${ticket}`).expect(200)).body.status).toBe('completed');
     expect(t.idp.deleted).toContain('acct-idp-down');

@@ -9,7 +9,7 @@ import { writeAudit } from './audit';
 
 const MAX_WINDOW_MS = 90 * 24 * 3600 * 1000;
 const DEFAULT_WINDOW_MS = 7 * 24 * 3600 * 1000;
-const MAX_LIMIT = 200;
+const MAX_LIMIT = 100;
 /** Searching logs or the audit trail is itself recorded; these rows are hidden unless asked for. */
 const READ_ACTIONS = ['logs.search', 'audit.search'];
 /** Doc 17: exports hold at most 10k rows per job. */
@@ -61,7 +61,7 @@ function time(q: Record<string, unknown>, field: string): Date | undefined {
   return d;
 }
 
-/** Parses and bounds an audit search: a window of at most 90 days (default 7), at most 200 rows a page. */
+/** Parses and bounds an audit search: a window of at most 90 days (default 7), at most 100 rows a page (Doc 17). */
 export function parseAuditQuery(q: Record<string, unknown>, now = new Date()): AuditQuery {
   const to = time(q, 'to') ?? now;
   const from = time(q, 'from') ?? new Date(to.getTime() - DEFAULT_WINDOW_MS);
@@ -213,7 +213,7 @@ const filtersOf = (q: AuditQuery) => ({
 const CSV_COLUMNS = ['id', 'occurredAt', 'actor', 'actorSubject', 'action', 'targetType', 'targetId', 'targetLabel', 'reason', 'changes', 'requestId'] as const;
 
 /** One CSV cell. Text a spreadsheet would run as a formula (= + - @, tab, CR) gets a leading apostrophe. */
-function cell(v: unknown): string {
+export function csvCell(v: unknown): string {
   let s = v === null || v === undefined ? '' : typeof v === 'string' ? v : JSON.stringify(v);
   if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\r\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
@@ -221,7 +221,7 @@ function cell(v: unknown): string {
 
 /** RFC 4180 CSV with a UTF-8 BOM so Excel shows Thai text correctly. */
 export function toCsv(rows: AuditRow[]): string {
-  const lines = [CSV_COLUMNS.join(','), ...rows.map((r) => CSV_COLUMNS.map((c) => cell(r[c])).join(','))];
+  const lines = [CSV_COLUMNS.join(','), ...rows.map((r) => CSV_COLUMNS.map((c) => csvCell(r[c])).join(','))];
   return `\uFEFF${lines.join('\r\n')}\r\n`;
 }
 

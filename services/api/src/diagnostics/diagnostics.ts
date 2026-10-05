@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Query,
   HttpCode,
   HttpStatus,
   Injectable,
@@ -16,6 +17,7 @@ import {
 import type { Request, Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { ApiError } from '../common/api-error';
+import { decodeCursor, encodeCursor, PAGE_MAX, parseLimit } from '../common/pagination';
 import { Database } from '../db/database';
 
 /** Doc 07 allowed event names. Anything else is refused, so new kinds of data need a code change and review. */
@@ -204,7 +206,18 @@ export class DiagnosticsService implements OnApplicationShutdown {
     });
   }
 
-  async list(ownerId: string): Promise<ReportSummary[]> {
+  /** Newest first, one page (Doc 17: cursor pages of at most 100); `only` picks a single report. */
+  async list(ownerId: string, opts: { after?: string[] | null; limit?: number; only?: string } = {}): Promise<ReportSummary[]> {
+    const limit = opts.limit ?? PAGE_MAX;
+    const params: unknown[] = [ownerId, DIAGNOSTICS_RETENTION_DAYS, limit];
+    let extra = '';
+    if (opts.only) {
+      params.push(opts.only);
+      extra = ` AND r.id = $${params.length}`;
+    } else if (opts.after) {
+      params.push(opts.after[0], opts.after[1]);
+      extra = ` AND (date_trunc('milliseconds', r.received_at), r.id::text) < ($${params.length - 1}::timestamptz, $${params.length})`;
+    }
     const rows = await this.db.query<{
       id: string;
       received_at: Date;
@@ -217,9 +230,9 @@ export class DiagnosticsService implements OnApplicationShutdown {
               (SELECT json_agg(json_build_object('eventName', event_name, 'count', n) ORDER BY n DESC, event_name)
                  FROM (SELECT event_name, count(*)::int AS n FROM diagnostic_events e WHERE e.report_id = r.id GROUP BY event_name) c) AS events
          FROM diagnostic_reports r LEFT JOIN devices d ON d.user_id = r.user_id AND d.id = r.device_id
-        WHERE r.user_id = $1 AND r.received_at > now() - make_interval(days => $2)
-        ORDER BY r.received_at DESC LIMIT 100`,
-      [ownerId, DIAGNOSTICS_RETENTION_DAYS],
+        WHERE r.user_id = $1 AND r.received_at > now() - make_interval(days => $2)${extra}
+        ORDER BY date_trunc('milliseconds', r.received_at) DESC, r.id::text DESC LIMIT $3`,
+      params,
     );
     return rows.map((r) => ({
       id: r.id,
@@ -234,7 +247,7 @@ export class DiagnosticsService implements OnApplicationShutdown {
 
   /** One report with its events, for the owner to see exactly what was sent. */
   async get(ownerId: string, id: string): Promise<ReportSummary & { items: DiagnosticEvent[] }> {
-    const summary = (await this.list(ownerId)).find((r) => r.id === id);
+    const [summary] = await this.list(ownerId, { only: id });
     if (!summary) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
     const items = await this.db.query<Record<string, unknown>>(
       `SELECT event_id, event_name, schema_version, monotonic_ms, session_random_id, duration_ms, result_code,
@@ -307,9 +320,17 @@ export class MyDiagnosticsController {
   constructor(private readonly diagnostics: DiagnosticsService) {}
 
   @Get()
-  async list(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  async list(@Req() req: Request, @Query('cursor') cursor: unknown, @Query('limit') limit: unknown, @Res({ passthrough: true }) res: Response) {
     res.setHeader('Cache-Control', 'no-store');
-    return { reports: await this.diagnostics.list(req.actor!.userId), retentionDays: DIAGNOSTICS_RETENTION_DAYS };
+    const size = parseLimit(limit);
+    const rows = await this.diagnostics.list(req.actor!.userId, { after: decodeCursor(cursor, 2), limit: size + 1 });
+    const reports = rows.slice(0, size);
+    const last = reports.at(-1);
+    return {
+      reports,
+      nextCursor: rows.length > size && last ? encodeCursor([last.receivedAt, last.id]) : null,
+      retentionDays: DIAGNOSTICS_RETENTION_DAYS,
+    };
   }
 
   @Get(':id')

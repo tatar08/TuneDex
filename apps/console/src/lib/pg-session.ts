@@ -16,6 +16,7 @@ interface Payload {
   csrfToken: string;
   tokens: TokenSet;
   staff?: boolean;
+  staffVersion?: string;
 }
 
 /**
@@ -135,7 +136,7 @@ export class PgSessionStore implements SessionStore {
     const l = this.limits(session.staff);
     await this.pool.query(
       `UPDATE console_sessions SET payload = $2, last_seen_at = $3, idle_ms = $4, absolute_until = created_at + $5 WHERE key = $1`,
-      [key, this.seal(key, { csrfToken: session.csrfToken, tokens: session.tokens, staff: session.staff }), session.lastSeenAt, l.idleMs, l.absoluteMs],
+      [key, this.seal(key, { csrfToken: session.csrfToken, tokens: session.tokens, staff: session.staff, staffVersion: session.staffVersion }), session.lastSeenAt, l.idleMs, l.absoluteMs],
     );
   }
 

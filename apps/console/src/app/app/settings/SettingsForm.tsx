@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { DeviceView, SettingsView } from '@/lib/bff';
+import type { DevicePreferencesView, DeviceView, SettingsView } from '@/lib/bff';
 import { strings } from '@/lib/i18n';
 import { AppNav } from '../AppNav';
 
@@ -24,6 +24,94 @@ type Problem =
 /** Last-seen times are shown in Thailand time whatever the browser's zone, so staff and users read the same clock. */
 const seenFormat = (lang: string) =>
   new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'th-TH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Bangkok' });
+
+/** Doc 17 /app/settings device overrides: one device can differ from the account; the preview shows what it will use. */
+function DeviceOverrides({ device, account, csrfToken, onAnnounce }: { device: DeviceView; account: Values; csrfToken: string; onAnnounce: (s: string) => void }) {
+  const t = strings(account.language);
+  const [saved, setSaved] = useState({ overrides: device.overrides, revision: device.preferencesRevision });
+  const [draft, setDraft] = useState<Partial<Values>>(device.overrides);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState('');
+  const label = (field: Field, value: string) => t[`${field}.${value}` as keyof typeof t] as string;
+  const effective = { ...account, ...draft } as Values;
+  const dirty = JSON.stringify(Object.entries(draft).sort()) !== JSON.stringify(Object.entries(saved.overrides).sort());
+
+  async function put(overrides: Partial<Values>) {
+    setBusy(true);
+    setProblem('');
+    try {
+      const res = await fetch(`/bff/devices/${device.id}/preferences`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', 'if-match': `"${saved.revision}"`, 'x-csrf-token': csrfToken },
+        body: JSON.stringify({ overrides }),
+      });
+      if (res.ok) {
+        const v = (await res.json()) as DevicePreferencesView;
+        setSaved({ overrides: v.overrides, revision: v.revision });
+        setDraft(v.overrides);
+        onAnnounce(t.overrideSaved);
+      } else if (res.status === 412) {
+        const latest = await fetch(`/bff/devices/${device.id}/preferences`).then((r) => (r.ok ? (r.json() as Promise<DevicePreferencesView>) : null)).catch(() => null);
+        if (latest) {
+          setSaved({ overrides: latest.overrides, revision: latest.revision });
+          setDraft(latest.overrides);
+        }
+        setProblem(t.overrideConflict);
+      } else setProblem(res.status === 401 ? t.expired : res.status === 429 ? t.rateLimited : t.unavailable);
+    } catch {
+      setProblem(t.unavailable);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <details className="overrides" open={Object.keys(saved.overrides).length > 0}>
+      <summary>{t.overrideTitle}</summary>
+      {problem && (
+        <p role="alert" className="notice error">
+          {problem}
+        </p>
+      )}
+      {(Object.keys(OPTIONS) as Field[]).map((field) => (
+        <label key={field} className="override-field">
+          <span>{t[field]}</span>
+          <select
+            value={draft[field] ?? ''}
+            onChange={(e) =>
+              setDraft((d) => {
+                const next = { ...d };
+                if (e.target.value) next[field] = e.target.value;
+                else delete next[field];
+                return next;
+              })
+            }
+          >
+            <option value="">{t.overrideFollow(label(field, account[field]))}</option>
+            {OPTIONS[field].map((value) => (
+              <option key={value} value={value}>
+                {label(field, value)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ))}
+      <p className="status" data-testid="effective">
+        {t.overrideEffective((Object.keys(OPTIONS) as Field[]).map((f) => label(f, effective[f])).join(' · '))}
+      </p>
+      <div className="row">
+        <button type="button" className="btn secondary" disabled={busy || !dirty} onClick={() => void put(draft)}>
+          {t.overrideSave}
+        </button>
+        {Object.keys(saved.overrides).length > 0 && (
+          <button type="button" className="btn secondary" disabled={busy} onClick={() => void put({})}>
+            {t.overrideReset}
+          </button>
+        )}
+      </div>
+    </details>
+  );
+}
 
 export function SettingsForm({
   initial,
@@ -52,8 +140,12 @@ export function SettingsForm({
     if (problem) alertRef.current?.focus();
   }, [problem]);
 
-  /** Sends only the fields that differ from `base`, the values this user started editing from. */
-  async function save(revision: number, base: Values = saved.settings) {
+  /**
+   * Sends only the fields that differ from `base`, the values this user started editing from.
+   * Doc 06/17: when someone else saved meanwhile, fields only one side changed are rebased and sent again
+   * once without asking; only a field both sides changed to different values goes to the user.
+   */
+  async function save(revision: number, base: Values = saved.settings, rebased = false) {
     const patch: Partial<Values> = {};
     for (const k of Object.keys(values) as Field[]) if (values[k] !== base[k]) patch[k] = values[k] as never;
     if (Object.keys(patch).length === 0) return;
@@ -72,6 +164,10 @@ export function SettingsForm({
         setAnnounce(strings((body as SettingsView).settings.language).savedRevision((body as SettingsView).revision));
       } else if (res.status === 412) {
         const latest = await fetch('/bff/settings').then((r) => (r.ok ? (r.json() as Promise<SettingsView>) : null)).catch(() => null);
+        if (latest && !rebased && !Object.keys(patch).some((k) => latest.settings[k as Field] !== base[k as Field] && latest.settings[k as Field] !== patch[k as Field])) {
+          setSaved(latest);
+          return void (await save(latest.revision, base, true));
+        }
         setProblem({ kind: 'conflict', server: latest, currentRevision: latest?.revision ?? body?.details?.currentRevision ?? revision });
       } else if (res.status === 401) {
         setProblem({ kind: 'expired' });
@@ -196,6 +292,7 @@ export function SettingsForm({
                     <span className="status">
                       {t.deviceDetail(d.appliedSettingsRevision, d.appBuild, seenFormat(saved.settings.language).format(new Date(d.lastSeenAt)))}
                     </span>
+                    <DeviceOverrides device={d} account={saved.settings} csrfToken={csrfToken} onAnnounce={setAnnounce} />
                   </li>
                 );
               })}

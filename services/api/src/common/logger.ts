@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Injectable, Inject, Optional } from '@nestjs/common';
 import { APP_CONFIG, AppConfig } from '../config';
 
@@ -10,6 +11,8 @@ export type Severity = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 export interface LogFields {
   eventCode: string;
   requestId?: string;
+  /** W3C trace id (32 lowercase hex) of the request the line belongs to. */
+  traceId?: string;
   method?: string;
   route?: string;
   status?: number;
@@ -40,6 +43,12 @@ export interface LogSink {
   add(line: LogLine): void;
 }
 
+/**
+ * The trace of the request being served, set by requestContext. Lines logged while serving it
+ * (rate limiter, idempotency store, error filter) carry its trace id without passing it around.
+ */
+export const traceScope = new AsyncLocalStorage<{ traceId: string }>();
+
 @Injectable()
 export class StructuredLogger {
   constructor(
@@ -49,6 +58,7 @@ export class StructuredLogger {
   ) {}
 
   log(severity: Severity, fields: LogFields): void {
+    const traceId = fields.traceId ?? traceScope.getStore()?.traceId;
     const line: LogLine = {
       timestamp: new Date().toISOString(),
       severity,
@@ -56,6 +66,7 @@ export class StructuredLogger {
       environment: this.config.env,
       build: this.config.build,
       ...fields,
+      ...(traceId && { traceId }),
     };
     this.write(JSON.stringify(line) + '\n');
     this.sink?.add(line);

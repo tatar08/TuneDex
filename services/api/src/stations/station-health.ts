@@ -18,6 +18,10 @@ const MANUAL_COOLDOWN_SECONDS = 60;
 const HISTORY = 20;
 /** Fixed key so only one API instance runs the scheduled check at a time. */
 const LOCK_KEY = 7_421_017;
+/** Worker mode: how long the API waits for the checker to answer a "check now", and how old a request it still takes. */
+const WORKER_WAIT_MS = 15_000;
+const REQUEST_MAX_AGE_SECONDS = 20;
+const REQUEST_POLL_MS = 1_000;
 
 export type HealthState = 'unknown' | 'ok' | 'failing' | 'suspect';
 
@@ -69,6 +73,7 @@ interface RecentRow {
 @Injectable()
 export class StationHealthService implements OnApplicationBootstrap, OnApplicationShutdown {
   private timer: NodeJS.Timeout | null = null;
+  private requestTimer: NodeJS.Timeout | null = null;
   private running: Promise<number> | null = null;
   private stopped = false;
   private readonly probe: ProbeDeps;
@@ -84,12 +89,27 @@ export class StationHealthService implements OnApplicationBootstrap, OnApplicati
   }
 
   onApplicationBootstrap(): void {
+    if (this.config.stationCheck.enabled && this.config.stationCheck.runner === 'api') this.schedule();
+  }
+
+  /** The `npm run checker` process: scheduled passes (when enabled) and staff "check now" requests. */
+  startWorker(): void {
     if (this.config.stationCheck.enabled) this.schedule();
+    const loop = () => {
+      if (this.stopped) return;
+      this.requestTimer = setTimeout(() => {
+        void this.serveRequests()
+          .catch(() => undefined)
+          .finally(loop);
+      }, REQUEST_POLL_MS);
+    };
+    loop();
   }
 
   async onApplicationShutdown(): Promise<void> {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    if (this.requestTimer) clearTimeout(this.requestTimer);
     await this.running?.catch(() => undefined);
   }
 
@@ -156,6 +176,50 @@ export class StationHealthService implements OnApplicationBootstrap, OnApplicati
 
   private async prune(): Promise<void> {
     await this.db.query(`DELETE FROM station_health WHERE checked_at < now() - make_interval(days => $1)`, [HEALTH_RETENTION_DAYS]);
+    await this.db.query(`DELETE FROM station_check_requests WHERE requested_at < now() - interval '1 day'`);
+  }
+
+  /** Checker process: answers waiting "check now" requests one by one. Returns how many it answered. */
+  async serveRequests(): Promise<number> {
+    let served = 0;
+    while (!this.stopped) {
+      const [req] = await this.db.query<{ id: string; station_id: string; target: 'published' | 'draft' }>(
+        `UPDATE station_check_requests SET claimed_at = now()
+          WHERE id = (SELECT id FROM station_check_requests
+                       WHERE claimed_at IS NULL AND requested_at > now() - make_interval(secs => $1)
+                       ORDER BY requested_at FOR UPDATE SKIP LOCKED LIMIT 1)
+          RETURNING id, station_id, target`,
+        [REQUEST_MAX_AGE_SECONDS],
+      );
+      if (!req) return served;
+      const [s] = await this.db.query<{ url: string | null }>(
+        `SELECT CASE WHEN $2 = 'published' THEN published->>'streamUrl' ELSE draft->>'streamUrl' END AS url FROM radio_stations WHERE id = $1`,
+        [req.station_id, req.target],
+      );
+      const result: ProbeResult = s?.url ? await probeStream(s.url, this.probe) : { ok: false, reason: 'invalid_url', httpStatus: null, latencyMs: 0, contentType: null };
+      if (s?.url) await this.record(req.station_id, req.target, result);
+      await this.db.query(`UPDATE station_check_requests SET done_at = now(), result = $2 WHERE id = $1`, [req.id, JSON.stringify(result)]);
+      served++;
+    }
+    return served;
+  }
+
+  /** API in worker mode: hands the probe to the checker process and waits for its answer. */
+  private async viaWorker(stationId: string, target: 'published' | 'draft'): Promise<ProbeResult> {
+    const [{ id }] = await this.db.query<{ id: string }>(
+      `INSERT INTO station_check_requests (station_id, target) VALUES ($1, $2) RETURNING id`,
+      [stationId, target],
+    );
+    const deadline = Date.now() + WORKER_WAIT_MS;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 250));
+      const [row] = await this.db.query<{ result: ProbeResult | null }>(`SELECT result FROM station_check_requests WHERE id = $1 AND done_at IS NOT NULL`, [id]);
+      if (row?.result) return row.result;
+    }
+    // Withdraw it if nobody took it, so a checker coming back later does not run a stale request.
+    await this.db.query(`DELETE FROM station_check_requests WHERE id = $1 AND claimed_at IS NULL`, [id]);
+    this.logger.log('WARN', { eventCode: 'STATION_CHECKER_UNAVAILABLE' });
+    throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'CHECKER_UNAVAILABLE');
   }
 
   /**
@@ -175,9 +239,11 @@ export class StationHealthService implements OnApplicationBootstrap, OnApplicati
     if (!s) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
     if (s.last) throw new ApiError(HttpStatus.TOO_MANY_REQUESTS, 'CHECK_TOO_SOON', { retryAfterSeconds: MANUAL_COOLDOWN_SECONDS });
     const target = s.published_url ? 'published' : 'draft';
-    const result = await probeStream(s.published_url ?? s.draft_url, this.probe);
+    const byWorker = this.config.stationCheck.runner === 'worker';
+    const result = byWorker ? await this.viaWorker(id, target) : await probeStream(s.published_url ?? s.draft_url, this.probe);
     await this.db.transaction(async (query) => {
-      await this.record(id, target, result, query);
+      // The checker process records its own result.
+      if (!byWorker) await this.record(id, target, result, query);
       await writeAudit(query, {
         actor: `user:${actor.userId}`,
         action: 'station.check',

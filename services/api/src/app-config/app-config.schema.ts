@@ -115,3 +115,94 @@ export function changedFields(a: AppConfigPayload, b: AppConfigPayload): string[
   if (a.catalogRefreshHours !== b.catalogRefreshHours) out.push('catalogRefreshHours');
   return out;
 }
+
+export const PLATFORMS = ['ios', 'android'] as const;
+export type Platform = (typeof PLATFORMS)[number];
+export const CHANNELS = ['staging', 'production'] as const;
+export type Channel = (typeof CHANNELS)[number];
+
+/** Which apps a release is for. A client outside it ignores the release and keeps the newest one that fits it. */
+export type Targets = Record<Platform, { include: boolean; minBuild: number | null; maxBuild: number | null }>;
+
+export const DEFAULT_TARGETS: Targets = {
+  ios: { include: true, minBuild: null, maxBuild: null },
+  android: { include: true, minBuild: null, maxBuild: null },
+};
+
+export function normalizeTargets(t: Partial<Targets> | null | undefined): Targets {
+  const one = (p: Platform) => ({
+    include: t?.[p]?.include ?? true,
+    minBuild: t?.[p]?.minBuild ?? null,
+    maxBuild: t?.[p]?.maxBuild ?? null,
+  });
+  return { ios: one('ios'), android: one('android') };
+}
+
+/** A partial change to the targets, e.g. `{ android: { minBuild: 120 } }`. */
+export function applyTargetsPatch(current: Targets, body: unknown): Targets {
+  if (!isObject(body)) throw invalid('targets', 'must_be_object');
+  onlyKeys('targets', body, PLATFORMS);
+  const next = normalizeTargets(current);
+  for (const p of PLATFORMS) {
+    if (!(p in body)) continue;
+    const v = body[p];
+    if (!isObject(v)) throw invalid(`targets.${p}`, 'must_be_object');
+    onlyKeys(`targets.${p}`, v, ['include', 'minBuild', 'maxBuild']);
+    if ('include' in v) {
+      if (typeof v.include !== 'boolean') throw invalid(`targets.${p}.include`, 'must_be_boolean');
+      next[p].include = v.include;
+    }
+    if ('minBuild' in v) next[p].minBuild = build(`targets.${p}.minBuild`, v.minBuild);
+    if ('maxBuild' in v) next[p].maxBuild = build(`targets.${p}.maxBuild`, v.maxBuild);
+    if (next[p].minBuild !== null && next[p].maxBuild !== null && next[p].minBuild! > next[p].maxBuild!) {
+      throw invalid(`targets.${p}.maxBuild`, 'below_min_build');
+    }
+  }
+  if (!PLATFORMS.some((p) => next[p].include)) throw invalid('targets', 'no_platform');
+  return next;
+}
+
+/** Dotted paths that differ between two target sets. */
+export function changedTargets(a: Targets, b: Targets): string[] {
+  const out: string[] = [];
+  for (const p of PLATFORMS) for (const k of ['include', 'minBuild', 'maxBuild'] as const) if (a[p][k] !== b[p][k]) out.push(`targets.${p}.${k}`);
+  return out;
+}
+
+/**
+ * Whether a client fits the targets. A client that does not say its platform fits only a release for every
+ * platform and build; one that says its platform but not its build fits only a release without a build range.
+ */
+export function fits(t: Targets, platform: Platform | null, buildNumber: number | null): boolean {
+  if (!platform) return PLATFORMS.every((p) => t[p].include && t[p].minBuild === null && t[p].maxBuild === null);
+  const r = t[platform];
+  if (!r.include) return false;
+  if (buildNumber === null) return r.minBuild === null && r.maxBuild === null;
+  return (r.minBuild === null || buildNumber >= r.minBuild) && (r.maxBuild === null || buildNumber <= r.maxBuild);
+}
+
+/** Query of GET /v1/config: `channel` (default production), `platform`, `build`. */
+export function parseClientQuery(q: Record<string, unknown>): { channel: Channel; platform: Platform | null; build: number | null } {
+  const channel = q.channel === undefined ? 'production' : q.channel;
+  if (!CHANNELS.includes(channel as Channel)) throw invalid('channel', 'value_not_allowed');
+  const platform = q.platform === undefined ? null : q.platform;
+  if (platform !== null && !PLATFORMS.includes(platform as Platform)) throw invalid('platform', 'value_not_allowed');
+  let buildNumber: number | null = null;
+  if (q.build !== undefined) {
+    if (typeof q.build !== 'string' || !/^[1-9]\d{0,9}$/.test(q.build) || Number(q.build) > MAX_BUILD) throw invalid('build', 'must_be_build_number');
+    if (platform === null) throw invalid('platform', 'required');
+    buildNumber = Number(q.build);
+  }
+  return { channel: channel as Channel, platform: platform as Platform | null, build: buildNumber };
+}
+
+/** Body of publish: `{ reason, validDays?, emergency? }`. An emergency needs a reason of 20+ characters. */
+export function parsePublishRelease(body: unknown): { reason: string; validDays: number; emergency: boolean } {
+  const b = isObject(body) ? { ...body } : {};
+  const emergency = b.emergency;
+  delete b.emergency;
+  if (emergency !== undefined && typeof emergency !== 'boolean') throw invalid('emergency', 'must_be_boolean');
+  const parsed = parseRelease(b);
+  if (emergency === true && parsed.reason.length < 20) throw invalid('reason', 'too_short');
+  return { ...parsed, emergency: emergency === true };
+}

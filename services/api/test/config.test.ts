@@ -32,7 +32,7 @@ describe('loadConfig', () => {
   });
 
   it('keeps stream checks off by default', () => {
-    expect(loadConfig(base).stationCheck).toEqual({ enabled: false, intervalMinutes: 15, region: 'default' });
+    expect(loadConfig(base).stationCheck).toEqual({ enabled: false, intervalMinutes: 15, region: 'default', runner: 'api' });
   });
 
   it.each([
@@ -40,6 +40,7 @@ describe('loadConfig', () => {
     ['STATION_CHECK_INTERVAL_MIN', '1'],
     ['STATION_CHECK_INTERVAL_MIN', '7.5'],
     ['STATION_CHECK_REGION', 'Asia Southeast'],
+    ['STATION_CHECK_RUNNER', 'both'],
     ['RATE_LIMIT_READS_PER_MIN', '0'],
     ['RATE_LIMIT_WRITES_PER_MIN', 'many'],
     ['RATE_LIMIT_CATALOG_PER_MIN', '1.5'],
@@ -96,6 +97,14 @@ describe('loadConfig', () => {
     expect(google).toMatchObject({ packageName: 'app.tunedeck', serviceAccount: { clientEmail: 'a@b' } });
   });
 
+  it('allows CORS only for listed exact origins', () => {
+    expect(loadConfig(base).corsAllowedOrigins).toEqual([]);
+    expect(loadConfig({ ...base, CORS_ALLOWED_ORIGINS: 'https://a.example, http://localhost:3000' }).corsAllowedOrigins).toEqual(['https://a.example', 'http://localhost:3000']);
+    for (const bad of ['*', 'https://a.example/path', 'a.example']) {
+      expect(() => loadConfig({ ...base, CORS_ALLOWED_ORIGINS: bad })).toThrow('CORS_ALLOWED_ORIGINS');
+    }
+  });
+
   it('requires the MFA acr values outside dev, and removes old audit records unless told not to', () => {
     expect(loadConfig(base).staffMfaAcr).toBeNull();
     expect(loadConfig({ ...base, STAFF_MFA_ACR: '2, gold' }).staffMfaAcr).toEqual(['2', 'gold']);
@@ -104,5 +113,13 @@ describe('loadConfig', () => {
     expect(() => loadConfig(staging)).toThrow('STAFF_MFA_ACR');
     expect(loadConfig(base).auditRetentionEnabled).toBe(true);
     expect(loadConfig({ ...base, AUDIT_RETENTION_ENABLED: 'false' }).auditRetentionEnabled).toBe(false);
+  });
+  it('evaluates alerts by default and accepts only an https webhook', () => {
+    expect(loadConfig(base).alerts).toEqual({ enabled: true, webhookUrl: null });
+    expect(loadConfig({ ...base, ALERTS_ENABLED: 'false' }).alerts.enabled).toBe(false);
+    expect(loadConfig({ ...base, ALERT_WEBHOOK_URL: 'https://hooks.example.test/abc' }).alerts.webhookUrl).toBe('https://hooks.example.test/abc');
+    for (const bad of ['http://hooks.example.test/abc', 'https://user:pw@hooks.example.test/', 'not a url']) {
+      expect(() => loadConfig({ ...base, ALERT_WEBHOOK_URL: bad })).toThrow('ALERT_WEBHOOK_URL');
+    }
   });
 });

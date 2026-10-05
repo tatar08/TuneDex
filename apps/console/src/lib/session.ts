@@ -8,6 +8,8 @@ export interface Session {
   lastSeenAt: number;
   /** Set once the account is known to hold a staff role; staff sessions get the shorter staff lifetime. */
   staff?: boolean;
+  /** The API's staff roles version when the session started; a different one later ends the session. */
+  staffVersion?: string;
 }
 
 export interface SessionLimits {

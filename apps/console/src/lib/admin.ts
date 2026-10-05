@@ -1,4 +1,11 @@
-import type { AdminStation, AuditEvent, HealthState, StaffRole, StationHealth } from './bff';
+import { Translate, translator } from './admin-i18n';
+import type { AdminStation, AuditEvent, HealthState, RightsRecord, RightsState, StaffRole, StationHealth } from './bff';
+import type { Lang } from './i18n';
+
+/** Thai, the default, for helpers called without a translate function. */
+const TH: Translate = translator('th');
+/** Locale for the date formatters: Thai keeps the Thai calendar, English uses day-month-year. */
+const locale = (lang: Lang) => (lang === 'en' ? 'en-GB' : 'th-TH');
 
 /** The five staff console themes Tar approved on 2026-10-03; each keeps its own layout. Minimal is the default. */
 export const THEMES = [
@@ -43,9 +50,27 @@ export const BLOCKER_LABELS: Record<string, string> = {
   admin_role_required: 'ต้องเป็นแอดมินจึงจะเผยแพร่ได้',
   own_change: 'คุณแก้ร่างนี้เอง ต้องให้แอดมินคนอื่นเป็นผู้เผยแพร่',
   already_published: 'เวอร์ชันนี้เผยแพร่อยู่แล้ว',
-  rights_basis_missing: 'ยังไม่ได้ระบุที่มาของสิทธิ์',
-  rights_reference_missing: 'ยังไม่มีเลขอ้างอิงหลักฐานสิทธิ์',
+  rights_missing: 'ยังไม่มีหลักฐานสิทธิ์ที่ใช้งานอยู่',
+  rights_territory: 'หลักฐานสิทธิ์ไม่ครอบคลุมประเทศของสถานี',
+  rights_not_yet_valid: 'หลักฐานสิทธิ์ยังไม่ถึงวันเริ่มใช้',
   rights_expired: 'สิทธิ์หมดอายุแล้ว',
+};
+
+/** The station's rights at a glance (AdminStation.rights.state). */
+export const RIGHTS_STATE_LABELS: Record<RightsState, string> = {
+  current: 'มีสิทธิ์ใช้งานอยู่',
+  missing: 'ยังไม่มีข้อมูลสิทธิ์',
+  territory: 'สิทธิ์ไม่ครอบคลุมประเทศนี้',
+  not_yet_valid: 'สิทธิ์ยังไม่เริ่ม',
+  expired: 'สิทธิ์หมดอายุแล้ว',
+};
+
+/** One rights record's status; "expired" and "scheduled" come from the dates. */
+export const RIGHTS_STATUS_LABELS: Record<RightsRecord['effectiveStatus'], string> = {
+  active: 'ใช้งานอยู่',
+  scheduled: 'ยังไม่ถึงวันเริ่ม',
+  expired: 'หมดอายุ',
+  revoked: 'เพิกถอนแล้ว',
 };
 
 export const RIGHTS_BASIS_LABELS: Record<string, string> = {
@@ -63,10 +88,19 @@ export const FIELD_LABELS: Record<string, string> = {
   streamUrl: 'ลิงก์สตรีม',
   codec: 'รูปแบบเสียง',
   bitrateKbps: 'บิตเรต (kbps)',
-  rightsBasis: 'ที่มาของสิทธิ์',
-  rightsReference: 'เลขอ้างอิงหลักฐาน',
-  rightsExpiresAt: 'สิทธิ์หมดอายุ',
   reason: 'เหตุผล',
+};
+
+/** Fields of a rights record (the add form and API validation errors). */
+export const RIGHTS_FIELD_LABELS: Record<string, string> = {
+  holder: 'เจ้าของสิทธิ์',
+  basis: 'ที่มาของสิทธิ์',
+  reference: 'เลขอ้างอิงหลักฐาน',
+  territories: 'ประเทศที่ครอบคลุม',
+  validFrom: 'เริ่มใช้',
+  expiresAt: 'สิทธิ์หมดอายุ',
+  evidenceRefs: 'รหัสไฟล์หลักฐาน',
+  reason: 'เหตุผลที่เพิกถอน',
 };
 
 export const REASON_LABELS: Record<string, string> = {
@@ -87,29 +121,42 @@ export const REASON_LABELS: Record<string, string> = {
   value_not_allowed: 'ค่าที่เลือกไม่อนุญาต',
   out_of_range: 'ค่าเกินช่วงที่รับได้ (8–512)',
   date_yyyy_mm_dd: 'วันที่ไม่ถูกต้อง',
+  too_short: 'สั้นเกินไป อธิบายอย่างน้อย 20 ตัวอักษร',
+  before_valid_from: 'วันหมดอายุต้องไม่ก่อนวันเริ่มใช้',
+  opaque_key: 'ใช้รหัสไฟล์ในที่เก็บส่วนตัว ห้ามใส่ลิงก์',
+  max_10: 'ไม่เกิน 10 รายการ',
+  unknown_field: 'ช่องนี้ไม่รองรับแล้ว',
 };
 
-const dateFmt = new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeZone: 'Asia/Bangkok' });
-const dateTimeFmt = new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Bangkok' });
-/** Dates are shown in Thailand time for everyone. */
-export const formatDate = (iso: string | null) => (iso ? dateFmt.format(new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso)) : '');
-export const formatDateTime = (iso: string | null) => (iso ? dateTimeFmt.format(new Date(iso)) : '');
+const dateFmt = { th: new Intl.DateTimeFormat(locale('th'), { dateStyle: 'medium', timeZone: 'Asia/Bangkok' }), en: new Intl.DateTimeFormat(locale('en'), { dateStyle: 'medium', timeZone: 'Asia/Bangkok' }) };
+const dateTimeFmt = {
+  th: new Intl.DateTimeFormat(locale('th'), { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Bangkok' }),
+  en: new Intl.DateTimeFormat(locale('en'), { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Bangkok' }),
+};
+/** Dates are shown in Thailand time for everyone, in the viewer's language. */
+export const formatDate = (iso: string | null, lang: Lang = 'th') => (iso ? dateFmt[lang].format(new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso)) : '');
+export const formatDateTime = (iso: string | null, lang: Lang = 'th') => (iso ? dateTimeFmt[lang].format(new Date(iso)) : '');
 
-/** Rights end within 30 days (or already ended): worth flagging in lists. */
+/** Rights end within 30 days (or already ended), or no record allows the station: worth flagging in lists. */
 export function rightsSoon(s: AdminStation, now = Date.now()): boolean {
-  const end = s.draft.rightsExpiresAt;
+  if (s.rights.state !== 'current') return true;
+  const end = s.rights.expiresAt;
   return !!end && Date.parse(`${end}T23:59:59Z`) - now < 30 * 86_400_000;
 }
 
-export const rightsLine = (s: AdminStation) =>
-  s.draft.rightsExpiresAt ? `สิทธิ์ถึง ${formatDate(s.draft.rightsExpiresAt)}` : s.draft.rightsBasis ? 'สิทธิ์ไม่มีวันหมดอายุ' : 'ยังไม่มีข้อมูลสิทธิ์';
+export const rightsLine = (s: AdminStation, t: Translate = TH, lang: Lang = 'th') =>
+  s.rights.state !== 'current'
+    ? t(RIGHTS_STATE_LABELS[s.rights.state])
+    : s.rights.expiresAt
+      ? t('สิทธิ์ถึง {0}', formatDate(s.rights.expiresAt, lang))
+      : t('สิทธิ์ไม่มีวันหมดอายุ');
 
 const LANGUAGE_NAMES: Record<string, string> = { th: 'ไทย', en: 'อังกฤษ', ja: 'ญี่ปุ่น', zh: 'จีน', ko: 'เกาหลี', lo: 'ลาว', my: 'พม่า', km: 'เขมร' };
-export const languageName = (code: string) => LANGUAGE_NAMES[code] ?? code.toUpperCase();
+export const languageName = (code: string, t: Translate = TH) => (LANGUAGE_NAMES[code] ? t(LANGUAGE_NAMES[code]) : code.toUpperCase());
 
 /** "jazz · ไทย · TH": genres, language name, country code. */
-export const subtitle = (s: AdminStation) =>
-  [s.draft.genres.join(', '), languageName(s.draft.language), s.draft.country].filter(Boolean).join(' · ');
+export const subtitle = (s: AdminStation, t: Translate = TH) =>
+  [s.draft.genres.join(', '), languageName(s.draft.language, t), s.draft.country].filter(Boolean).join(' · ');
 
 export const initials = (name: string) =>
   name
@@ -126,11 +173,11 @@ export function countByStatus(stations: AdminStation[]): Record<StatusFilter, nu
   return out;
 }
 
-/** What the apps can see right now: published, enabled, and the published rights have not ended. */
+/** What the apps can see right now: published, enabled, and a rights record still covers the published station. */
 export function visibleInApps(s: AdminStation, now = Date.now()): boolean {
   if (!s.published || s.disabledAt) return false;
-  const end = s.published.rightsExpiresAt;
-  return !end || Date.parse(`${end}T23:59:59Z`) >= now;
+  const end = s.rights.liveUntil;
+  return !end || Date.parse(end) > now;
 }
 
 export interface CatalogSummary {
@@ -146,9 +193,9 @@ export function summarize(stations: AdminStation[]): CatalogSummary {
   return { total: c.all, visible: stations.filter((s) => visibleInApps(s)).length, pending: c.changes_pending, drafts: c.draft, disabled: c.disabled };
 }
 
-/** Days until the rights end (negative once ended), or null when there is no end date. */
+/** Days until the rights end (negative once ended), or null when there is no end date or no record. */
 export function rightsDaysLeft(s: AdminStation, now = Date.now()): number | null {
-  const end = s.draft.rightsExpiresAt;
+  const end = s.rights.state === 'current' || s.rights.state === 'expired' ? s.rights.expiresAt : null;
   return end ? Math.ceil((Date.parse(`${end}T23:59:59Z`) - now) / 86_400_000) : null;
 }
 
@@ -160,12 +207,12 @@ export const canSeeUsers = (roles: StaffRole[]) => roles.includes('support') || 
 /** Operators can look at the app configuration; only admins draft, publish or roll it back. */
 export const canSeeConfig = (roles: StaffRole[]) => roles.includes('operator') || roles.includes('admin');
 
+/** Doc 17: one log query covers at most 24 hours (older lines: move the window with a page link). */
 export const LOG_RANGES = [
   { id: '15m', label: '15 นาทีล่าสุด', ms: 15 * 60_000 },
   { id: '1h', label: '1 ชั่วโมงล่าสุด', ms: 3_600_000 },
   { id: '6h', label: '6 ชั่วโมงล่าสุด', ms: 6 * 3_600_000 },
   { id: '24h', label: '24 ชั่วโมงล่าสุด', ms: 24 * 3_600_000 },
-  { id: '7d', label: '7 วันล่าสุด', ms: 7 * 24 * 3_600_000 },
 ] as const;
 export type LogRangeId = (typeof LOG_RANGES)[number]['id'];
 
@@ -182,6 +229,8 @@ export const LOG_FIELD_LABELS: Record<string, string> = {
   build: 'build',
   eventCode: 'รหัสเหตุการณ์',
   requestId: 'requestId',
+  traceId: 'traceId',
+  errorCode: 'รหัสข้อผิดพลาด',
   status: 'HTTP status',
   cursor: 'หน้าถัดไป',
 };
@@ -192,6 +241,8 @@ export interface LogSearch {
   status: string;
   eventCode: string;
   requestId: string;
+  traceId: string;
+  errorCode: string;
   build: string;
   /** Fixed end of the window while paging, so newer lines do not shift the pages. */
   to: string;
@@ -210,6 +261,8 @@ export function logSearchFrom(sp: Record<string, string | string[] | undefined>)
     status: pick(sp.status, 3),
     eventCode: pick(sp.eventCode, 64).toUpperCase(),
     requestId: pick(sp.requestId, 64),
+    traceId: pick(sp.traceId, 32).toLowerCase(),
+    errorCode: pick(sp.errorCode, 64),
     build: pick(sp.build, 64),
     to: pick(sp.to, 40),
     cursor: pick(sp.cursor, 120),
@@ -227,6 +280,8 @@ export function logApiParams(s: LogSearch, now = Date.now()) {
     status: s.status,
     eventCode: s.eventCode,
     requestId: s.requestId,
+    traceId: s.traceId,
+    errorCode: s.errorCode,
     build: s.build,
     cursor: s.cursor,
     limit: '50',
@@ -241,7 +296,7 @@ export function logHref(s: Partial<LogSearch>): string {
   return qs ? `/admin/logs?${qs}` : '/admin/logs';
 }
 
-const logTimeFmt = new Intl.DateTimeFormat('th-TH', {
+const logTimeOpts: Intl.DateTimeFormatOptions = {
   timeZone: 'Asia/Bangkok',
   day: 'numeric',
   month: 'short',
@@ -249,8 +304,9 @@ const logTimeFmt = new Intl.DateTimeFormat('th-TH', {
   minute: '2-digit',
   second: '2-digit',
   hour12: false,
-});
-export const formatLogTime = (iso: string) => logTimeFmt.format(new Date(iso));
+};
+const logTimeFmt = { th: new Intl.DateTimeFormat(locale('th'), logTimeOpts), en: new Intl.DateTimeFormat(locale('en'), logTimeOpts) };
+export const formatLogTime = (iso: string, lang: Lang = 'th') => logTimeFmt[lang].format(new Date(iso));
 
 export const AUDIT_RANGES = [
   { id: '24h', label: '24 ชั่วโมงล่าสุด', ms: 24 * 3_600_000 },
@@ -264,17 +320,27 @@ export const ACTION_LABELS: Record<string, string> = {
   'station.create': 'สร้างร่างสถานี',
   'station.update': 'แก้ร่างสถานี',
   'station.publish': 'เผยแพร่สถานี',
+  'station.publish_emergency': 'เผยแพร่สถานีแบบฉุกเฉิน (ไม่มีผู้ตรวจคนที่สอง ต้องตรวจย้อนหลัง)',
   'station.disable': 'ปิดสถานี',
   'station.enable': 'เปิดสถานีอีกครั้ง',
   'station.check': 'ตรวจสตรีม',
+  'rights.add': 'เพิ่มหลักฐานสิทธิ์สถานี',
+  'rights.revoke': 'เพิกถอนสิทธิ์สถานี',
   'staff_role.grant': 'ให้สิทธิ์ทีมงาน',
   'staff_role.revoke': 'ถอนสิทธิ์ทีมงาน',
   'logs.search': 'ค้นบันทึกระบบ',
+  'logs.export': 'ส่งออกบันทึกระบบ',
   'audit.search': 'ดูประวัติการแก้ไข',
   'device.revoke': 'ผู้ใช้ออกจากระบบอุปกรณ์',
   'audit.export': 'ส่งออกประวัติ',
   'account.export': 'ผู้ใช้ดาวน์โหลดข้อมูล',
   'account.delete_requested': 'ผู้ใช้ขอลบบัญชี',
+  'account.restore_repurge': 'ลบบัญชีซ้ำหลังกู้ข้อมูล',
+  'support.code_created': 'ลูกค้าสร้างรหัสให้ support',
+  'support.access_granted': 'support ได้สิทธิ์ดูรายงานวินิจฉัย',
+  'support.access_refused': 'รหัสจากลูกค้าใช้ไม่ได้',
+  'support.access_revoked': 'ลูกค้ายกเลิกสิทธิ์ support',
+  'support.diagnostics_read': 'support เปิดดูรายงานวินิจฉัย',
   'account.deleted': 'ลบข้อมูลบัญชีเสร็จ',
   'job.retry': 'สั่งงานเบื้องหลังซ้ำ',
   'user.lookup': 'เปิดดูข้อมูลผู้ใช้',
@@ -288,6 +354,7 @@ export const actionFamily = (a: string) => a.split('.')[0];
 export const AUDIT_FAMILIES = [
   { id: '', label: 'ทุกการกระทำ' },
   { id: 'station', label: 'สถานี' },
+  { id: 'rights', label: 'สิทธิ์สถานี' },
   { id: 'staff_role', label: 'สิทธิ์ทีมงาน' },
   { id: 'logs', label: 'การค้นบันทึก' },
   { id: 'audit', label: 'การดูประวัติ' },
@@ -352,20 +419,20 @@ export function auditHref(s: Partial<AuditSearch>): string {
 }
 
 /** Who did it: the account's OIDC subject, or the operator label for staff CLI changes. */
-export const actorName = (e: AuditEvent) => e.actorSubject ?? (e.actor.startsWith('operator:') ? `โอเปอเรเตอร์ ${e.actor.slice(9)}` : e.actor);
+export const actorName = (e: AuditEvent, t: Translate = TH) => e.actorSubject ?? (e.actor.startsWith('operator:') ? t('โอเปอเรเตอร์ {0}', e.actor.slice(9)) : e.actor);
 /** Value for the actor filter that finds this actor again. */
 export const actorKey = (e: AuditEvent) => e.actorSubject ?? e.actor.replace(/^user:/, '');
 
 /** One-line, plain-text summary of what changed. */
-export function changeSummary(e: AuditEvent): string {
+export function changeSummary(e: AuditEvent, t: Translate = TH): string {
   const c = e.changes ?? {};
   const parts: string[] = [];
-  if (Array.isArray(c.fields)) parts.push(`ช่อง: ${(c.fields as string[]).map((f) => FIELD_LABELS[f] ?? f).join(', ')}`);
-  if (typeof c.role === 'string') parts.push(`บทบาท: ${ROLE_LABELS[c.role as StaffRole] ?? c.role}`);
+  if (Array.isArray(c.fields)) parts.push(t('ช่อง: {0}', (c.fields as string[]).map((f) => (FIELD_LABELS[f] ? t(FIELD_LABELS[f]) : f)).join(', ')));
+  if (typeof c.role === 'string') parts.push(t('บทบาท: {0}', ROLE_LABELS[c.role as StaffRole] ? t(ROLE_LABELS[c.role as StaffRole]) : c.role));
   if (c.revision !== undefined) parts.push(`revision ${c.revision}`);
-  if (c.previousPublishedRevision !== undefined && c.previousPublishedRevision !== null) parts.push(`แทน r${c.previousPublishedRevision}`);
-  if (typeof c.target === 'string') parts.push(c.target === 'draft' ? 'ตรวจสตรีมของร่าง' : 'ตรวจสตรีมที่เผยแพร่');
-  if (typeof c.result === 'string') parts.push(`ผล: ${PROBE_REASON_LABELS[c.result] ?? c.result}`);
+  if (c.previousPublishedRevision !== undefined && c.previousPublishedRevision !== null) parts.push(t('แทน r{0}', String(c.previousPublishedRevision)));
+  if (typeof c.target === 'string') parts.push(t(c.target === 'draft' ? 'ตรวจสตรีมของร่าง' : 'ตรวจสตรีมที่เผยแพร่'));
+  if (typeof c.result === 'string') parts.push(t('ผล: {0}', PROBE_REASON_LABELS[c.result] ? t(PROBE_REASON_LABELS[c.result]) : c.result));
   for (const [k, v] of Object.entries(c)) {
     if (['fields', 'role', 'revision', 'previousPublishedRevision', 'target', 'result'].includes(k)) continue;
     parts.push(`${k}: ${Array.isArray(v) ? v.join(',') : typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)}`);
@@ -373,8 +440,9 @@ export function changeSummary(e: AuditEvent): string {
   return parts.join(' · ');
 }
 
-const dayFmt = new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-export const formatDay = (iso: string) => dayFmt.format(new Date(iso));
+const dayOpts: Intl.DateTimeFormatOptions = { timeZone: 'Asia/Bangkok', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' };
+const dayFmt = { th: new Intl.DateTimeFormat(locale('th'), dayOpts), en: new Intl.DateTimeFormat(locale('en'), dayOpts) };
+export const formatDay = (iso: string, lang: Lang = 'th') => dayFmt[lang].format(new Date(iso));
 
 /** Shown when the API answers 429 API_RATE_LIMITED. */
 export const RATE_LIMITED = 'ทำรายการถี่เกินไป รอประมาณหนึ่งนาทีแล้วลองใหม่';
@@ -399,15 +467,15 @@ export const PROBE_REASON_LABELS: Record<string, string> = {
   not_audio: 'ไม่ใช่สตรีมเสียง',
 };
 
-export const probeReason = (reason: string, httpStatus: number | null) =>
-  `${PROBE_REASON_LABELS[reason] ?? reason}${reason === 'http_status' && httpStatus ? ` (${httpStatus})` : ''}`;
+export const probeReason = (reason: string, httpStatus: number | null, t: Translate = TH) =>
+  `${PROBE_REASON_LABELS[reason] ? t(PROBE_REASON_LABELS[reason]) : reason}${reason === 'http_status' && httpStatus ? ` (${httpStatus})` : ''}`;
 
 /** One line for lists: state plus the latest result when it is not fine. */
-export function healthLine(h: StationHealth): string {
-  if (h.state === 'unknown') return HEALTH_LABELS.unknown;
+export function healthLine(h: StationHealth, t: Translate = TH): string {
+  if (h.state === 'unknown') return t(HEALTH_LABELS.unknown);
   const worst = [...h.regions].sort((a, b) => b.consecutiveFailures - a.consecutiveFailures)[0];
-  if (h.state === 'ok') return worst?.latencyMs != null ? `${HEALTH_LABELS.ok} · ${worst.latencyMs} ms` : HEALTH_LABELS.ok;
-  return `${HEALTH_LABELS[h.state]} · ${probeReason(worst.reason, worst.httpStatus)} · ${worst.consecutiveFailures} ครั้งติด`;
+  if (h.state === 'ok') return worst?.latencyMs != null ? `${t(HEALTH_LABELS.ok)} · ${worst.latencyMs} ms` : t(HEALTH_LABELS.ok);
+  return [t(HEALTH_LABELS[h.state]), probeReason(worst.reason, worst.httpStatus, t), t('{0} ครั้งติด', worst.consecutiveFailures)].join(' · ');
 }
 
 export function countByHealth(stations: AdminStation[]): Record<HealthState, number> {

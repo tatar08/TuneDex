@@ -60,7 +60,9 @@ export function testConfig(databaseUrl: string): AppConfig {
     billing: { apple: null, google: null },
     auditRetentionEnabled: false,
     staffMfaAcr: null,
-    stationCheck: { enabled: false, intervalMinutes: 15, region: 'test-region' },
+    corsAllowedOrigins: [],
+    alerts: { enabled: false, webhookUrl: null },
+    stationCheck: { enabled: false, intervalMinutes: 15, region: 'test-region', runner: 'api' },
     configSigningKey: null,
     idpAdmin: {
       tokenUrl: 'https://idp.test/realms/tunedeck/protocol/openid-connect/token',
@@ -73,12 +75,12 @@ export function testConfig(databaseUrl: string): AppConfig {
 
 /**
  * Test-only Keycloak admin API: issues client-credentials tokens and deletes users by id. Every user exists
- * until deleted; `failDeletes` makes the delete call answer 503. Changing `validToken` makes earlier admin tokens invalid.
+ * until deleted; `failDeletes` makes the delete call answer 503. Changing `validToken` makes earlier admin tokens invalid. A GET finds every user not yet deleted (push to `deleted` to simulate one removed at Keycloak).
  */
 export function createFakeIdp() {
   const deleted: string[] = [];
   const endedSessions: string[] = [];
-  const state = { failDeletes: false, failSessions: false, tokenRequests: 0, validToken: 'admin-token' };
+  const state = { failDeletes: false, failSessions: false, failLookups: false, tokenRequests: 0, validToken: 'admin-token' };
   const fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = String(input);
     if (url === 'https://idp.test/realms/tunedeck/protocol/openid-connect/token') {
@@ -88,6 +90,12 @@ export function createFakeIdp() {
       return Response.json({ access_token: state.validToken, expires_in: 300 });
     }
     const m = /^https:\/\/idp\.test\/admin\/realms\/tunedeck\/users\/([^/]+)$/.exec(url);
+    if (m && (init?.method ?? 'GET') === 'GET') {
+      if ((init?.headers as Record<string, string>).Authorization !== `Bearer ${state.validToken}`) return new Response(null, { status: 401 });
+      if (state.failLookups) return new Response(null, { status: 503 });
+      const id = decodeURIComponent(m[1]);
+      return deleted.includes(id) ? new Response(null, { status: 404 }) : Response.json({ id });
+    }
     if (m && init?.method === 'DELETE') {
       if ((init.headers as Record<string, string>).Authorization !== `Bearer ${state.validToken}`) return new Response(null, { status: 401 });
       if (state.failDeletes) return new Response(null, { status: 503 });
@@ -133,12 +141,12 @@ export async function createTestDatabase(): Promise<{ url: string; drop: () => P
   };
 }
 
-export async function createTestApp(databaseUrl: string, keyResolver: JWTVerifyGetKey, extra: Pick<AppDeps, 'probeDeps' | 'googleFetch' | 'googlePushKeys'> & { config?: Partial<AppConfig> } = {}) {
+export async function createTestApp(databaseUrl: string, keyResolver: JWTVerifyGetKey, extra: Pick<AppDeps, 'probeDeps' | 'googleFetch' | 'googlePushKeys' | 'alertFetch'> & { config?: Partial<AppConfig> } = {}) {
   const pool = createPool(databaseUrl);
   const logs: string[] = [];
   const idp = createFakeIdp();
   const moduleRef = await Test.createTestingModule({
-    imports: [AppModule.forRoot({ config: { ...testConfig(databaseUrl), ...extra.config }, pool, keyResolver, logWriter: (l) => logs.push(l), probeDeps: extra.probeDeps, idpFetch: idp.fetch, googleFetch: extra.googleFetch, googlePushKeys: extra.googlePushKeys })],
+    imports: [AppModule.forRoot({ config: { ...testConfig(databaseUrl), ...extra.config }, pool, keyResolver, logWriter: (l) => logs.push(l), probeDeps: extra.probeDeps, idpFetch: idp.fetch, googleFetch: extra.googleFetch, googlePushKeys: extra.googlePushKeys, alertFetch: extra.alertFetch })],
   }).compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false, bodyParser: false });
   configureApp(app);

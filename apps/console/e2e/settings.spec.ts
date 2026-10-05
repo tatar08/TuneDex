@@ -58,20 +58,32 @@ test('sign in, save by keyboard, resolve a conflict, sign out', async ({ browser
   await other.getByRole('button', { name: 'บันทึก' }).click();
   await expect(other.getByTestId('saved-revision')).toHaveText('บันทึกแล้ว · revision 2');
 
+  // A different field changed elsewhere: the save is rebased on revision 2 without asking.
   await page.getByRole('radio', { name: 'สว่าง' }).check();
   await page.getByRole('button', { name: 'บันทึก' }).click();
+  await expect(page.getByTestId('saved-revision')).toHaveText('บันทึกแล้ว · revision 3');
+  await expect(page.getByRole('alert').filter({ hasText: 'revision' })).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: 'เฉพาะ Wi-Fi' })).toBeChecked();
+
+  // The same field changed elsewhere to something else: the user chooses.
+  await other.reload();
+  await other.getByRole('radio', { name: 'มืด' }).check();
+  await other.getByRole('button', { name: 'บันทึก' }).click();
+  await expect(other.getByTestId('saved-revision')).toHaveText('บันทึกแล้ว · revision 4');
+  await page.getByRole('radio', { name: 'ตามระบบ' }).check();
+  await page.getByRole('button', { name: 'บันทึก' }).click();
   const alert = page.getByRole('alert').filter({ hasText: 'revision' });
-  await expect(alert).toContainText('revision 2');
+  await expect(alert).toContainText('revision 4');
   await expect(alert).toBeFocused();
   await page.getByRole('button', { name: 'บันทึกค่าของฉันทับ' }).click();
-  await expect(page.getByTestId('saved-revision')).toHaveText('บันทึกแล้ว · revision 3');
+  await expect(page.getByTestId('saved-revision')).toHaveText('บันทึกแล้ว · revision 5');
 
   await page.reload();
-  await expect(page.getByRole('radio', { name: 'สว่าง' })).toBeChecked();
+  await expect(page.getByRole('radio', { name: 'ตามระบบ' })).toBeChecked();
   await expect(page.getByRole('radio', { name: 'เฉพาะ Wi-Fi' })).toBeChecked();
   await expect(page.getByText(/ยังไม่มีอุปกรณ์ที่ลงชื่อเข้าใช้/)).toBeVisible();
 
-  // The phone app checks in: first still on revision 2, then after applying revision 3.
+  // The phone app checks in: first still on revision 4, then after applying revision 5.
   const phone = await idp.accessTokenFor('e2e-alice');
   const checkIn = (applied: number) =>
     fetch(`${api.url}/v1/me/devices/7c2e9d10-3b4a-4f5e-8a6b-9c0d1e2f3a4b`, {
@@ -79,12 +91,12 @@ test('sign in, save by keyboard, resolve a conflict, sign out', async ({ browser
       headers: { authorization: `Bearer ${phone}`, 'content-type': 'application/json' },
       body: JSON.stringify({ platform: 'ios', osMajor: 18, appBuild: '1.0.0+42', appliedSettingsRevision: applied }),
     });
-  expect((await checkIn(2)).status).toBe(200);
+  expect((await checkIn(4)).status).toBe(200);
   await page.reload();
   const device = page.getByTestId('device');
   await expect(device).toContainText('iPhone · iOS 18');
   await expect(device).toContainText('รอซิงก์');
-  expect((await checkIn(3)).status).toBe(200);
+  expect((await checkIn(5)).status).toBe(200);
   await page.reload();
   await expect(device).toContainText('ใช้ค่าล่าสุดแล้ว');
 
@@ -191,7 +203,41 @@ test('signing a phone out from the web asks for a fresh sign-in first', async ({
   await expect(page.getByRole('button', { name: 'ยืนยัน ออกจากระบบ' })).toHaveCount(0);
 });
 
-test('download my data, then delete the account after a fresh sign-in', async ({ browser }) => {
+test('prepare my data after a fresh sign-in, then download it', async ({ browser }) => {
+  const phone = await idp.accessTokenFor('e2e-gail');
+  const device = crypto.randomUUID();
+  const checkIn = await fetch(`${api.url}/v1/me/devices/${device}`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${phone}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ platform: 'ios', osMajor: 18, appBuild: '1.0.0+42', appliedSettingsRevision: 0 }),
+  });
+  expect(checkIn.status).toBe(200);
+
+  idp.setUser('e2e-gail');
+  const first = await (await browser.newContext()).newPage();
+  await first.goto(`${base}/auth/login`);
+  await first.close();
+  idp.ageSignIn(600);
+  const context = await browser.newContext({ acceptDownloads: true });
+  const page = await context.newPage();
+  await page.goto(`${base}/auth/login?returnTo=/app/privacy`);
+
+  await page.getByRole('button', { name: 'เตรียมไฟล์ข้อมูลของฉัน' }).click();
+  const alert = page.getByRole('alert').filter({ hasText: 'ยืนยันตัวตน' });
+  await expect(alert).toContainText('ก่อนส่งออกข้อมูล');
+  await alert.getByRole('link', { name: 'ยืนยันตัวตน' }).click();
+  // Back on the page, the file is prepared without another click.
+  await expect(page).toHaveURL(`${base}/app/privacy`);
+  await expect(page.getByTestId('export-ready')).toContainText('ไฟล์พร้อมแล้ว');
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/export-ready.png`, fullPage: true });
+
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: 'ดาวน์โหลดไฟล์' }).click()]);
+  expect(download.suggestedFilename()).toMatch(/^tunedeck-export-\d{4}-\d{2}-\d{2}\.json$/);
+  const exported = JSON.parse(await (await import('node:fs/promises')).readFile((await download.path())!, 'utf8'));
+  expect(exported.devices.map((d: { id: string }) => d.id)).toEqual([device]);
+});
+
+test('delete the account after a fresh sign-in', async ({ browser }) => {
   const phone = await idp.accessTokenFor('e2e-fern');
   const device = crypto.randomUUID();
   const checkIn = () =>
@@ -211,11 +257,6 @@ test('download my data, then delete the account after a fresh sign-in', async ({
   const page = await context.newPage();
   await page.goto(`${base}/auth/login?returnTo=/app/privacy`);
   await expect(page.getByRole('heading', { name: 'ความเป็นส่วนตัว' })).toBeVisible();
-
-  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: 'ดาวน์โหลดข้อมูลของฉัน' }).click()]);
-  expect(download.suggestedFilename()).toMatch(/^tunedeck-export-\d{4}-\d{2}-\d{2}\.json$/);
-  const exported = JSON.parse(await (await import('node:fs/promises')).readFile((await download.path())!, 'utf8'));
-  expect(exported.devices.map((d: { id: string }) => d.id)).toEqual([device]);
 
   await page.getByRole('button', { name: 'ลบบัญชีนี้' }).click();
   const yes = page.getByRole('button', { name: 'ยืนยัน ลบบัญชี' });
@@ -302,4 +343,55 @@ test('the overview shows each phone’s last sync, and favorites picked on the w
   await expect(page.getByTestId('overview-device')).toContainText('ซิงก์ล่าสุด');
   await expect(page.getByText('สถานีโปรด 1 สถานี')).toBeVisible();
   if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/overview.png`, fullPage: true });
+});
+
+test('one device keeps its own theme, previewed on the settings page and reset from the devices page', async ({ browser }) => {
+  const token = await idp.accessTokenFor('e2e-hana');
+  const car = crypto.randomUUID();
+  expect(
+    (await fetch(`${api.url}/v1/me/devices/${car}`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'android', osMajor: 15, appBuild: '1.0.0+42', appliedSettingsRevision: 0 }),
+    })).status,
+  ).toBe(200);
+
+  idp.setUser('e2e-hana');
+  const page = await (await browser.newContext()).newPage();
+  await page.goto(`${base}/auth/login?returnTo=/app/settings`);
+  const device = page.getByTestId('device');
+  await device.getByText('ค่าเฉพาะเครื่องนี้').click();
+  await device.getByLabel('ธีมของแอป').selectOption('dark');
+  await expect(device.getByTestId('effective')).toHaveText('เครื่องนี้จะใช้: มืด · ไทย · อนุญาต');
+  await device.getByRole('button', { name: 'บันทึกค่าเฉพาะเครื่อง' }).click();
+  await expect(device.getByRole('button', { name: 'กลับไปใช้ตามบัญชี' })).toBeVisible();
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/device-overrides.png`, fullPage: true });
+
+  // The phone reads what it should apply.
+  const prefs = await (await fetch(`${api.url}/v1/me/devices/${car}/preferences`, { headers: { authorization: `Bearer ${token}` } })).json();
+  expect(prefs).toMatchObject({ overrides: { theme: 'dark' }, effective: { theme: 'dark' } });
+
+  await page.goto(`${base}/app/devices`);
+  await expect(page.getByText('มีค่าเฉพาะเครื่อง')).toBeVisible();
+  await page.getByRole('button', { name: 'กลับไปใช้ตามบัญชี' }).click();
+  await expect(page.getByText('มีค่าเฉพาะเครื่อง')).toHaveCount(0);
+  const after = await (await fetch(`${api.url}/v1/me/devices/${car}/preferences`, { headers: { authorization: `Bearer ${token}` } })).json();
+  expect(after.overrides).toEqual({});
+});
+
+test('sign-in links to register and recover, each with its states, in Thai or English', async ({ page }) => {
+  await page.goto(`${base}/login`);
+  await page.getByRole('link', { name: 'สร้างบัญชี' }).click();
+  await expect(page.getByRole('heading', { name: 'สร้างบัญชี TuneDeck' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'สร้างบัญชี', exact: true })).toHaveAttribute('href', '/auth/login?register=1');
+
+  await page.goto(`${base}/recover?expired=1`);
+  await expect(page.getByRole('status')).toHaveText('ลิงก์นี้หมดอายุหรือถูกใช้ไปแล้ว ขอลิงก์ใหม่ได้จากปุ่มด้านล่าง');
+  await expect(page.getByRole('link', { name: 'ไปหน้าตั้งรหัสผ่านใหม่' })).toHaveAttribute('href', '/auth/recover');
+
+  await page.getByRole('link', { name: 'English' }).click();
+  await expect(page).toHaveURL(`${base}/recover`);
+  await expect(page.getByRole('heading', { name: 'Reset your password' })).toBeVisible();
+  await page.goto(`${base}/login`);
+  await expect(page.getByRole('heading', { name: 'Sign in to TuneDeck' })).toBeVisible();
 });

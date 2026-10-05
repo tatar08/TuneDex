@@ -24,6 +24,8 @@ function config(): ConsoleConfig {
     sessionIdleMs: 12 * 3600_000,
     sessionAbsoluteMs: 7 * 24 * 3600_000,
     sessionDatabaseUrl: null,
+    environment: 'dev',
+    build: 'console-test',
   };
 }
 
@@ -201,7 +203,7 @@ describe('devices through the BFF and the real API', () => {
     const cookie = await signIn('bff-devices');
     const empty = await devices(cookie);
     expect(empty.status).toBe(200);
-    expect(await empty.json()).toEqual({ settingsRevision: 0, devices: [] });
+    expect(await empty.json()).toEqual({ settingsRevision: 0, devices: [], serverObservedAt: expect.any(String), nextCursor: null });
 
     const phone = await idp.accessTokenFor('bff-devices');
     const put = await fetch(`${api.url}/v1/me/devices/0b9a4f8e-6c1d-4e2a-9f3b-1a2b3c4d5e6f`, {
@@ -213,7 +215,7 @@ describe('devices through the BFF and the real API', () => {
 
     const listed = await (await devices(cookie)).json();
     expect(listed.devices).toHaveLength(1);
-    expect(listed.devices[0]).toMatchObject({ platform: 'android', appliedSettingsRevision: 0 });
+    expect(listed.devices[0]).toMatchObject({ platform: 'android', appliedSettingsRevision: 0, overrides: {}, preferencesRevision: 0 });
     expect((await (await devices(await signIn('bff-devices-other'))).json()).devices).toEqual([]);
   });
 
@@ -254,7 +256,16 @@ describe('favorites through the BFF and the real API', () => {
 describe('staff routes through the BFF', () => {
   const station = {
     name: 'BFF FM', country: 'TH', language: 'th', genres: [], streamUrl: 'https://stream.example.com/bff.mp3', codec: 'mp3',
-    rightsBasis: 'owner_permission', rightsReference: 'REF-1',
+  };
+  const record = { holder: 'BFF Media', basis: 'owner_permission', reference: 'REF-1', territories: ['TH'], evidenceRefs: ['rights/bff.pdf'] };
+  const rightsPost = (cookie: string, id: string, body: unknown, csrf?: string, recordId?: string) => {
+    const path = recordId ? `/bff/admin/stations/${id}/rights/${recordId}/revoke` : `/bff/admin/stations/${id}/rights`;
+    const req = new Request(`${BASE}${path}`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json', origin: BASE, ...(csrf ? { 'x-csrf-token': csrf } : {}) },
+      body: JSON.stringify(body),
+    });
+    return recordId ? bff.stationRightsRevoke(req, id, recordId) : bff.stationRights(req, id);
   };
   const post = (cookie: string, path: string, body: unknown, o: { csrf?: string; origin?: string; ifMatch?: string } = {}) => {
     const req = new Request(`${BASE}${path}`, {
@@ -278,6 +289,8 @@ describe('staff routes through the BFF', () => {
     const created = await post(editor, '/bff/admin/stations', station, { csrf: await csrfFor(editor) });
     expect(created.status).toBe(201);
     const { id } = await created.json();
+    expect((await rightsPost(editor, id, record)).status).toBe(403);
+    expect((await rightsPost(editor, id, record, await csrfFor(editor))).status).toBe(201);
 
     const admin = await signIn('bff-admin');
     const listed = await bff.stations(new Request(`${BASE}/bff/admin/stations`, { headers: { cookie: admin } }));
@@ -285,6 +298,45 @@ describe('staff routes through the BFF', () => {
     const published = await post(admin, `/bff/admin/stations/${id}/publish`, { reason: 'ok' }, { csrf: await csrfFor(admin), ifMatch: '"1"' });
     expect(published.status).toBe(200);
     expect((await published.json()).status).toBe('published');
+  });
+
+  it('manages rights records and reads the station history through the BFF', async () => {
+    const editor = await signIn('bff-editor');
+    const csrf = await csrfFor(editor);
+    const { id } = await (await post(editor, '/bff/admin/stations', { ...station, name: 'BFF Rights FM' }, { csrf })).json();
+    const added = await rightsPost(editor, id, record, csrf);
+    expect(added.status).toBe(201);
+    const rec = await added.json();
+    expect(rec).not.toHaveProperty('evidenceRefs');
+
+    const list = await bff.stationRights(new Request(`${BASE}/bff/admin/stations/${id}/rights`, { headers: { cookie: editor } }), id);
+    expect((await list.json()).records[0]).toMatchObject({ id: rec.id, evidenceRefs: ['rights/bff.pdf'] });
+
+    expect((await rightsPost(editor, id, { reason: 'owner withdrew permission' }, undefined, rec.id)).status).toBe(403);
+    const revoked = await rightsPost(editor, id, { reason: 'owner withdrew permission' }, csrf, rec.id);
+    expect((await revoked.json()).status).toBe('revoked');
+
+    const history = await bff.stationHistory(new Request(`${BASE}/bff/admin/stations/${id}/history?limit=2&evil=1`, { headers: { cookie: editor } }), id);
+    const body = await history.json();
+    expect(body.events.map((e: { action: string }) => e.action)).toEqual(['rights.revoke', 'rights.add']);
+    expect(body.nextCursor).toEqual(expect.any(String));
+    const next = await bff.stationHistory(new Request(`${BASE}/bff/admin/stations/${id}/history?cursor=${body.nextCursor}`, { headers: { cookie: editor } }), id);
+    expect((await next.json()).events.map((e: { action: string }) => e.action)).toEqual(['station.create']);
+
+    // Ids are checked before they reach an API path.
+    expect((await bff.stationHistory(new Request(`${BASE}/bff/admin/stations/x/history`, { headers: { cookie: editor } }), '../../me')).status).toBe(404);
+    expect((await rightsPost(editor, id, { reason: 'x' }, csrf, '../revoke')).status).toBe(404);
+    expect((await bff.stationRights(new Request(`${BASE}/bff/admin/stations/x/rights`, { headers: { cookie: editor } }), 'x')).status).toBe(404);
+  });
+
+  it('ends the web session when a staff role is granted or revoked after sign-in (Doc 17)', async () => {
+    api.staff('grant', 'bff-role-change', 'support', '--by', 'test', '--reason', 'test');
+    const cookie = await signIn('bff-role-change');
+    const ctx = await bff.sessionFromCookie(cookie);
+    expect(await bff.loadStaff(ctx!)).toEqual({ roles: ['support'], mfa: true });
+    api.staff('revoke', 'bff-role-change', 'support', '--by', 'test', '--reason', 'test');
+    expect(await bff.loadStaff((await bff.sessionFromCookie(cookie))!)).toBeNull();
+    expect(await bff.sessionFromCookie(cookie)).toBeNull();
   });
 
   it('passes the API refusal through for accounts without a staff role', async () => {
@@ -429,12 +481,122 @@ describe('upstream failures and logging', () => {
     for (const secret of idp.issued) expect(raw).not.toContain(secret);
     expect(raw).not.toMatch(/td_session=|code=|Bearer /);
     const line = JSON.parse(logs[0]);
-    expect(Object.keys(line).sort()).toEqual(['durationMs', 'eventCode', 'method', 'requestId', 'route', 'service', 'severity', 'status', 'timestamp']);
+    expect(Object.keys(line).sort()).toEqual(['build', 'durationMs', 'environment', 'eventCode', 'method', 'requestId', 'route', 'service', 'severity', 'status', 'timestamp', 'traceId']);
+    expect(line).toMatchObject({ environment: 'dev', build: 'console-test', traceId: expect.stringMatching(/^[0-9a-f]{32}$/) });
+  });
+});
+
+describe('trace context through the BFF', () => {
+  const TRACE = '4bf92f3577b34da6a3ce929d0e0e4736';
+  const sent: string[] = [];
+  const lines: string[] = [];
+  let traced: Bff;
+
+  beforeAll(() => {
+    traced = createBff({
+      config: config(),
+      oidc: new OidcClient(config()),
+      store: new MemorySessionStore(12 * 3600_000, 7 * 24 * 3600_000, () => clock),
+      logWriter: (l) => lines.push(l),
+      fetchImpl: async (input, init) => {
+        if (String(input).startsWith(api.url)) sent.push(new Headers(init?.headers).get('traceparent') ?? '');
+        return fetch(input, init);
+      },
+    });
+  });
+
+  it('starts a trace per request, sends it to the API and finds the API line under the same trace id', async () => {
+    const cookie = await signIn('trace-user', traced);
+    sent.length = 0;
+    lines.length = 0;
+    expect((await traced.getSettings(new Request(`${BASE}/bff/settings`, { headers: { cookie } }))).status).toBe(200);
+    const line = JSON.parse(lines[lines.length - 1]);
+    expect(line).toMatchObject({ eventCode: 'BFF_REQUEST', route: '/bff/settings', traceId: expect.stringMatching(/^[0-9a-f]{32}$/) });
+    expect(sent.length).toBeGreaterThan(0);
+    for (const h of sent) expect(h).toMatch(new RegExp(`^00-${line.traceId}-[0-9a-f]{16}-01$`));
+    // The API keeps its request line under the same trace (written to the database within about a second).
+    let rows: { route: string }[] = [];
+    for (let i = 0; i < 40 && rows.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      rows = ((await api.sql(`SELECT route FROM operational_logs WHERE trace_id = '${line.traceId}'`)) as { rows: { route: string }[] }).rows;
+    }
+    expect(rows.map((r) => r.route)).toContain('/v1/me/settings');
+  });
+
+  it('continues a valid traceparent from the browser and ignores an invalid one', async () => {
+    const cookie = await signIn('trace-user-2', traced);
+    sent.length = 0;
+    lines.length = 0;
+    await traced.getSettings(new Request(`${BASE}/bff/settings`, { headers: { cookie, traceparent: `00-${TRACE}-00f067aa0ba902b7-01` } }));
+    expect(JSON.parse(lines[lines.length - 1]).traceId).toBe(TRACE);
+    expect(sent.every((h) => h.startsWith(`00-${TRACE}-`) && !h.includes('00f067aa0ba902b7'))).toBe(true);
+    lines.length = 0;
+    await traced.getSettings(new Request(`${BASE}/bff/settings`, { headers: { cookie, traceparent: `00-${'0'.repeat(32)}-00f067aa0ba902b7-01` } }));
+    expect(JSON.parse(lines[lines.length - 1]).traceId).not.toMatch(/^0+$/);
+  });
+});
+
+describe('log export through the BFF', () => {
+  const exportReq = (cookie: string, csrf: string, qs: string, body: unknown = { reason: 'incident review for ticket 42' }) =>
+    bff.logExport(
+      new Request(`${BASE}/bff/admin/logs/export?${qs}`, {
+        method: 'POST',
+        headers: { cookie, origin: BASE, 'x-csrf-token': csrf, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  beforeAll(() => {
+    api.staff('grant', 'bff-ops', 'operator', '--by', 'test', '--reason', 'test');
+  });
+
+  it('downloads the current search as CSV, forwarding only search fields, and the API records the reason', async () => {
+    const ops = await signIn('bff-ops');
+    const csrf = await csrfFor(ops);
+    const to = new Date();
+    const from = new Date(to.getTime() - 3600_000);
+    const qs = new URLSearchParams({ from: from.toISOString(), to: to.toISOString(), severity: 'INFO', traceId: 'a'.repeat(32), errorCode: 'X_FAILED', limit: '10', cursor: 'abc', other: 'drop' });
+    const res = await exportReq(ops, csrf, qs.toString());
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('text/csv; charset=utf-8');
+    expect(res.headers.get('content-disposition')).toMatch(/^attachment; filename="tunedeck-logs-\d{4}-\d{2}-\d{2}\.csv"$/);
+    expect((await res.text()).replace(/^\uFEFF/, '').split('\r\n')[0]).toContain('traceId');
+    const audit = (await api.sql(`SELECT reason, changes FROM audit_events WHERE action = 'logs.export' ORDER BY id DESC LIMIT 1`)) as { rows: { reason: string; changes: Record<string, unknown> }[] };
+    expect(audit.rows[0].reason).toBe('incident review for ticket 42');
+    expect(audit.rows[0].changes).toMatchObject({ traceId: 'a'.repeat(32), errorCode: 'X_FAILED', severity: ['INFO'], rows: 0 });
+  });
+
+  it('needs CSRF and passes the API refusals through', async () => {
+    const ops = await signIn('bff-ops');
+    expect((await exportReq(ops, 'wrong', '')).status).toBe(403);
+    const short = await exportReq(ops, await csrfFor(ops), '', { reason: 'short' });
+    expect(short.status).toBe(400);
+    expect((await short.json()).details.field).toBe('reason');
+    const customer = await signIn('bff-customer-logs');
+    expect((await exportReq(customer, await csrfFor(customer), '')).status).toBe(403);
   });
 });
 
 it('readCookie ignores lookalike cookie names', () => {
   expect(readCookie('xtd_session=a; td_session=b', 'td_session')).toBe('b');
+});
+
+describe('register and recover (Doc 17)', () => {
+  it('opens the provider\'s sign-up form with the usual PKCE and state, and hands password reset to the provider', async () => {
+    const start = await bff.login(new Request(`${BASE}/auth/login?register=1`));
+    const url = new URL(start.headers.get('location')!);
+    expect(url.searchParams.get('prompt')).toBe('create');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(url.searchParams.get('state')).toBeTruthy();
+    const plain = new URL((await bff.login(new Request(`${BASE}/auth/login`))).headers.get('location')!);
+    expect(plain.searchParams.has('prompt')).toBe(false);
+
+    const recover = await bff.recover(new Request(`${BASE}/auth/recover`));
+    expect(recover.status).toBe(302);
+    const reset = new URL(recover.headers.get('location')!);
+    expect(reset.pathname).toMatch(/\/login-actions\/reset-credentials$/);
+    expect(reset.searchParams.get('client_id')).toBe(config().oidc.clientId);
+  });
 });
 
 describe('MFA step-up for staff actions', () => {
@@ -562,12 +724,40 @@ describe('account export and deletion', () => {
   const del = (cookie: string, csrf?: string) =>
     bff.deleteAccount(new Request(`${BASE}/bff/account`, { method: 'DELETE', headers: { cookie, origin: BASE, ...(csrf ? { 'x-csrf-token': csrf } : {}) } }));
 
-  it('downloads the export as an attachment', async () => {
+  it('prepares the export after a fresh sign-in, and downloads it through the BFF without exposing the API link', async () => {
+    const start = (cookie: string, csrf?: string) =>
+      bff.startExport(new Request(`${BASE}/bff/account/exports`, { method: 'POST', headers: { cookie, origin: BASE, ...(csrf ? { 'x-csrf-token': csrf } : {}) } }));
+    await signIn('acct-web-export-stale');
+    idp.ageSignIn(600);
+    const stale = await signIn('acct-web-export-stale');
+    expect((await start(stale)).status).toBe(403);
+    const refused = await start(stale, await csrfFor(stale));
+    expect(refused.status).toBe(401);
+    expect((await refused.json()).code).toBe('REAUTH_REQUIRED');
+    expect(await bff.sessionFromCookie(stale)).not.toBeNull();
+
     const cookie = await signIn('acct-web-export');
-    const res = await bff.exportAccount(new Request(`${BASE}/bff/account/export`, { headers: { cookie } }));
-    expect(res.status).toBe(200);
-    expect(res.headers.get('content-disposition')).toMatch(/^attachment; filename="tunedeck-export-[\d-]+\.json"$/);
-    expect((await res.json()).format).toBe('tunedeck-account-export');
+    const res = await start(cookie, await csrfFor(cookie));
+    expect(res.status).toBe(202);
+    const job = await res.json();
+    expect(job).toMatchObject({ status: 'pending' });
+
+    let status = job;
+    for (let i = 0; i < 50 && status.status === 'pending'; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      status = await (await bff.exportStatus(new Request(`${BASE}/bff/account/exports/${job.id}`, { headers: { cookie } }), job.id)).json();
+    }
+    expect(status).toEqual({ id: job.id, status: 'ready', requestedAt: expect.any(String), readyAt: expect.any(String), expiresAt: expect.any(String) });
+
+    const file = await bff.exportFile(new Request(`${BASE}/bff/account/exports/${job.id}/file`, { headers: { cookie } }), job.id);
+    expect(file.status).toBe(200);
+    expect(file.headers.get('content-disposition')).toMatch(/^attachment; filename="tunedeck-export-[\d-]+\.json"$/);
+    expect((await file.json()).format).toBe('tunedeck-account-export');
+
+    // Someone else's export, and malformed ids, are not found.
+    const other = await signIn('acct-web-export-other');
+    expect((await bff.exportFile(new Request(`${BASE}/bff/account/exports/${job.id}/file`, { headers: { cookie: other } }), job.id)).status).toBe(404);
+    expect((await bff.exportStatus(new Request(`${BASE}/bff/account/exports/x`, { headers: { cookie } }), 'x')).status).toBe(404);
   });
 
   it('needs CSRF and a fresh sign-in, then ends the web session and hands back a ticket', async () => {
