@@ -404,7 +404,7 @@ export interface DirectoryBlock {
   createdAt: string;
 }
 
-export type ConfigFeature = 'catalogBrowse' | 'playlistImport' | 'diagnosticsUpload' | 'radioDirectory';
+export type ConfigFeature = 'catalogBrowse' | 'playlistImport' | 'diagnosticsUpload' | 'radioDirectory' | 'videoPlayback' | 'webBrowser';
 export interface AppConfigPayload {
   minSupportedBuild: { ios: number | null; android: number | null };
   features: Record<ConfigFeature, boolean>;
