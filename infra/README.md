@@ -29,7 +29,7 @@ docker compose up --build
   - A user profile with only username and email (no name fields), registration by email, a 12-character minimum password, and brute-force protection.
   - The mobile app's client is not in this file: its redirect URI and client type are Codex's to decide.
 - Staff roles: sign in once, then `docker compose exec api node dist/staff/staff-cli.js grant <subject> admin --by <you> --reason "<why>"`. The subject is the Keycloak user id.
-- Postgres listens on 127.0.0.1:5432 (user `tunedeck`, password from `.env`). Console sessions live in memory here because the base URL is localhost.
+- Postgres listens on 127.0.0.1:5432 (user `tunedeck`, password from `.env`); set `POSTGRES_HOST_PORT` (e.g. 55432) in `.env` when the machine already runs its own Postgres there. Containers still reach it as `postgres:5432`. Console sessions live in memory here because the base URL is localhost.
 
 Checked on 2026-10-04 against Keycloak 26.4, with the API and console on the compose network:
 - A staff member signed in with a password.
