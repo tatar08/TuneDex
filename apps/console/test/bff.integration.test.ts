@@ -300,6 +300,23 @@ describe('staff routes through the BFF', () => {
     expect((await published.json()).status).toBe('published');
   });
 
+  it('searches stations on the server and reads the catalog counts in one call', async () => {
+    const editor = await signIn('bff-editor');
+    const csrf = await csrfFor(editor);
+    for (const name of ['Search Probe Alpha', 'search probe beta']) expect((await post(editor, '/bff/admin/stations', { ...station, name }, { csrf })).status).toBe(201);
+    const ctx = (await bff.sessionFromCookie(editor))!;
+    const found = await bff.loadStations(ctx, { q: 'SEARCH PROBE' });
+    expect(found).toMatchObject({ status: 200, truncated: false });
+    expect(found!.stations!.map((s) => s.draft.name)).toEqual(['Search Probe Alpha', 'search probe beta']);
+    const all = await bff.loadStations(ctx);
+    const counts = await bff.loadStationSummary(ctx);
+    expect(counts).toMatchObject({ status: 200 });
+    expect(counts!.summary!.total).toBe(all!.stations!.length);
+    expect(counts!.summary!.drafts).toBe(all!.stations!.filter((s) => s.status === 'draft').length);
+    const customer = await signIn('bff-search-customer');
+    expect(await bff.loadStationSummary((await bff.sessionFromCookie(customer))!)).toEqual({ status: 403 });
+  });
+
   it('manages rights records and reads the station history through the BFF', async () => {
     const editor = await signIn('bff-editor');
     const csrf = await csrfFor(editor);

@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { MODE_COOKIE, modeFrom, summarize, THEME_COOKIE, themeFrom } from '@/lib/admin';
+import { MODE_COOKIE, modeFrom, THEME_COOKIE, themeFrom } from '@/lib/admin';
 import { translator } from '@/lib/admin-i18n';
 import { pageLang } from '@/lib/lang';
 import { getBff } from '@/lib/runtime';
@@ -53,8 +53,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   }
 
   // Catalog counts for the header and menu badge; the page still works if this read fails.
-  const list = await bff.loadStations(ctx).catch(() => null);
-  const summary = list && 'stations' in list && list.stations ? summarize(list.stations) : null;
+  const counts = await bff.loadStationSummary(ctx).catch(() => null);
+  const summary = counts?.summary ?? null;
 
   return (
     <AdminShell

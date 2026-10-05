@@ -32,6 +32,7 @@ export type ErrorCode =
   | 'IDEMPOTENCY_KEY_REUSED'
   | 'IDEMPOTENCY_IN_PROGRESS'
   | 'SUPPORT_ACCESS_REQUIRED'
+  | 'DIRECTORY_BLOCK_EXISTS'
   | 'INTERNAL';
 
 export const MESSAGE_KEYS: Record<ErrorCode, string> = {
@@ -66,6 +67,7 @@ export const MESSAGE_KEYS: Record<ErrorCode, string> = {
   IDEMPOTENCY_KEY_REUSED: 'errors.request.idempotencyKeyReused',
   IDEMPOTENCY_IN_PROGRESS: 'errors.request.inProgress',
   SUPPORT_ACCESS_REQUIRED: 'errors.support.accessRequired',
+  DIRECTORY_BLOCK_EXISTS: 'errors.directory.blockExists',
   INTERNAL: 'errors.service.internal',
 };
 

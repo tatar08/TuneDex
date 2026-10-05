@@ -395,6 +395,78 @@ describe('station catalog', () => {
     });
   });
 
+  describe('search and summary', () => {
+    const names = (res: request.Response) => res.body.stations.map((s: { draft: { name: string } }) => s.draft.name);
+
+    it('finds stations by part of the name, any case, in cursor pages', async () => {
+      for (const name of ['Zeta Search One', 'zeta search two', 'Zeta Search Three']) expect((await create('editor', { ...station, name })).status).toBe(201);
+      const all = await http().get('/v1/admin/stations?q=ZETA%20SEARCH').set(as('editor')).expect(200);
+      expect(names(all)).toEqual(['Zeta Search One', 'Zeta Search Three', 'zeta search two']);
+      const first = await http().get('/v1/admin/stations?q=zeta%20search&limit=2').set(as('editor')).expect(200);
+      expect(names(first)).toEqual(['Zeta Search One', 'Zeta Search Three']);
+      const second = await http().get(`/v1/admin/stations?q=zeta%20search&limit=2&cursor=${first.body.nextCursor}`).set(as('editor')).expect(200);
+      expect(names(second)).toEqual(['zeta search two']);
+      expect(second.body.nextCursor).toBeNull();
+    });
+
+    it('treats % and _ in the search as plain characters', async () => {
+      expect((await create('editor', { ...station, name: '100% Hits_FM' })).status).toBe(201);
+      expect(names(await http().get('/v1/admin/stations?q=100%25').set(as('editor')))).toEqual(['100% Hits_FM']);
+      expect(names(await http().get('/v1/admin/stations?q=s_F').set(as('editor')))).toEqual(['100% Hits_FM']);
+      expect(names(await http().get('/v1/admin/stations?q=%25%25%25').set(as('editor')))).toEqual([]);
+    });
+
+    it('filters by status with the same rules as the station view', async () => {
+      const sid = (await create('editor', { ...station, name: 'Yotta Status FM' })).body.id;
+      const has = async (status: string) =>
+        names(await http().get(`/v1/admin/stations?q=yotta%20status&status=${status}`).set(as('editor')).expect(200)).length === 1;
+      expect(await has('draft')).toBe(true);
+      await publish('admin', sid, 1).expect(200);
+      expect([await has('draft'), await has('published')]).toEqual([false, true]);
+      await patch('editor', sid, 1, { genres: ['jazz', 'soul'] }).expect(200);
+      expect([await has('published'), await has('changes_pending')]).toEqual([false, true]);
+      await http().post(`/v1/admin/stations/${sid}/disable`).set(as('admin')).send({ reason: 'stream down for 3 checks' }).expect(200);
+      expect([await has('changes_pending'), await has('disabled')]).toEqual([false, true]);
+    });
+
+    it('rejects a bad search or status', async () => {
+      for (const qs of ['q=%20%20', `q=${'x'.repeat(81)}`, 'status=live', 'q=a&q=b']) {
+        expect((await http().get(`/v1/admin/stations?${qs}`).set(as('editor'))).status).toBe(400);
+      }
+    });
+
+    it('counts the catalog like the public catalog and the station statuses', async () => {
+      const list: { status: string; published: unknown; disabledAt: string | null; rights: { liveUntil: string | null } }[] = [];
+      let cursor: string | null = null;
+      do {
+        const page: request.Response = await http().get(`/v1/admin/stations?limit=100${cursor ? `&cursor=${cursor}` : ''}`).set(as('editor')).expect(200);
+        list.push(...page.body.stations);
+        cursor = page.body.nextCursor;
+      } while (cursor);
+      const publicCount = async () => {
+        let n = 0;
+        let c: string | null = null;
+        do {
+          const page: request.Response = await catalog(`?limit=100${c ? `&cursor=${c}` : ''}`).expect(200);
+          n += page.body.stations.length;
+          c = page.body.nextCursor;
+        } while (c);
+        return n;
+      };
+      const res = await http().get('/v1/admin/stations/summary').set(as('editor')).expect(200);
+      expect(res.headers['cache-control']).toBe('no-store');
+      expect(res.body).toEqual({
+        total: list.length,
+        visible: await publicCount(),
+        pending: list.filter((s) => s.status === 'changes_pending').length,
+        drafts: list.filter((s) => s.status === 'draft').length,
+        disabled: list.filter((s) => s.status === 'disabled').length,
+      });
+      expect(res.body.total).toBeGreaterThan(0);
+      expect((await http().get('/v1/admin/stations/summary').set(as('user'))).status).toBe(403);
+    });
+  });
+
   describe('validation', () => {
     it.each([
       ['http stream', { streamUrl: 'http://stream.example.com/a.mp3' }, 'streamUrl', 'https_required'],

@@ -13,6 +13,7 @@ import { AdminUsersController, AdminUsersService } from './users/admin-users';
 import { AdminOverviewController, OverviewService } from './overview/overview';
 import { AdminMetricsController, MetricsService } from './overview/metrics';
 import { ALERT_FETCH, AlertFetch, AlertService } from './overview/alerts';
+import { AdminDirectoryController, DIRECTORY_FETCH, DirectoryController, DirectoryFetch, DirectoryService } from './directory/directory';
 import { AdminAuditController, AuditSearchService } from './audit/audit-search';
 import { AuthGuard, KEY_RESOLVER } from './auth/auth.guard';
 import { ErrorEnvelopeFilter } from './common/error.filter';
@@ -56,6 +57,8 @@ export interface AppDeps {
   googleFetch?: GoogleFetch;
   /** Tests only: replaces the network for the alert webhook. */
   alertFetch?: AlertFetch;
+  /** Tests only: fake Radio Browser server. */
+  directoryFetch?: DirectoryFetch;
   googlePushKeys?: JWTVerifyGetKey;
 }
 
@@ -64,7 +67,7 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController, DevicesController, DevicePreferencesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, MyExportsController, ExportDownloadController, AdminOverviewController, AdminMetricsController, AdminJobsController, AdminUsersController, AdminSupportDiagnosticsController, MySupportAccessController, AdminConfigController, PublicConfigController, SyncController, FavoritesController, BillingController],
+      controllers: [HealthController, SettingsController, DevicesController, DevicePreferencesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, MyExportsController, ExportDownloadController, AdminOverviewController, AdminMetricsController, AdminJobsController, AdminUsersController, AdminSupportDiagnosticsController, MySupportAccessController, AdminConfigController, PublicConfigController, SyncController, FavoritesController, BillingController, DirectoryController, AdminDirectoryController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },
@@ -95,6 +98,8 @@ export class AppModule {
         OverviewService,
         MetricsService,
         AlertService,
+        DirectoryService,
+        { provide: DIRECTORY_FETCH, useValue: deps.directoryFetch ?? ((url: string, init: Parameters<DirectoryFetch>[1]) => fetch(url, init)) },
         { provide: ALERT_FETCH, useValue: deps.alertFetch ?? ((url: string, init: Parameters<AlertFetch>[1]) => fetch(url, init)) },
         JobsService,
         AdminUsersService,

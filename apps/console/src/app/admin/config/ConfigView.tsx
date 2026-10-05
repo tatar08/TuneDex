@@ -36,6 +36,21 @@ const FEATURES: { id: ConfigFeature; label: string; hint: string }[] = [
     label: "ส่งรายงานวินิจฉัย",
     hint: "ส่งเฉพาะผู้ใช้ที่ยินยอม",
   },
+  {
+    id: "radioDirectory",
+    label: "ค้นหาสถานีวิทยุทั่วโลก",
+    hint: "สถานีจาก Radio Browser ที่ผู้ใช้เพิ่มเอง ปิดแล้วสถานีที่เพิ่มไว้ยังอยู่",
+  },
+  {
+    id: "videoPlayback",
+    label: "ดูช่องทีวีจากลิสต์ของผู้ใช้",
+    hint: "เฉพาะบนมือถือและกล่องทีวี ในรถเล่นเสียงอย่างเดียวเสมอ",
+  },
+  {
+    id: "webBrowser",
+    label: "เบราว์เซอร์ในแอป",
+    hint: "เปิดเว็บอย่าง YouTube บนมือถือและกล่องทีวี ไม่แสดงในรถ",
+  },
 ];
 const FIELD_LABEL: Record<string, string> = {
   "minSupportedBuild.ios": "build ขั้นต่ำ iOS",
@@ -43,6 +58,9 @@ const FIELD_LABEL: Record<string, string> = {
   "features.catalogBrowse": "แค็ตตาล็อก",
   "features.playlistImport": "นำเข้าเพลย์ลิสต์",
   "features.diagnosticsUpload": "รายงานวินิจฉัย",
+  "features.radioDirectory": "ค้นหาวิทยุทั่วโลก",
+  "features.videoPlayback": "ช่องทีวี",
+  "features.webBrowser": "เบราว์เซอร์ในแอป",
   catalogRefreshHours: "รอบรีเฟรชแค็ตตาล็อก",
   "targets.ios.include": "ส่งให้ iOS",
   "targets.ios.minBuild": "iOS ตั้งแต่ build",

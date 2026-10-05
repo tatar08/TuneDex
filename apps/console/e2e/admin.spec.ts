@@ -239,6 +239,40 @@ test('the log page has its own layout in each theme', async ({ browser }) => {
   }
 });
 
+test('editors block and unblock worldwide radio stations in every theme', async ({ browser }) => {
+  const page = await signInAs(browser, 'e2e-editor', '/admin/directory');
+  const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
+  const themes = ['minimal', 'control-room', 'broadcast-rack', 'daylight-bento', 'workbench'];
+  for (const [i, theme] of themes.entries()) {
+    await picker.selectOption(theme);
+    await page.reload();
+    // The search goes through the API; this stack has no Radio Browser server, so it says the search is off.
+    await page.getByRole('searchbox', { name: 'ค้นหาชื่อสถานีแบบที่ผู้ใช้เห็น' }).fill('jazz');
+    await page.getByRole('searchbox', { name: 'ค้นหาชื่อสถานีแบบที่ผู้ใช้เห็น' }).press('Enter');
+    await expect(page).toHaveURL(`${stack.base}/admin/directory?q=jazz`);
+    await expect(page.locator('.adm-alert')).toContainText('RADIO_BROWSER_BASE_URL');
+
+    const host = `relay${i}.pirate.example.com`;
+    await page.getByRole('button', { name: '+ บล็อกด้วยรหัสหรือโฮสต์' }).click();
+    await page.getByLabel('โฮสต์ เช่น stream.example.com').fill(host);
+    await page.getByLabel('เหตุผล (จะถูกบันทึกไว้ในประวัติ)').fill('rights holder complaint 2026-10');
+    await page.getByRole('button', { name: 'บล็อก', exact: true }).click();
+    await expect(page.getByText(host).first()).toBeVisible();
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/directory-${theme}.png`, fullPage: true });
+
+    if (theme === 'workbench') await page.getByRole('button', { name: host }).click();
+    await page.getByRole('button', { name: 'ยกเลิกบล็อก' }).first().click();
+    await page.getByLabel('เหตุผล (จะถูกบันทึกไว้ในประวัติ)').fill('complaint withdrawn by owner');
+    await page.getByRole('form', { name: `ยกเลิกบล็อก ${host}` }).getByRole('button', { name: 'ยกเลิกบล็อก' }).click();
+    await expect(page.getByText(host)).toHaveCount(0);
+  }
+  // Operators have no catalog role: no menu entry, and the page refuses.
+  const ops = await signInAs(browser, 'e2e-ops', '/admin/overview');
+  await expect(ops.getByRole('link', { name: 'วิทยุทั่วโลก' })).toHaveCount(0);
+  await ops.goto(`${stack.base}/admin/directory`);
+  await expect(ops.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์');
+});
+
 test('auditors read who changed what; reading is recorded', async ({ browser }) => {
   const aud = await signInAs(browser, 'e2e-auditor', '/admin/audit');
   await aud.goto(`${stack.base}/admin`);

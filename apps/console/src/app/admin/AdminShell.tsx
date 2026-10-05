@@ -31,6 +31,7 @@ export const useT = (): Translate => useAdmin().t;
 const NAV = [
   { href: '/admin/overview', label: 'ภาพรวมระบบ', short: 'OV', icon: 'bolt', show: canSeeLogs },
   { href: '/admin/stations', label: 'สถานีวิทยุ', short: 'ST', icon: 'stations', show: canSeeStations },
+  { href: '/admin/directory', label: 'วิทยุทั่วโลก', short: 'WR', icon: 'globe', show: canSeeStations },
   { href: '/admin/logs', label: 'บันทึกระบบ', short: 'LG', icon: 'logs', show: canSeeLogs },
   { href: '/admin/jobs', label: 'งานเบื้องหลัง', short: 'JB', icon: 'jobs', show: canSeeLogs },
   { href: '/admin/users', label: 'ผู้ใช้', short: 'US', icon: 'users', show: canSeeUsers },
@@ -92,6 +93,7 @@ const ICONS = {
   logout: 'M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1',
   chevron: 'M15 19l-7-7 7-7',
   bolt: 'M13 10V3L4 14h7v7l9-11h-7z',
+  globe: 'M21 12a9 9 0 11-18 0 9 9 0 0118 0zM3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18M12 3a15 15 0 000 18',
   config: 'M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4',
   users: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z',
   jobs: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15',

@@ -714,6 +714,92 @@ paths:
           headers: { Retry-After: { schema: { type: integer } } }
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         '503': { $ref: '#/components/responses/Error' }
+  /v1/directory/radio:
+    get:
+      summary: Search the community radio directory (no sign-in)
+      description: 'Radio Browser (www.radio-browser.info) searched through our server, decided by Tar 2026-10-05. These stations are community data, not our curated catalog: the apps show them as such and only add one to the user''s own list when the user picks it. Only plain public https streams (the same rules as streamUrl in StationDraft) in mp3, aac or hls get through, ordered by Radio Browser click count; stations staff blocked never appear. Answers are cached 10 minutes, and served up to an hour old while Radio Browser is down. Search text is never logged. Off (503) unless RADIO_BROWSER_BASE_URL is set; the app switch is features.radioDirectory in GET /v1/config.'
+      security: []
+      parameters:
+        - { name: q, in: query, schema: { type: string, minLength: 1, maxLength: 80 }, description: Part of the station name; trimmed, blank is 400 }
+        - { name: country, in: query, schema: { type: string, pattern: '^[A-Za-z]{2}$' }, description: ISO 3166 alpha-2, any case }
+        - { name: language, in: query, schema: { type: string, minLength: 2, maxLength: 40 }, description: 'Language name as Radio Browser has it, e.g. thai' }
+        - { name: tag, in: query, schema: { type: string, minLength: 1, maxLength: 30 }, description: 'Genre tag, e.g. jazz' }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 30 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, maximum: 1000, default: 0 }, description: From nextOffset }
+      responses:
+        '200':
+          description: 'Stations (a page may hold fewer than limit after filtering; keep paging while nextOffset is set)'
+          headers: { Cache-Control: { schema: { type: string, example: 'public, max-age=300' } } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stations, nextOffset, attribution]
+                properties:
+                  stations: { type: array, maxItems: 50, items: { $ref: '#/components/schemas/DirectoryStation' } }
+                  nextOffset: { type: integer, nullable: true }
+                  attribution: { type: string, description: Show this wherever the results are shown }
+        '400': { description: 'VALIDATION_FAILED: details.field q, country, language, tag, limit or offset; unknown_field for any other parameter', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429':
+          description: API_RATE_LIMITED (60 a minute per client address), details.retryAfterSeconds
+          headers: { Retry-After: { schema: { type: integer } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '503': { description: 'DEPENDENCY_UNAVAILABLE with details {dependency: radio_directory, reason: not_configured | unreachable}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/admin/directory/blocks:
+    get:
+      summary: Community stations taken out of the directory search (catalog_editor, admin)
+      description: 'Roles: catalog_editor or admin. Newest first. Cache-Control: no-store.'
+      responses:
+        '200':
+          description: Blocks
+          headers: { Cache-Control: { schema: { type: string, example: no-store } } }
+          content: { application/json: { schema: { type: object, required: [blocks], properties: { blocks: { type: array, items: { $ref: '#/components/schemas/DirectoryBlock' } } } } } }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    post:
+      summary: Block a community station or a stream host (catalog_editor, admin)
+      description: 'Roles: catalog_editor or admin. kind station blocks one Radio Browser station id; kind host blocks every stream on that host and its subdomains. Takes effect on the next search. Audited as directory.block.add with the reason. Stations users already added stay in their own lists (Doc 10: we do not delete user libraries).'
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, description: 'Optional; see POST /v1/admin/stations', schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,128}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [kind, value, reason]
+              properties:
+                kind: { type: string, enum: [station, host] }
+                value: { type: string, description: 'A Radio Browser station UUID, or a host name such as stream.example.com (lower-cased; a trailing dot is dropped)' }
+                reason: { type: string, minLength: 10, maxLength: 500 }
+      responses:
+        '201':
+          description: Blocked
+          headers: { Cache-Control: { schema: { type: string, example: no-store } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/DirectoryBlock' } } }
+        '400': { description: 'VALIDATION_FAILED: kind value_not_allowed, value must_be_uuid or must_be_host, reason length, unknown_field', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'DIRECTORY_BLOCK_EXISTS, or IDEMPOTENCY_KEY_REUSED / IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { $ref: '#/components/responses/Error' }
+  /v1/admin/directory/blocks/{blockId}/remove:
+    parameters:
+      - { name: blockId, in: path, required: true, schema: { type: string, pattern: '^[1-9][0-9]{0,17}$' }, description: 'Not a number: 400 (field id, must_be_number)' }
+    post:
+      summary: Lift a block with a reason (catalog_editor, admin)
+      description: 'Roles: catalog_editor or admin. Audited as directory.block.remove with the reason.'
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, description: 'Optional; see POST /v1/admin/stations', schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,128}$' } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reason' } } } }
+      responses:
+        '204': { description: Lifted }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { $ref: '#/components/responses/Error' }
   /v1/admin/stations:
     get:
       summary: List stations, one cursor page by name then id (catalog_editor, admin)
@@ -721,12 +807,14 @@ paths:
       parameters:
         - { name: cursor, in: query, schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,1024}$' }, description: Opaque; from nextCursor }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: q, in: query, schema: { type: string, minLength: 1, maxLength: 80 }, description: 'Part of the draft name, any case; % and _ are plain characters. Trimmed; blank after trimming is 400' }
+        - { name: status, in: query, schema: { type: string, enum: [draft, published, changes_pending, disabled] }, description: Only stations with this status }
       responses:
         '200':
           description: One page of stations, each with its stream health
           headers: { Cache-Control: { schema: { type: string, example: no-store } } }
           content: { application/json: { schema: { $ref: '#/components/schemas/AdminStationPage' } } }
-        '400': { description: 'VALIDATION_FAILED: details.field limit (out_of_range, max) or cursor (malformed)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '400': { description: 'VALIDATION_FAILED: details.field limit (out_of_range, max), cursor (malformed), q (out_of_range, max 80) or status (invalid)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200} when this Keycloak session did not sign in with MFA in the last 12 hours', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     post:
@@ -749,6 +837,27 @@ paths:
         '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { description: 'IDEMPOTENCY_KEY_REUSED, or IDEMPOTENCY_IN_PROGRESS (Retry-After: 1)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '413': { $ref: '#/components/responses/Error' }
+  /v1/admin/stations/summary:
+    get:
+      summary: Catalog counts for the console header (catalog_editor, admin)
+      description: 'Roles: catalog_editor or admin. visible counts what GET /v1/catalog/radio serves right now; pending, drafts and disabled use the same rules as AdminStation.status. Cache-Control: no-store.'
+      responses:
+        '200':
+          description: Counts
+          headers: { Cache-Control: { schema: { type: string, example: no-store } } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [total, visible, pending, drafts, disabled]
+                properties:
+                  total: { type: integer, minimum: 0 }
+                  visible: { type: integer, minimum: 0 }
+                  pending: { type: integer, minimum: 0, description: Status changes_pending }
+                  drafts: { type: integer, minimum: 0 }
+                  disabled: { type: integer, minimum: 0 }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/admin/stations/{stationId}:
     parameters:
       - { $ref: '#/components/parameters/StationId' }
@@ -1331,7 +1440,7 @@ components:
       properties:
         code:
           type: string
-          enum: [AUTH_REQUIRED, AUTH_FORBIDDEN, VALIDATION_FAILED, NOT_FOUND, EXPORT_NOT_READY, IDEMPOTENCY_KEY_REQUIRED, PRECONDITION_REQUIRED, REVISION_MISMATCH, PAYLOAD_TOO_LARGE, DEPENDENCY_UNAVAILABLE, REAUTH_REQUIRED, DEVICE_REVOKED, DEVICE_LIMIT, ROLE_REQUIRED, PUBLISH_BLOCKED, CHECK_TOO_SOON, CHECKER_UNAVAILABLE, RIGHTS_ALREADY_REVOKED, API_RATE_LIMITED, ACCOUNT_DELETING, JOB_RETRY_TOO_SOON, JOB_BUSY, JOB_RETRY_LIMIT, JOB_SUPERSEDED, SYNC_RESET_REQUIRED, PURCHASE_INVALID, PURCHASE_CONFLICT, MFA_REQUIRED, IDEMPOTENCY_KEY_REUSED, IDEMPOTENCY_IN_PROGRESS, SUPPORT_ACCESS_REQUIRED, INTERNAL]
+          enum: [AUTH_REQUIRED, AUTH_FORBIDDEN, VALIDATION_FAILED, NOT_FOUND, EXPORT_NOT_READY, IDEMPOTENCY_KEY_REQUIRED, PRECONDITION_REQUIRED, REVISION_MISMATCH, PAYLOAD_TOO_LARGE, DEPENDENCY_UNAVAILABLE, REAUTH_REQUIRED, DEVICE_REVOKED, DEVICE_LIMIT, ROLE_REQUIRED, PUBLISH_BLOCKED, CHECK_TOO_SOON, CHECKER_UNAVAILABLE, RIGHTS_ALREADY_REVOKED, API_RATE_LIMITED, ACCOUNT_DELETING, JOB_RETRY_TOO_SOON, JOB_BUSY, JOB_RETRY_LIMIT, JOB_SUPERSEDED, SYNC_RESET_REQUIRED, PURCHASE_INVALID, PURCHASE_CONFLICT, MFA_REQUIRED, IDEMPOTENCY_KEY_REUSED, IDEMPOTENCY_IN_PROGRESS, SUPPORT_ACCESS_REQUIRED, INTERNAL, DIRECTORY_BLOCK_EXISTS]
         messageKey: { type: string, example: errors.settings.revisionMismatch }
         requestId: { type: string }
         details:
@@ -1795,12 +1904,15 @@ components:
         features:
           type: object
           additionalProperties: false
-          required: [catalogBrowse, playlistImport, diagnosticsUpload]
+          required: [catalogBrowse, playlistImport, diagnosticsUpload, radioDirectory, videoPlayback, webBrowser]
           description: Disable-only switches. true = the build's default (on); false turns a shipped feature off
           properties:
             catalogBrowse: { type: boolean }
             playlistImport: { type: boolean }
             diagnosticsUpload: { type: boolean }
+            radioDirectory: { type: boolean, description: Search of the community radio directory (GET /v1/directory/radio) }
+            videoPlayback: { type: boolean, description: 'Video channels from playlists the user imported, on the phone or TV box only (never in CarPlay or Android Auto)' }
+            webBrowser: { type: boolean, description: 'In-app web browser (e.g. YouTube, Bilibili, TikTok sites), on the phone or TV box only' }
         catalogRefreshHours: { type: integer, minimum: 1, maximum: 168, description: How often the app refreshes the radio catalog in the foreground }
     ConfigTarget:
       type: object
@@ -1831,6 +1943,33 @@ components:
         publishedAt: { type: string, format: date-time, nullable: true, description: null for release 0 }
         expiresAt: { type: string, format: date-time, nullable: true, description: 'null for release 0; after it apps use their built-in defaults' }
         config: { $ref: '#/components/schemas/ConfigPayload' }
+    DirectoryStation:
+      type: object
+      additionalProperties: false
+      required: [id, name, country, language, genres, streamUrl, codec, bitrateKbps, logoUrl, homepageUrl]
+      description: A community station from Radio Browser. Not part of the curated catalog and never published by us.
+      properties:
+        id: { type: string, format: uuid, description: Radio Browser stationuuid }
+        name: { type: string, maxLength: 80 }
+        country: { type: string, pattern: '^[A-Z]{2}$', nullable: true }
+        language: { type: string, maxLength: 40, nullable: true }
+        genres: { type: array, maxItems: 5, items: { type: string, maxLength: 30 } }
+        streamUrl: { type: string, format: uri, description: Plain public https URL }
+        codec: { type: string, enum: [mp3, aac, hls] }
+        bitrateKbps: { type: integer, minimum: 1, maximum: 1000, nullable: true }
+        logoUrl: { type: string, format: uri, nullable: true, description: 'https only; the station''s own logo, rights not checked by us' }
+        homepageUrl: { type: string, format: uri, nullable: true }
+    DirectoryBlock:
+      type: object
+      additionalProperties: false
+      required: [id, kind, value, reason, createdBy, createdAt]
+      properties:
+        id: { type: string, pattern: '^[1-9][0-9]*$' }
+        kind: { type: string, enum: [station, host] }
+        value: { type: string }
+        reason: { type: string }
+        createdBy: { type: string, nullable: true, description: OIDC subject of the staff member }
+        createdAt: { type: string, format: date-time }
     PublicStation:
       type: object
       required: [id, revision, name, country, language, genres, streamUrl, codec, bitrateKbps]
@@ -2336,9 +2475,9 @@ components:
             android: { type: [integer, 'null'], minimum: 1, maximum: 2147483647 }
         features:
           type: object
-          required: [catalogBrowse, playlistImport, diagnosticsUpload]
+          required: [catalogBrowse, playlistImport, diagnosticsUpload, radioDirectory, videoPlayback, webBrowser]
           description: 'Disable-only switches: true = the build''s default, false turns a shipped feature off'
-          properties: { catalogBrowse: { type: boolean }, playlistImport: { type: boolean }, diagnosticsUpload: { type: boolean } }
+          properties: { catalogBrowse: { type: boolean }, playlistImport: { type: boolean }, diagnosticsUpload: { type: boolean }, radioDirectory: { type: boolean }, videoPlayback: { type: boolean }, webBrowser: { type: boolean } }
         catalogRefreshHours: { type: integer, minimum: 1, maximum: 168 }
     AdminConfigTargets:
       type: object
@@ -2368,7 +2507,7 @@ components:
         features:
           type: object
           additionalProperties: false
-          properties: { catalogBrowse: { type: boolean }, playlistImport: { type: boolean }, diagnosticsUpload: { type: boolean } }
+          properties: { catalogBrowse: { type: boolean }, playlistImport: { type: boolean }, diagnosticsUpload: { type: boolean }, radioDirectory: { type: boolean }, videoPlayback: { type: boolean }, webBrowser: { type: boolean } }
         catalogRefreshHours: { type: integer, minimum: 1, maximum: 168 }
         targets:
           type: object
