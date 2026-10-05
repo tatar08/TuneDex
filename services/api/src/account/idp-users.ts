@@ -61,6 +61,18 @@ export class IdpUsersService {
     return true;
   }
 
+  /**
+   * Whether the user has a one-time-code (TOTP) credential. Staff roles are only granted to people who set one
+   * up, because the realm does not let a password-only sign-in enroll a new code during the MFA step.
+   */
+  async hasOtp(subject: string): Promise<boolean> {
+    const admin = this.config.idpAdmin!;
+    const res = await this.admin('GET', `${admin.adminBase}/users/${encodeURIComponent(subject)}/credentials`);
+    if (!res.ok) throw new IdpError('lookup', res.status);
+    const creds = (await res.json()) as unknown;
+    return Array.isArray(creds) && creds.some((c) => typeof c === 'object' && c !== null && (c as { type?: unknown }).type === 'otp');
+  }
+
   /** A cached token Keycloak no longer accepts (revoked, keys rotated, server rebuilt) is replaced and the call retried once. */
   private async admin(method: 'GET' | 'DELETE', url: string): Promise<Response> {
     for (let attempt = 0; ; attempt++) {

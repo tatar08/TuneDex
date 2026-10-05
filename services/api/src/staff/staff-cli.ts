@@ -1,5 +1,7 @@
 import { Pool } from 'pg';
+import { IdpUsersService } from '../account/idp-users';
 import { writeAudit } from '../audit/audit';
+import { loadConfig } from '../config';
 import { Database } from '../db/database';
 import { STAFF_ROLES, StaffRole } from './staff';
 
@@ -10,8 +12,14 @@ import { STAFF_ROLES, StaffRole } from './staff';
  *   node dist/staff/staff-cli.js list
  *   node dist/staff/staff-cli.js grant  <oidc-subject> <role> --by <operator> --reason "<why>"
  *   node dist/staff/staff-cli.js revoke <oidc-subject> <role> --by <operator> --reason "<why>"
+ *
+ * A grant needs the person to have set up a one-time code (TOTP) at Keycloak first: the realm does not let a
+ * password-only sign-in enroll a code during the MFA step, so a stolen password cannot become staff MFA.
+ * Where Keycloak cannot be asked (local dev without the admin client), the grant goes ahead with a warning.
  */
-export async function runStaffCli(argv: string[], db: Database, out: (line: string) => void = console.log): Promise<number> {
+export type OtpCheck = (subject: string) => Promise<boolean>;
+
+export async function runStaffCli(argv: string[], db: Database, out: (line: string) => void = console.log, otpCheck?: OtpCheck): Promise<number> {
   const [command, subject, role] = argv;
   const flag = (name: string) => {
     const i = argv.indexOf(`--${name}`);
@@ -36,6 +44,15 @@ export async function runStaffCli(argv: string[], db: Database, out: (line: stri
   if (!(STAFF_ROLES as readonly string[]).includes(role)) {
     out(`unknown role "${role}"; one of: ${STAFF_ROLES.join(', ')}`);
     return 2;
+  }
+
+  if (command === 'grant') {
+    if (!otpCheck) {
+      out('warning: Keycloak admin client not configured, so the one-time code was not checked');
+    } else if (!(await otpCheck(subject))) {
+      out(`${subject} has no one-time code yet: they set one up first (Keycloak account page → Signing in → Authenticator application), then grant again`);
+      return 3;
+    }
   }
 
   return db.transaction(async (query) => {
@@ -70,7 +87,17 @@ if (require.main === module) {
     process.exit(2);
   }
   const pool = new Pool({ connectionString: url });
-  runStaffCli(process.argv.slice(2), new Database(pool))
+  let otpCheck: OtpCheck | undefined;
+  try {
+    const config = loadConfig();
+    if (config.idpAdmin) {
+      const idp = new IdpUsersService(config, fetch);
+      otpCheck = (subject) => idp.hasOtp(subject);
+    }
+  } catch {
+    // Only DATABASE_URL set (local dev): no Keycloak to ask.
+  }
+  runStaffCli(process.argv.slice(2), new Database(pool), console.log, otpCheck)
     .then((code) => (process.exitCode = code))
     .catch((err: Error) => {
       console.error(`staff-cli failed: ${err.message}`);

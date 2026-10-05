@@ -59,7 +59,9 @@ describe('account export and deletion', () => {
   it('exports the account’s own data as a JSON download, and audits it', async () => {
     const device = await seed('acct-export');
     await seed('acct-export-other');
-    const res = await http().get('/v1/me/export').set(await bearer('acct-export')).expect(200);
+    // An old sign-in is not enough to read everything.
+    expect((await http().get('/v1/me/export').set(await bearer('acct-export', Math.floor(Date.now() / 1000) - 3600))).body.code).toBe('REAUTH_REQUIRED');
+    const res = await http().get('/v1/me/export').set(await bearer('acct-export', Math.floor(Date.now() / 1000))).expect(200);
     expect(res.headers['content-disposition']).toMatch(/^attachment; filename="tunedeck-export-\d{4}-\d{2}-\d{2}\.json"$/);
     expect(res.headers['cache-control']).toBe('no-store');
     expect(res.body).toMatchObject({

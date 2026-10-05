@@ -14,10 +14,15 @@ const MUTATIONS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
  */
 const REQUIRED = new Set(['POST /v1/me/exports', 'DELETE /v1/me']);
 /**
- * Answers that carry a secret (a download token, a support code) are never stored, so the key is ignored
+ * Answers that carry a secret (a download token, a support code) or personal data read under audit are never stored, so the key is ignored
  * there; each call simply mints a new one and replaces the previous, which is safe to repeat.
  */
-const SECRET_ANSWERS = [/^POST \/v1\/me\/exports\/[^/]+\/link$/, /^POST \/v1\/me\/support-access\/codes$/];
+const SECRET_ANSWERS = [
+  /^POST \/v1\/me\/exports\/[^/]+\/link$/,
+  /^POST \/v1\/me\/support-access\/codes$/,
+  // A support lookup returns personal data and must be audited every time it is read, so it is never replayed.
+  /^POST \/v1\/admin\/users\/lookup$/,
+];
 const KEY_PATTERN = /^[A-Za-z0-9_.:-]{8,128}$/;
 /** Doc 17: at least 24 hours. */
 export const IDEMPOTENCY_TTL_HOURS = 24;

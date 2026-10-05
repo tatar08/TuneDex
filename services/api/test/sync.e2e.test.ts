@@ -138,7 +138,8 @@ describe('account sync (/v1/sync) and audit retention', () => {
 
   it('refuses a revoked device and exports favorites', async () => {
     const a = await bearer('sync-a');
-    const exp = (await http().get('/v1/me/export').set(a).expect(200)).body;
+    const fresh = { Authorization: `Bearer ${await id.token('sync-a', { authTime: Math.floor(Date.now() / 1000) })}` };
+    const exp = (await http().get('/v1/me/export').set(fresh).expect(200)).body;
     expect(exp.favorites).toEqual([{ stationId: jazz, order: 0, updatedAt: expect.any(String) }]);
     expect((await http().get('/v1/me/favorites').set(a).expect(200)).body.favorites).toEqual([{ entityId: expect.any(String), revision: 1, stationId: jazz, order: 0, updatedAt: expect.any(String) }]);
     await t.pool.query('UPDATE devices SET revoked_at = now() WHERE id = $1', [phone]);

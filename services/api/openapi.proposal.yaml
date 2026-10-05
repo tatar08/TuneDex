@@ -283,7 +283,7 @@ paths:
   /v1/me/export:
     get:
       summary: The account's data built on the spot (legacy; new clients use POST /v1/me/exports)
-      description: No recent sign-in needed. Audited account.export on every call. At most 10,000 diagnostic events (diagnosticsTruncated says when more exist).
+      description: Needs a sign-in from the last 5 minutes (401 REAUTH_REQUIRED otherwise), since it returns all of the account's data. Audited account.export on every call. At most 10,000 diagnostic events (diagnosticsTruncated says when more exist).
       responses:
         '200':
           description: The export document, as a download

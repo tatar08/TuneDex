@@ -83,4 +83,14 @@ describe('/v1/admin/users/lookup', () => {
     // The audit trail never holds the email that was searched for.
     expect(JSON.stringify(audit.rows)).not.toMatch(/example\.com/i);
   });
+
+  it('never replays a lookup from the idempotency store, so every read is audited', async () => {
+    const sup = { ...(await bearer('users-support')), 'Idempotency-Key': 'lookup-replay-0001' };
+    const count = async () => Number((await t.pool.query(`SELECT count(*) FROM audit_events WHERE action = 'user.lookup'`)).rows[0].count);
+    const before = await count();
+    await http().post('/v1/admin/users/lookup').set(sup).send({ query: customer, reason }).expect(200);
+    const again = await http().post('/v1/admin/users/lookup').set(sup).send({ query: customer, reason }).expect(200);
+    expect(again.headers['idempotent-replayed']).toBeUndefined();
+    expect(await count()).toBe(before + 2);
+  });
 });

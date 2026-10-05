@@ -348,10 +348,11 @@ export class MyAccountController {
     return this.account.me(req.actor!.userId);
   }
 
-  /** Doc 17 export: a JSON download of the account's own data. */
+  /** Doc 17 export: a JSON download of the account's own data. All of it, so it needs a sign-in from the last 5 minutes. */
   @Get('export')
   async export(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     res.setHeader('Cache-Control', 'no-store');
+    requireRecentSignIn(req);
     res.setHeader('Content-Disposition', `attachment; filename="tunedeck-export-${new Date().toISOString().slice(0, 10)}.json"`);
     return this.account.export(req.actor!.userId, req.requestId);
   }
