@@ -176,9 +176,9 @@ export class AuditSearchService {
         `SELECT a.id::text, a.occurred_at, a.actor, u.oidc_subject AS actor_subject,
                 CASE a.target_type WHEN 'station' THEN st.draft->>'name' WHEN 'user' THEN tu.oidc_subject END AS target_label, a.action, a.target_type, a.target_id, a.reason, a.changes, a.request_id
            FROM audit_events a
-           LEFT JOIN users u ON a.actor LIKE 'user:%' AND u.id::text = substr(a.actor, 6)
-           LEFT JOIN radio_stations st ON a.target_type = 'station' AND st.id::text = a.target_id
-           LEFT JOIN users tu ON a.target_type = 'user' AND tu.id::text = a.target_id
+           LEFT JOIN users u ON u.id = CASE WHEN a.actor ~ '^user:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN substr(a.actor, 6)::uuid END
+           LEFT JOIN radio_stations st ON st.id = CASE WHEN a.target_type = 'station' AND a.target_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN a.target_id::uuid END
+           LEFT JOIN users tu ON tu.id = CASE WHEN a.target_type = 'user' AND a.target_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN a.target_id::uuid END
           WHERE ${where.join(' AND ')}
           ORDER BY a.occurred_at DESC, a.id DESC LIMIT $${params.length}`,
         params,

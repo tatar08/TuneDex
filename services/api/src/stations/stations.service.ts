@@ -450,7 +450,7 @@ export class StationsService implements OnApplicationBootstrap, OnApplicationShu
     }>(
       `SELECT a.id::text, a.occurred_at, a.action, a.actor, u.oidc_subject AS actor_subject, a.reason, a.changes
          FROM audit_events a
-         LEFT JOIN users u ON a.actor LIKE 'user:%' AND u.id::text = substr(a.actor, 6)
+         LEFT JOIN users u ON u.id = CASE WHEN a.actor ~ '^user:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN substr(a.actor, 6)::uuid END
         WHERE a.target_type = 'station' AND a.target_id = $1 AND ${HISTORY_ACTIONS}
           AND ($2::bigint IS NULL OR a.id < $2::bigint)
         ORDER BY a.id DESC LIMIT $3`,

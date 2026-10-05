@@ -12,6 +12,8 @@ export const PUSH_MAX_BYTES = 64 * 1024;
 export const PULL_DEFAULT = 50;
 export const PULL_MAX = 100;
 export const FAVORITE_ORDER_MAX = 9999;
+const PURGE_CHUNK = 5000;
+const PURGE_MAX_ROUNDS = 50;
 const PURGE_EVERY_MS = 60 * 60 * 1000;
 
 export type SyncType = 'favorite';
@@ -247,27 +249,47 @@ export class SyncService implements OnApplicationBootstrap, OnApplicationShutdow
     return rows.map((r) => ({ entityId: r.entity_id, revision: Number(r.revision), stationId: r.value!.stationId, order: r.value!.order, updatedAt: r.updated_at.toISOString() }));
   }
 
-  /** Removes tombstones and replay records past retention, and moves each affected account's horizon forward. */
+  /**
+   * Removes tombstones and replay records past retention, and moves each affected account's horizon forward.
+   * In chunks of PURGE_CHUNK, each its own short transaction, so a large backlog never runs into the statement
+   * timeout; one instance at a time (advisory lock), the others skip the round.
+   */
   async purgeExpired(): Promise<{ tombstones: number; changes: number }> {
-    return this.db.transaction(async (query) => {
-      const gone = await query<{ user_id: string; max_seq: string; n: string }>(
-        `WITH d AS (DELETE FROM synced_entities WHERE deleted_at < now() - make_interval(days => $1) RETURNING user_id, seq)
-         SELECT user_id, max(seq) AS max_seq, count(*) AS n FROM d GROUP BY user_id`,
-        [SYNC_RETENTION_DAYS],
-      );
-      for (const g of gone) {
-        await query(
-          `INSERT INTO sync_horizons (user_id, purged_seq) VALUES ($1, $2)
-           ON CONFLICT (user_id) DO UPDATE SET purged_seq = GREATEST(sync_horizons.purged_seq, EXCLUDED.purged_seq)`,
-          [g.user_id, g.max_seq],
+    let tombstones = 0;
+    let changes = 0;
+    for (let round = 0; round < PURGE_MAX_ROUNDS; round++) {
+      const r = await this.db.transaction(async (query) => {
+        const [lock] = await query<{ ok: boolean }>(`SELECT pg_try_advisory_xact_lock(727011) AS ok`);
+        if (!lock.ok) return null;
+        const gone = await query<{ user_id: string; max_seq: string; n: string }>(
+          `WITH d AS (
+             DELETE FROM synced_entities WHERE (user_id, entity_id) IN (
+               SELECT user_id, entity_id FROM synced_entities WHERE deleted_at < now() - make_interval(days => $1) LIMIT $2)
+             RETURNING user_id, seq)
+           SELECT user_id, max(seq) AS max_seq, count(*) AS n FROM d GROUP BY user_id`,
+          [SYNC_RETENTION_DAYS, PURGE_CHUNK],
         );
-      }
-      const changes = await query<{ n: string }>(
-        `WITH d AS (DELETE FROM sync_changes WHERE created_at < now() - make_interval(days => $1) RETURNING 1) SELECT count(*) AS n FROM d`,
-        [SYNC_RETENTION_DAYS],
-      );
-      return { tombstones: gone.reduce((s, g) => s + Number(g.n), 0), changes: Number(changes[0].n) };
-    });
+        for (const g of gone) {
+          await query(
+            `INSERT INTO sync_horizons (user_id, purged_seq) VALUES ($1, $2)
+             ON CONFLICT (user_id) DO UPDATE SET purged_seq = GREATEST(sync_horizons.purged_seq, EXCLUDED.purged_seq)`,
+            [g.user_id, g.max_seq],
+          );
+        }
+        const [c] = await query<{ n: string }>(
+          `WITH d AS (DELETE FROM sync_changes WHERE ctid IN (
+             SELECT ctid FROM sync_changes WHERE created_at < now() - make_interval(days => $1) LIMIT $2) RETURNING 1)
+           SELECT count(*) AS n FROM d`,
+          [SYNC_RETENTION_DAYS, PURGE_CHUNK],
+        );
+        return { tombstones: gone.reduce((s, g) => s + Number(g.n), 0), changes: Number(c.n) };
+      });
+      if (!r) break;
+      tombstones += r.tombstones;
+      changes += r.changes;
+      if (r.tombstones < PURGE_CHUNK && r.changes < PURGE_CHUNK) break;
+    }
+    return { tombstones, changes };
   }
 
   private async checkDevice(query: Database['query'], ownerId: string, deviceId: string): Promise<void> {

@@ -12,6 +12,8 @@ export const LATENCY_BOUNDS_MS = [50, 100, 250, 500, 1000, 2500, 5000] as const;
 const BUCKETS = { '1h': { ms: 3600_000, maxRangeDays: 14 }, '1d': { ms: 86_400_000, maxRangeDays: METRICS_RETENTION_DAYS } } as const;
 type BucketId = keyof typeof BUCKETS;
 const ROLLUP_EVERY_MS = 5 * 60_000;
+/** After a start, how far back the rollup fills in (13 days: clear of the 14-day log pruning). */
+const BACKFILL_HOURS = 13 * 24;
 /** A read refreshes the current hours first if the last rollup is older than this. */
 const FRESH_MS = 60_000;
 const TOP_ROUTES = 50;
@@ -121,6 +123,9 @@ export class MetricsService implements OnApplicationBootstrap, OnApplicationShut
   private timer: NodeJS.Timeout | null = null;
   private lastRollup = 0;
   private rolling: Promise<void> | null = null;
+  private backfilled = false;
+  private backfilling: Promise<unknown> | null = null;
+  private stopped = false;
 
   constructor(private readonly db: Database) {}
 
@@ -130,14 +135,17 @@ export class MetricsService implements OnApplicationBootstrap, OnApplicationShut
   }
 
   async onApplicationShutdown(): Promise<void> {
+    this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     await this.rolling?.catch(() => undefined);
+    await this.backfilling;
   }
 
   /**
-   * Recomputes the current and the two previous hours from the raw log lines (after a start, the last 13 days,
-   * which fills gaps while the API was down and stays clear of the hour the 14-day log pruning is cutting), and
-   * drops rows past retention.
+   * Recomputes the current and the two previous hours from the raw log lines, and drops rows past retention.
+   * The first run after a start also fills the last 13 days (gaps while the API was down; clear of the hour the
+   * 14-day log pruning is cutting) in the background, one hour per statement, so no single statement scans days
+   * of logs and runs into the statement timeout.
    */
   rollup(): Promise<void> {
     this.rolling ??= this.doRollup().finally(() => (this.rolling = null));
@@ -145,6 +153,21 @@ export class MetricsService implements OnApplicationBootstrap, OnApplicationShut
   }
 
   private async doRollup(): Promise<void> {
+    await this.rollupHours(2, 0);
+    await this.db.query(`DELETE FROM api_metrics_hourly WHERE hour < now() - make_interval(days => $1)`, [METRICS_RETENTION_DAYS]);
+    this.lastRollup = Date.now();
+    if (!this.backfilled) {
+      this.backfilled = true;
+      this.backfilling = this.backfill().catch(() => (this.backfilled = false));
+    }
+  }
+
+  private async backfill(): Promise<void> {
+    for (let h = BACKFILL_HOURS; h > 2 && !this.stopped; h--) await this.rollupHours(h, h - 1);
+  }
+
+  /** Recomputes whole hours from `fromHoursAgo` (inclusive) up to `toHoursAgo` (exclusive; 0 = now). */
+  private async rollupHours(fromHoursAgo: number, toHoursAgo: number): Promise<void> {
     const slot = (i: number) =>
       i === 0
         ? `count(*) FILTER (WHERE duration_ms <= ${LATENCY_BOUNDS_MS[0]})`
@@ -159,14 +182,13 @@ export class MetricsService implements OnApplicationBootstrap, OnApplicationShut
          FROM operational_logs
         WHERE event_code = 'HTTP_REQUEST' AND method IS NOT NULL AND route IS NOT NULL
           AND logged_at >= date_trunc('hour', now()) - make_interval(hours => $1)
+          AND ($2::int = 0 OR logged_at < date_trunc('hour', now()) - make_interval(hours => $2))
         GROUP BY 1, 2, 3
        ON CONFLICT (hour, method, route) DO UPDATE
          SET requests = EXCLUDED.requests, server_errors = EXCLUDED.server_errors,
              client_errors = EXCLUDED.client_errors, latency_buckets = EXCLUDED.latency_buckets`,
-      [this.lastRollup === 0 ? 13 * 24 : 2],
+      [fromHoursAgo, toHoursAgo],
     );
-    await this.db.query(`DELETE FROM api_metrics_hourly WHERE hour < now() - make_interval(days => $1)`, [METRICS_RETENTION_DAYS]);
-    this.lastRollup = Date.now();
   }
 
   async load(q: MetricsQuery): Promise<Metrics> {
