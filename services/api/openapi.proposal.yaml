@@ -2072,7 +2072,7 @@ components:
         retentionDays: { type: integer, const: 90 }
     AdminOverview:
       type: object
-      required: [window, generatedAt, api, stations, queues, incidents]
+      required: [window, generatedAt, api, stations, queues, clients, incidents]
       properties:
         window:
           type: object
@@ -2140,6 +2140,36 @@ components:
                 oldestRequestedAt: { type: [string, 'null'], format: date-time }
                 deadlineDays: { type: integer, example: 30 }
             diagnosticReports: { type: integer, description: Reports received in the window }
+        clients:
+          type: object
+          description: 'Opt-in app diagnostics received in the window (Doc 07 numerator/denominator). A failure is an event with any resultCode. Counts and distinct-device counts only.'
+          required: [reports, devices, events, byEvent, topFailures, builds]
+          properties:
+            reports: { type: integer }
+            devices: { type: integer, description: Distinct reporting devices }
+            events: { type: integer }
+            byEvent:
+              type: array
+              description: Every event name seen, most frequent first
+              items:
+                type: object
+                required: [eventName, events, failures, devices]
+                properties: { eventName: { type: string }, events: { type: integer }, failures: { type: integer }, devices: { type: integer } }
+            topFailures:
+              type: array
+              maxItems: 10
+              items:
+                type: object
+                required: [eventName, resultCode, count, devices]
+                properties: { eventName: { type: string }, resultCode: { type: string }, count: { type: integer }, devices: { type: integer } }
+            builds:
+              type: array
+              maxItems: 5
+              description: Busiest app builds by event count, per platform
+              items:
+                type: object
+                required: [appBuild, platform, events, failures]
+                properties: { appBuild: { type: string }, platform: { type: string, enum: [ios, android] }, events: { type: integer }, failures: { type: integer } }
         incidents:
           type: array
           items:
