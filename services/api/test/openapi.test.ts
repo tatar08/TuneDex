@@ -66,4 +66,11 @@ describe('openapi.proposal.yaml (the contract the apps build against)', () => {
     walk(spec);
     expect([...new Set(missing)]).toEqual([]);
   });
+
+  it('lists exactly the error codes the API can return', () => {
+    const source = readFileSync(join(__dirname, '..', 'src', 'common', 'api-error.ts'), 'utf8');
+    const codes = [...source.matchAll(/^  \| '([A-Z_0-9]+)'/gm)].map((m) => m[1]).sort();
+    const error = spec.components.schemas.Error as { properties: { code: { enum: string[] } } };
+    expect([...error.properties.code.enum].sort()).toEqual(codes);
+  });
 });
