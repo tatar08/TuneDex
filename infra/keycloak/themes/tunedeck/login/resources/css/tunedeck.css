@@ -39,7 +39,7 @@ div.kc-logo-text span { display: inline; }
 }
 /* No coloured strip along the top of the card */
 .pf-v5-c-login__main::before, .pf-v5-c-login__main::after { display: none !important; }
-.pf-v5-c-login__main-header { padding-top: 32px; }
+.pf-v5-c-login__main-header { padding-top: 32px; border-top: 0 !important; }
 .pf-v5-c-login__main-header .pf-v5-c-title, #kc-page-title { font-weight: 800; letter-spacing: -0.02em; color: var(--td-fg); }
 .pf-v5-c-login__main-footer-band { background: var(--td-soft); border-top: 0; border-radius: 16px; padding: 16px 20px !important; margin-block: 8px 0; }
 .pf-v5-c-login__main-footer-band-item, .pf-v5-c-login__main-footer-band > * { margin: 0 !important; padding: 0 !important; }
@@ -57,6 +57,8 @@ div.kc-logo-text span { display: inline; }
 .pf-v5-c-form-control:focus-within::before { border-color: var(--td-accent) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--td-accent) 22%, transparent); }
 .pf-v5-c-form-control > input, .pf-v5-c-form-control > select, .pf-v5-c-form-control > textarea { outline: none !important; background: transparent; }
 .pf-v5-c-form__label-text { font-weight: 600; }
+/* Same gap between every field (the code page put its label right under the email line) */
+.pf-v5-c-form__group + .pf-v5-c-form__group, #kc-form-login > div + div, #kc-otp-login-form > div + div { margin-top: 16px; }
 /* Password field and its eye button read as one rounded box */
 .pf-v5-c-input-group > .pf-v5-c-input-group__item:first-child .pf-v5-c-form-control,
 .pf-v5-c-input-group > .pf-v5-c-input-group__item:first-child .pf-v5-c-form-control::before { border-top-right-radius: 0; border-bottom-right-radius: 0; }
@@ -65,6 +67,7 @@ div.kc-logo-text span { display: inline; }
   --pf-v5-c-button--after--BorderColor: var(--td-line); --pf-v5-c-button--after--BorderRadius: 0 12px 12px 0;
 }
 .pf-v5-c-input-group .pf-v5-c-button.pf-m-control::after { border: 1px solid var(--td-line) !important; border-left: 0 !important; border-radius: 0 12px 12px 0; }
+.pf-v5-c-input-group > .pf-v5-c-input-group__item:first-child .pf-v5-c-form-control::before { border-right: 0 !important; }
 /* Language menu: the same rounded box */
 .pf-v5-c-menu-toggle, #login-select-toggle, #kc-locale select {
   border-radius: 12px !important; background: var(--td-soft); --pf-v5-c-menu-toggle--before--BorderColor: var(--td-line);
