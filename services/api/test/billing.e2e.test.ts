@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CompactSign, createLocalJWKSet, exportJWK, importPKCS8, SignJWT } from 'jose';
 import request from 'supertest';
+import { BillingService } from '../src/billing/billing';
 import type { GoogleFetch } from '../src/billing/google';
 import { createIdentity, createTestApp, createTestDatabase, TestIdentity } from './harness';
 
@@ -207,14 +208,40 @@ describe('Pro purchase verification (/v1/billing, /v1/webhooks)', () => {
     expect(moved.rows[0].changes).toMatchObject({ store: 'google', fromDeletedAccount: true });
   });
 
-  it('answers 503 and grants nothing when a store is not configured', async () => {
+  it('answers 503 and grants nothing when a store is not configured; its webhooks answer like a bad signature', async () => {
     const bare = await createTestApp(db.url, id.keyResolver);
     try {
       const res = await request(bare.app.getHttpServer()).post('/v1/billing/verify').set(await bearer('other')).send({ store: 'apple', signedTransaction: await sign(tx({ originalTransactionId: '77' })) });
       expect(res.status).toBe(503);
-      expect((await request(bare.app.getHttpServer()).post('/v1/webhooks/google').send({})).status).toBe(503);
+      // An anonymous caller cannot tell an unconfigured store from a configured one.
+      expect((await request(bare.app.getHttpServer()).post('/v1/webhooks/google').send({})).status).toBe(401);
+      expect((await request(bare.app.getHttpServer()).post('/v1/webhooks/apple').send({})).status).toBe(401);
+      expect((await http().post('/v1/webhooks/google').send({})).status).toBe(401);
     } finally {
       await bare.close();
     }
+  });
+
+  it('acknowledges an App Store notification from an environment it does not accept, and changes nothing', async () => {
+    const prodOnly = await createTestApp(db.url, id.keyResolver, {
+      config: { billing: { apple: { bundleId: 'app.tunedeck', rootCaPem: apple.rootPem, productIds: ['tunedeck.pro.lifetime'], environments: ['Production'] }, google: null } },
+    });
+    try {
+      const sandboxTx = tx({ originalTransactionId: 'sbx-0001', transactionId: 'sbx-0001', environment: 'Sandbox', appAccountToken: userId.other });
+      expect((await verifyApple('other', await sign(sandboxTx))).body.state).toBe('verified');
+      const payload = await sign({ notificationType: 'REFUND', notificationUUID: randomUUID(), data: { bundleId: 'app.tunedeck', environment: 'Sandbox', signedTransactionInfo: await sign(sandboxTx) } });
+      expect((await request(prodOnly.app.getHttpServer()).post('/v1/webhooks/apple').send({ signedPayload: payload })).status).toBe(200);
+      const states = (await t.pool.query(`SELECT state FROM purchases WHERE user_id = $1 AND environment = 'sandbox'`, [userId.other])).rows;
+      expect(states).toEqual([{ state: 'verified' }]);
+    } finally {
+      await prodOnly.close();
+    }
+  });
+
+  it('forgets handled notification ids after 30 days, keeping recent ones', async () => {
+    await t.pool.query(`INSERT INTO store_notifications (store, digest, kind, received_at) VALUES ('google', 'old-1', 'voided', now() - interval '31 days'), ('google', 'new-1', 'voided', now() - interval '29 days')`);
+    expect(await t.app.get(BillingService).pruneNotifications()).toBeGreaterThanOrEqual(1);
+    const left = (await t.pool.query(`SELECT digest FROM store_notifications WHERE digest IN ('old-1', 'new-1')`)).rows.map((r) => r.digest);
+    expect(left).toEqual(['new-1']);
   });
 });

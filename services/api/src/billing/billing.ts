@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Inject, Injectable, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Inject, Injectable, OnApplicationBootstrap, OnApplicationShutdown, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { Request, Response } from 'express';
 import type { JWTVerifyGetKey } from 'jose';
@@ -15,6 +15,9 @@ export const GOOGLE_FETCH = Symbol('GOOGLE_FETCH');
 /** Google's public keys for Pub/Sub push tokens (remote JWKS at runtime, a local key set in tests). */
 export const GOOGLE_PUSH_KEYS = Symbol('GOOGLE_PUSH_KEYS');
 export const WEBHOOK_MAX_BYTES = 64 * 1024;
+/** Handled notification ids are kept this long. Apple retries for about 3 days and Pub/Sub for at most 7, so a redelivery is still recognised. */
+export const NOTIFICATION_RETENTION_DAYS = 30;
+const PRUNE_EVERY_MS = 24 * 60 * 60 * 1000;
 
 export type Store = 'apple' | 'google';
 export type PurchaseState = 'verified' | 'pending' | 'revoked';
@@ -84,8 +87,9 @@ const view = (r: Row): PurchaseView => ({
  * store cannot be reached nothing new is granted (what was verified before stays).
  */
 @Injectable()
-export class BillingService {
+export class BillingService implements OnApplicationBootstrap, OnApplicationShutdown {
   private readonly google: GooglePlayClient | null;
+  private timer?: NodeJS.Timeout;
 
   constructor(
     private readonly db: Database,
@@ -95,6 +99,40 @@ export class BillingService {
     @Inject(GOOGLE_PUSH_KEYS) private readonly pushKeys: JWTVerifyGetKey,
   ) {
     this.google = config.billing.google ? new GooglePlayClient(config.billing.google, googleFetch) : null;
+  }
+
+  onApplicationBootstrap(): void {
+    const run = () => void this.pruneNotifications().catch(() => this.logger.log('ERROR', { eventCode: 'STORE_NOTIFICATION_PRUNE_FAILED' }));
+    this.timer = setInterval(run, PRUNE_EVERY_MS);
+    this.timer.unref();
+  }
+
+  onApplicationShutdown(): void {
+    if (this.timer) clearInterval(this.timer);
+  }
+
+  /** Forgets handled notification ids past retention, in small chunks. */
+  async pruneNotifications(): Promise<number> {
+    let removed = 0;
+    for (let i = 0; i < 50; i++) {
+      const rows = await this.db.query(
+        `DELETE FROM store_notifications WHERE (store, digest) IN (
+           SELECT store, digest FROM store_notifications WHERE received_at < now() - make_interval(days => $1) LIMIT 5000) RETURNING 1`,
+        [NOTIFICATION_RETENTION_DAYS],
+      );
+      removed += rows.length;
+      if (rows.length < 5000) break;
+    }
+    return removed;
+  }
+
+  /**
+   * A webhook for a store that is not set up cannot authenticate its caller, so it answers like a failed
+   * signature: an anonymous probe learns nothing about which stores are configured. Logged so a missing key shows.
+   */
+  private notConfigured(store: Store): ApiError {
+    this.logger.log('WARN', { eventCode: 'STORE_WEBHOOK_NOT_CONFIGURED', errorCode: store.toUpperCase() });
+    return new ApiError(HttpStatus.UNAUTHORIZED, 'AUTH_REQUIRED');
   }
 
   async entitlements(userId: string): Promise<{ pro: Record<Store, PurchaseState | 'none'>; purchases: PurchaseView[] }> {
@@ -256,7 +294,7 @@ export class BillingService {
   /** App Store Server Notifications V2. Only REFUND and REVOKE change anything here. */
   async appleNotification(body: unknown): Promise<void> {
     const cfg = this.config.billing.apple;
-    if (!cfg) throw new DependencyUnavailableError('apple');
+    if (!cfg) throw this.notConfigured('apple');
     if (!isObject(body) || typeof body.signedPayload !== 'string') throw invalid('signedPayload', 'must_be_jws');
     let n: AppleNotification;
     let tx: AppleTransaction | null = null;
@@ -268,6 +306,12 @@ export class BillingService {
       throw err;
     }
     if (n.data?.bundleId !== cfg.bundleId || typeof n.notificationUUID !== 'string') throw refused('wrong_app');
+    // The same rule as verify: a notification from an environment this server does not accept (Sandbox in
+    // production) is acknowledged so Apple stops resending it, and changes nothing.
+    if (!cfg.environments.includes(n.data?.environment as 'Production')) {
+      this.logger.log('INFO', { eventCode: 'APPLE_NOTIFICATION_IGNORED', errorCode: 'ENVIRONMENT' });
+      return;
+    }
     await this.once('apple', n.notificationUUID, n.notificationType, async () => {
       if ((n.notificationType === 'REFUND' || n.notificationType === 'REVOKE') && tx?.originalTransactionId) {
         await this.revoke('apple', digestOf('apple', tx.originalTransactionId), n.notificationType.toLowerCase());
@@ -278,7 +322,7 @@ export class BillingService {
   /** Google Play real-time developer notifications via Pub/Sub push. */
   async googleNotification(authorization: string | undefined, body: unknown): Promise<void> {
     const cfg = this.config.billing.google;
-    if (!cfg || !this.google) throw new DependencyUnavailableError('google');
+    if (!cfg || !this.google) throw this.notConfigured('google');
     if (!(await verifyPubSubToken(authorization, this.pushKeys, cfg))) throw new ApiError(HttpStatus.UNAUTHORIZED, 'AUTH_REQUIRED');
     const msg = isObject(body) && isObject(body.message) ? body.message : null;
     if (!msg || typeof msg.messageId !== 'string' || typeof msg.data !== 'string') throw invalid('message', 'malformed');
