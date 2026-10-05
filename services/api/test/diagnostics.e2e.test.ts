@@ -138,4 +138,11 @@ describe('client diagnostics', () => {
     await upload(alice, batch({ events: [event({ resultCode: 'CANARY_CODE_XYZ', sessionRandomId: 'canary_session_123' })] })).expect(200);
     expect(t.logs.raw()).not.toMatch(/CANARY_CODE_XYZ|canary_session_123/);
   });
+
+  it('answers 400, not 500, for a well-formed cursor with a bogus key', async () => {
+    const bogus = Buffer.from(JSON.stringify(['not-a-time', 'x'])).toString('base64url');
+    const res = await http().get(`/v1/me/diagnostics?cursor=${bogus}`).set(alice);
+    expect(res.status).toBe(400);
+    expect(res.body.details).toMatchObject({ field: 'cursor' });
+  });
 });
