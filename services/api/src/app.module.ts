@@ -13,7 +13,8 @@ import { AdminUsersController, AdminUsersService } from './users/admin-users';
 import { AdminOverviewController, OverviewService } from './overview/overview';
 import { AdminMetricsController, MetricsService } from './overview/metrics';
 import { ALERT_FETCH, AlertFetch, AlertService } from './overview/alerts';
-import { AdminDirectoryController, DIRECTORY_FETCH, DirectoryController, DirectoryFetch, DirectoryService } from './directory/directory';
+import { boundedFetch } from './common/bounded-fetch';
+import { AdminDirectoryController, DIRECTORY_FETCH, DirectoryController, DirectoryFetch, DirectoryService, UPSTREAM_MAX_BYTES } from './directory/directory';
 import { AdminAuditController, AuditSearchService } from './audit/audit-search';
 import { AuthGuard, KEY_RESOLVER } from './auth/auth.guard';
 import { ErrorEnvelopeFilter } from './common/error.filter';
@@ -99,8 +100,8 @@ export class AppModule {
         MetricsService,
         AlertService,
         DirectoryService,
-        { provide: DIRECTORY_FETCH, useValue: deps.directoryFetch ?? ((url: string, init: Parameters<DirectoryFetch>[1]) => fetch(url, init)) },
-        { provide: ALERT_FETCH, useValue: deps.alertFetch ?? ((url: string, init: Parameters<AlertFetch>[1]) => fetch(url, init)) },
+        { provide: DIRECTORY_FETCH, useValue: deps.directoryFetch ?? ((url: string, init: Parameters<DirectoryFetch>[1]) => boundedFetch(url, init, UPSTREAM_MAX_BYTES)) },
+        { provide: ALERT_FETCH, useValue: deps.alertFetch ?? ((url: string, init: Parameters<AlertFetch>[1]) => boundedFetch(url, init, 64 * 1024)) },
         JobsService,
         AdminUsersService,
         SupportAccessService,

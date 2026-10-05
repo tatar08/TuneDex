@@ -63,6 +63,9 @@ export class RateLimitInterceptor implements NestInterceptor {
     if (req.path.startsWith('/v1/directory/')) return { bucket: `ip:${addressKey(req.ip)}:directory`, limit: limits.catalogPerMinutePerIp };
     // Deletion progress is public (the account can no longer sign in); tickets are unguessable, but cap guessing anyway.
     if (req.path.startsWith('/v1/account-deletions/')) return { bucket: `ip:${addressKey(req.ip)}:deletion`, limit: limits.catalogPerMinutePerIp };
+    // Store webhooks come from Apple's and Google's servers; checking a signature costs more than this counter,
+    // so a flood from one address is cut off early. Generous, since one store address sends every notification.
+    if (req.path.startsWith('/v1/webhooks/')) return { bucket: `ip:${addressKey(req.ip)}:webhook`, limit: limits.catalogPerMinutePerIp * 10 };
     // Export download links work without a sign-in too.
     if (req.path.startsWith('/v1/export-downloads/')) return { bucket: `ip:${addressKey(req.ip)}:export`, limit: limits.catalogPerMinutePerIp };
     return null;

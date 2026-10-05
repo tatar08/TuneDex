@@ -208,4 +208,13 @@ describe('community radio directory (Radio Browser)', () => {
     expect((await http().get('/v1/admin/directory/blocks')).status).toBe(401);
     expect((await http().post('/v1/admin/directory/blocks/abc/remove').set(as('admin')).send({ reason: 'complaint withdrawn' })).status).toBe(400);
   });
+
+  it('asks Radio Browser once for concurrent identical searches, and a trailing dot does not dodge a host block', async () => {
+    reply = { status: 200, body: [rb(30), rb(31, { url_resolved: 'https://edge.dotted-host.example.com./live.mp3' })] };
+    const [a, b, c] = await Promise.all([1, 2, 3].map(() => http().get('/v1/directory/radio?q=stampede')));
+    expect([a.status, b.status, c.status]).toEqual([200, 200, 200]);
+    expect(calls).toHaveLength(1);
+    await http().post('/v1/admin/directory/blocks').set(as('admin')).send({ kind: 'host', value: 'dotted-host.example.com', reason: 'complaint from rights holder' }).expect(201);
+    expect((await http().get('/v1/directory/radio?q=stampede').expect(200)).body.stations.map((s: { id: string }) => s.id)).toEqual([uuid(30)]);
+  });
 });

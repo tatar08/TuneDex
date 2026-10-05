@@ -51,6 +51,8 @@ export interface SignedConfig {
 
 /** A signed copy is re-signed after this long, so validUntil keeps moving forward. */
 const RESIGN_AFTER_MS = 60 * 60_000;
+/** A publish or rollback reaches every instance's public answer within this. */
+const RELEASES_CACHE_MS = 5_000;
 /** How long an app may accept one signed copy. */
 const SIGNED_COPY_VALID_MS = 24 * 60 * 60_000;
 
@@ -172,6 +174,7 @@ const releaseView = (r: ReleaseRow, viewer: string): ReleaseView => ({
 export class AppConfigService {
   /** Signed documents by release (0 = defaults, per channel); a release never changes, so entries never go stale. */
   private readonly cache = new Map<string, { body: { jws: string } & SignedConfig; etag: string; signedAt: number }>();
+  private readonly releaseRows = new Map<Channel, { at: number; rows: ReleaseRow[] }>();
 
   constructor(
     private readonly db: Database,
@@ -272,6 +275,7 @@ export class AppConfigService {
         requestId: actor.requestId,
       });
     });
+    this.releaseRows.clear();
     return this.view(actor);
   }
 
@@ -305,6 +309,7 @@ export class AppConfigService {
         requestId: actor.requestId,
       });
     });
+    this.releaseRows.clear();
     return this.view(actor);
   }
 
@@ -363,6 +368,7 @@ export class AppConfigService {
         requestId: actor.requestId,
       });
     });
+    this.releaseRows.clear();
     return this.view(actor);
   }
 
@@ -397,7 +403,20 @@ export class AppConfigService {
         requestId: actor.requestId,
       });
     });
+    this.releaseRows.clear();
     return this.view(actor);
+  }
+
+  /**
+   * The newest 50 releases on a channel (releases are few; plenty to find the one that fits), read at most once
+   * every few seconds per instance: every app launch asks for its config, and none of them signs in.
+   */
+  private async recentReleases(channel: Channel): Promise<ReleaseRow[]> {
+    const hit = this.releaseRows.get(channel);
+    if (hit && Date.now() - hit.at < RELEASES_CACHE_MS) return hit.rows;
+    const rows = await this.db.query<ReleaseRow>(`SELECT ${RELEASE_COLUMNS} FROM app_config_releases WHERE environment = $1 ORDER BY release DESC LIMIT 50`, [channel]);
+    this.releaseRows.set(channel, { at: Date.now(), rows });
+    return rows;
   }
 
   /**
@@ -406,8 +425,7 @@ export class AppConfigService {
    * debugging. Apps must act only on the verified JWS.
    */
   async signedCurrent(client: { channel: Channel; platform: Platform | null; build: number | null } = { channel: 'production', platform: null, build: null }): Promise<{ body: { jws: string } & SignedConfig; etag: string }> {
-    // Releases are few; the newest 50 on the channel are plenty to find the one that fits.
-    const rows = await this.db.query<ReleaseRow>(`SELECT ${RELEASE_COLUMNS} FROM app_config_releases WHERE environment = $1 ORDER BY release DESC LIMIT 50`, [client.channel]);
+    const rows = await this.recentReleases(client.channel);
     const row = rows.find((r) => fits(normalizeTargets(r.targets), client.platform, client.build)) ?? null;
     const release = row ? Number(row.release) : 0;
     const key = row ? `r${release}` : `d-${client.channel}`;

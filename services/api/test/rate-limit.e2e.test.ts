@@ -53,6 +53,13 @@ describe('rate limits', () => {
     await http().get('/v1/me/settings').set(carol).expect(200);
   });
 
+  it('caps store webhook calls per address before any signature is checked', async () => {
+    // Stores are not configured here, so each call is a 401; the cap is ten times the catalog's.
+    for (let i = 0; i < 30; i++) expect((await http().post('/v1/webhooks/apple').set('X-Forwarded-For', '203.0.113.20').send({})).status).toBe(401);
+    expect((await http().post('/v1/webhooks/apple').set('X-Forwarded-For', '203.0.113.20').send({})).status).toBe(429);
+    expect((await http().post('/v1/webhooks/apple').set('X-Forwarded-For', '203.0.113.21').send({})).status).toBe(401);
+  });
+
   it('limits the public catalog per client address, behind our proxy', async () => {
     for (let i = 0; i < 3; i++) await http().get('/v1/catalog/radio').set('X-Forwarded-For', '203.0.113.7').expect(200);
     expect((await http().get('/v1/catalog/radio').set('X-Forwarded-For', '203.0.113.7')).status).toBe(429);

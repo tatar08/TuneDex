@@ -81,6 +81,11 @@ for (const [net, prefix] of [
 ] as const)
   blocked.addSubnet(net, prefix, 'ipv6');
 
+// IPv4-compatible (::a.b.c.d), IPv4-mapped in hex form (::ffff:7f00:1) and SIIT-translated addresses. Kept in
+// their own list: Node's BlockList would also match plain IPv4 checks against these IPv6 prefixes.
+const embeddedV4 = new BlockList();
+for (const net of ['::', '::ffff:0:0', '::ffff:0:0:0']) embeddedV4.addSubnet(net, 96, 'ipv6');
+
 /** True for loopback, private, link-local, metadata, CGNAT, documentation, multicast and reserved addresses. */
 export function isBlockedAddress(address: string): boolean {
   const family = isIP(address);
@@ -88,7 +93,7 @@ export function isBlockedAddress(address: string): boolean {
   if (family === 6) {
     const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
     if (mapped) return blocked.check(mapped[1], 'ipv4');
-    return blocked.check(address, 'ipv6');
+    return blocked.check(address, 'ipv6') || embeddedV4.check(address, 'ipv6');
   }
   return true;
 }
@@ -129,7 +134,14 @@ export async function probeStream(raw: string, deps: ProbeDeps): Promise<ProbeRe
       if (!acceptable(url)) return done(hop === 0 ? 'invalid_url' : 'blocked_address');
       let addresses: string[];
       try {
-        addresses = await deps.resolve(url.hostname);
+        // A slow resolver must not hold the probe past its time budget.
+        addresses = await Promise.race([
+          deps.resolve(url.hostname),
+          new Promise<never>((_, reject) => {
+            if (signal.aborted) reject(signal.reason);
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+          }),
+        ]);
       } catch {
         return done(signal.aborted ? 'timeout' : 'dns_failed');
       }
