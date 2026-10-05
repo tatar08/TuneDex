@@ -597,6 +597,15 @@ describe('register and recover (Doc 17)', () => {
     expect(reset.pathname).toMatch(/\/login-actions\/reset-credentials$/);
     expect(reset.searchParams.get('client_id')).toBe(config().oidc.clientId);
   });
+
+  it('opens the provider\'s pages in the language picked before sign-in, Thai by default', async () => {
+    const th = new URL((await bff.login(new Request(`${BASE}/auth/login?register=1`))).headers.get('location')!);
+    expect(th.searchParams.get('ui_locales')).toBe('th');
+    const en = new URL((await bff.login(new Request(`${BASE}/auth/login`, { headers: { cookie: 'td_lang=en' } }))).headers.get('location')!);
+    expect(en.searchParams.get('ui_locales')).toBe('en');
+    const reset = new URL((await bff.recover(new Request(`${BASE}/auth/recover`, { headers: { cookie: 'td_lang=en' } }))).headers.get('location')!);
+    expect(reset.searchParams.get('kc_locale')).toBe('en');
+  });
 });
 
 describe('MFA step-up for staff actions', () => {

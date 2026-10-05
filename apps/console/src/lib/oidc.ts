@@ -64,8 +64,9 @@ export class OidcClient {
   /**
    * With `reauth`, asks the provider to prompt for credentials again even inside a live SSO session (OIDC max_age=0).
    * With `mfa` it also asks for the configured MFA level (acr_values), so the new token passes the API's step-up check.
+   * `locale` (OIDC ui_locales) opens the provider's pages in the language the visitor picked here.
    */
-  async authorizeUrl(p: { state: string; nonce: string; codeVerifier: string; reauth?: boolean; mfa?: boolean; register?: boolean }): Promise<string> {
+  async authorizeUrl(p: { state: string; nonce: string; codeVerifier: string; reauth?: boolean; mfa?: boolean; register?: boolean; locale?: string }): Promise<string> {
     const m = await this.metadata();
     const url = new URL(m.authorization_endpoint);
     url.search = new URLSearchParams({
@@ -81,14 +82,16 @@ export class OidcClient {
       ...(p.mfa && this.config.oidc.mfaAcr ? { acr_values: this.config.oidc.mfaAcr } : {}),
       // OIDC prompt=create: the provider opens its sign-up form (Keycloak handles email verification).
       ...(p.register && !p.reauth && !p.mfa ? { prompt: 'create' } : {}),
+      ...(p.locale ? { ui_locales: p.locale } : {}),
     }).toString();
     return url.toString();
   }
 
   /** Keycloak's "forgot password" page for this client. It never says whether an email has an account. */
-  passwordResetUrl(): string {
+  passwordResetUrl(locale?: string): string {
     const url = new URL(`${this.config.oidc.issuer.replace(/\/$/, '')}/login-actions/reset-credentials`);
     url.searchParams.set('client_id', this.config.oidc.clientId);
+    if (locale) url.searchParams.set('kc_locale', locale);
     return url.toString();
   }
 

@@ -1,0 +1,58 @@
+/* TuneDeck: the staff console's Minimal look (soft backdrop, white card, dark pill buttons) on Keycloak's sign-in pages.
+   Fonts are the system's own: these pages never load anything from Google. */
+:root {
+  --td-bg: #eaf3f8; --td-panel: #ffffff; --td-soft: #f1f5f9; --td-fg: #0f172a; --td-muted: #64748b; --td-line: #e2e8f0;
+  --td-ink: #0f172a; --td-ink-t: #ffffff; --td-accent: #02c39a;
+  --pf-v5-global--FontFamily--text: "Sarabun", "Noto Sans Thai", "Leelawadee UI", "Thonburi", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --pf-v5-global--FontFamily--heading: var(--pf-v5-global--FontFamily--text);
+  --pf-v5-global--primary-color--100: var(--td-ink);
+  --pf-v5-global--primary-color--200: #1e293b;
+  --pf-v5-global--link--Color: var(--td-fg);
+  --pf-v5-global--link--Color--hover: var(--td-accent);
+  --pf-v5-global--BorderRadius--sm: 12px;
+}
+.pf-v5-theme-dark {
+  --td-bg: #0b0f19; --td-panel: #131b2e; --td-soft: #1a2439; --td-fg: #e2e8f0; --td-muted: #94a3b8; --td-line: #1f2a44;
+  --td-ink: #02c39a; --td-ink-t: #04241c;
+  --pf-v5-global--primary-color--200: #01a582;
+}
+html, body, .pf-v5-c-login { background: var(--td-bg) !important; color: var(--td-fg); }
+.pf-v5-c-login { background-image: none !important; }
+
+/* Brand above the card: the TuneDeck mark and name instead of the realm's plain text */
+#kc-header-wrapper, .pf-v5-c-login__header .pf-v5-c-brand, div.kc-logo-text {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  font-size: 22px; font-weight: 800; letter-spacing: -0.01em; color: var(--td-fg); text-transform: none;
+}
+#kc-header-wrapper::before {
+  content: ""; width: 44px; height: 44px; flex: none; background: url("../img/logo.svg") center / contain no-repeat;
+}
+div.kc-logo-text { background-image: none; }
+div.kc-logo-text span { display: inline; }
+
+/* The card */
+.pf-v5-c-login__main {
+  background: var(--td-panel) !important; border-radius: 28px; box-shadow: 0 20px 50px -20px rgba(15, 23, 42, 0.18);
+  overflow: hidden; border: 0;
+}
+.pf-v5-c-login__main-header { padding-top: 32px; }
+.pf-v5-c-login__main-header .pf-v5-c-title, #kc-page-title { font-weight: 800; letter-spacing: -0.02em; color: var(--td-fg); }
+.pf-v5-c-login__main-footer-band { background: var(--td-soft); border-top: 0; }
+
+/* Fields */
+.pf-v5-c-form-control { border-radius: 12px; --pf-v5-c-form-control--before--BorderColor: var(--td-line); --pf-v5-c-form-control--after--BorderColor: transparent; background: var(--td-soft); }
+.pf-v5-c-form-control:focus-within { --pf-v5-c-form-control--after--BorderColor: var(--td-accent); }
+.pf-v5-c-form__label-text { font-weight: 600; }
+
+/* Buttons */
+.pf-v5-c-button.pf-m-primary { background: var(--td-ink); color: var(--td-ink-t); border-radius: 14px; font-weight: 700; padding-block: 12px; }
+.pf-v5-c-button.pf-m-primary:hover { filter: brightness(1.12); }
+.pf-v5-c-button.pf-m-secondary, .pf-v5-c-button.pf-m-link { border-radius: 14px; }
+
+/* Language menu and footer links stay quiet */
+.pf-v5-c-login__main-header-utilities, #kc-locale { color: var(--td-muted); }
+.pf-v5-c-alert { border-radius: 14px; }
+
+@media (max-width: 640px) {
+  .pf-v5-c-login__main { border-radius: 0; box-shadow: none; }
+}

@@ -42,6 +42,8 @@ services:
       # The named volume takes the image's ownership of data/ (Keycloak runs as uid 1000); the realm file sits inside it.
       - kcdata:/opt/keycloak/data
       - ./keycloak:/opt/keycloak/data/import:ro
+      # TuneDeck look for the sign-in, sign-up and MFA pages (loginTheme in the realm file).
+      - ../keycloak/themes/tunedeck:/opt/keycloak/themes/tunedeck:ro
     ports:
       - "127.0.0.1:8080:8080"
     networks:

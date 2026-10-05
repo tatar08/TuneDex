@@ -27,6 +27,7 @@ docker compose up --build
     - Level 2 (`acr` = `mfa`) also asks for a one-time code (TOTP). A staff member without one sets it up on that screen.
     - The API's `STAFF_MFA_ACR` and the console's `OIDC_MFA_ACR` are both `mfa`.
   - A user profile with only username and email (no name fields), registration by email, a 12-character minimum password, and brute-force protection.
+  - The `tunedeck` login theme (`infra/keycloak/themes/tunedeck`, mounted read-only) and Thai/English pages, Thai by default. The console passes the visitor's language (`ui_locales`). On a realm imported before this, set it once: `docker compose exec keycloak /opt/keycloak/bin/kcadm.sh update realms/tunedeck -s loginTheme=tunedeck -s internationalizationEnabled=true -s 'supportedLocales=["th","en"]' -s defaultLocale=th --server http://localhost:8080 --realm master --user admin --password "$KEYCLOAK_ADMIN_PASSWORD"`.
   - The mobile app's client is not in this file: its redirect URI and client type are Codex's to decide.
 - Staff roles: sign in once, then `docker compose exec api node dist/staff/staff-cli.js grant <subject> admin --by <you> --reason "<why>"`. The subject is the Keycloak user id.
 - Postgres listens on 127.0.0.1:5432 (user `tunedeck`, password from `.env`); set `POSTGRES_HOST_PORT` (e.g. 55432) in `.env` when the machine already runs its own Postgres there. Containers still reach it as `postgres:5432`. Console sessions live in memory here because the base URL is localhost.
