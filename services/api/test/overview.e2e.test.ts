@@ -85,4 +85,38 @@ describe('/v1/admin/overview', () => {
     expect(res.body.api.buckets).toHaveLength(24);
     expect(JSON.stringify(res.body)).not.toContain(u.id);
   });
+
+  it('summarises app diagnostics per event with failure classes and builds, as counts only', async () => {
+    const { randomUUID } = await import('node:crypto');
+    const ev = (eventName: string, resultCode: string | null, appBuild = '1.0.0+42') => ({
+      eventId: randomUUID(), eventName, schemaVersion: 1, monotonicMs: 1000, sessionRandomId: 'sess_ab12cd34', durationMs: 900,
+      ...(resultCode ? { resultCode } : {}), networkClass: 'wifi', appBuild, osMajor: 18, deviceClass: 'phone',
+    });
+    const upload = async (sub: string, platform: string, events: object[]) => {
+      const who = await bearer(sub);
+      const device = randomUUID();
+      await http().put(`/v1/me/devices/${device}`).set(who).send({ platform, osMajor: 18, appBuild: '1.0.0+42' }).expect(200);
+      await http().post('/v1/diagnostics/batches').set(who).send({ batchId: randomUUID(), deviceId: device, consent: true, events }).expect(200);
+      return device;
+    };
+    const d1 = await upload('ov-app-1', 'ios', [ev('playback_start_result', null), ev('playback_start_result', 'MEDIA_STALLED'), ev('playback_stall', 'MEDIA_STALLED')]);
+    await upload('ov-app-2', 'android', [ev('playback_start_result', 'NET_TIMEOUT', '1.0.1+43'), ev('playback_start_result', null, '1.0.1+43')]);
+
+    const c = (await http().get('/v1/admin/overview').query({ window: '1h' }).set(await bearer('ov-ops')).expect(200)).body.clients;
+    expect(c).toMatchObject({ reports: 2, devices: 2, events: 5 });
+    expect(c.byEvent).toEqual([
+      { eventName: 'playback_start_result', events: 4, failures: 2, devices: 2 },
+      { eventName: 'playback_stall', events: 1, failures: 1, devices: 1 },
+    ]);
+    expect(c.topFailures).toEqual([
+      { eventName: 'playback_stall', resultCode: 'MEDIA_STALLED', count: 1, devices: 1 },
+      { eventName: 'playback_start_result', resultCode: 'MEDIA_STALLED', count: 1, devices: 1 },
+      { eventName: 'playback_start_result', resultCode: 'NET_TIMEOUT', count: 1, devices: 1 },
+    ]);
+    expect(c.builds).toEqual([
+      { appBuild: '1.0.0+42', platform: 'ios', events: 3, failures: 2 },
+      { appBuild: '1.0.1+43', platform: 'android', events: 2, failures: 1 },
+    ]);
+    expect(JSON.stringify(c)).not.toContain(d1);
+  });
 });

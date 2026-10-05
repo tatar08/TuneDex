@@ -1,35 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PATH_METADATA, METHOD_METADATA } from '@nestjs/common/constants';
-import { RequestMethod } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const yaml: { load: (text: string) => unknown } = require('js-yaml');
-import { AppModule } from '../src/app.module';
-import { testConfig } from './harness';
+import { servedRoutes as routes } from './routes';
 
 type Spec = { paths: Record<string, Record<string, unknown>>; components: Record<string, Record<string, unknown>> };
 
-/** Every route the API serves, as "METHOD /path/{param}", read from the controllers' own decorators. */
-function servedRoutes(): string[] {
-  const mod = AppModule.forRoot({ config: testConfig('postgres://unused/unused'), pool: {} as never, keyResolver: (() => undefined) as never });
-  const out = new Set<string>();
-  for (const controller of mod.controllers ?? []) {
-    const bases = [Reflect.getMetadata(PATH_METADATA, controller) as string | string[]].flat();
-    for (const name of Object.getOwnPropertyNames(controller.prototype)) {
-      const handler = controller.prototype[name];
-      const method = Reflect.getMetadata(METHOD_METADATA, handler) as RequestMethod | undefined;
-      if (method === undefined || typeof handler !== 'function' || Reflect.getMetadata(PATH_METADATA, handler) === undefined) continue;
-      const subs = [Reflect.getMetadata(PATH_METADATA, handler) as string | string[]].flat();
-      for (const base of bases) {
-        for (const sub of subs) {
-          const path = '/' + [base, sub].map((p) => p.replace(/^\/+|\/+$/g, '')).filter(Boolean).join('/');
-          out.add(`${RequestMethod[method]} ${path.replace(/:(\w+)/g, '{$1}')}`);
-        }
-      }
-    }
-  }
-  return [...out].sort();
-}
+const servedRoutes = () => routes().map((r) => `${r.method} ${r.path}`);
 
 const spec = yaml.load(readFileSync(join(__dirname, '..', 'openapi.proposal.yaml'), 'utf8')) as Spec;
 const shape = (route: string) => route.replace(/\{[^}]+\}/g, '{}');

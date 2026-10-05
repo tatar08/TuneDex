@@ -293,6 +293,8 @@ export type IncidentCode =
   | 'api_latency'
   | 'stations_suspect'
   | 'station_checker_stale'
+  | 'station_rights_expiring'
+  | 'backup_stale'
   | 'account_deletion_failed'
   | 'account_deletion_stuck'
   | 'account_deletion_late'
@@ -326,6 +328,15 @@ export interface Overview {
   queues: {
     accountDeletions: { open: number; failed: number; oldestRequestedAt: string | null; deadlineDays: number };
     diagnosticReports: number;
+  };
+  /** Opt-in app diagnostics in the window; a failure is an event with a resultCode. Counts only. */
+  clients: {
+    reports: number;
+    devices: number;
+    events: number;
+    byEvent: { eventName: string; events: number; failures: number; devices: number }[];
+    topFailures: { eventName: string; resultCode: string; count: number; devices: number }[];
+    builds: { appBuild: string; platform: 'ios' | 'android'; events: number; failures: number }[];
   };
   incidents: { code: IncidentCode; severity: 'critical' | 'warning'; count: number; since?: string }[];
 }

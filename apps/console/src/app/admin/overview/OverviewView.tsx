@@ -29,6 +29,8 @@ const INCIDENTS: Record<IncidentCode, { title: string; detail: string; href?: st
   api_latency: { title: 'API ตอบช้า', detail: 'p95 {0} ms เกิน 1 วินาที ใน 10 นาทีล่าสุด', href: '/admin/logs' },
   stations_suspect: { title: 'สถานีน่าสงสัย', detail: '{0} สถานีตรวจไม่ผ่าน 3 ครั้งติด รอแอดมินตรวจ', href: '/admin/stations' },
   station_checker_stale: { title: 'ตัวตรวจสตรีมไม่ได้รัน', detail: 'ไม่มีผลตรวจใหม่นานเกิน 2.5 รอบ' },
+  backup_stale: { title: 'ไม่มี backup ใหม่', detail: 'backup ล่าสุดเมื่อ {0} ชั่วโมงก่อน เกิน 24 ชั่วโมง ตรวจงาน backup.sh' },
+  station_rights_expiring: { title: 'สิทธิ์เผยแพร่ใกล้หมด', detail: '{0} สถานีสิทธิ์จะหมดใน 14 วัน ต้องเพิ่มหลักฐานใหม่ ไม่อย่างนั้นจะหายจากแอป', href: '/admin/stations' },
   no_recent_traffic: { title: 'ไม่มีคำขอเข้ามาเลย', detail: 'ไม่มีคำขอใน 15 นาทีล่าสุด ตัวเลขอาจไม่ใช่สถานะตอนนี้' },
 };
 
@@ -244,6 +246,86 @@ function TopErrors({ o }: { o: Overview }) {
   );
 }
 
+/** Doc 07 event names, as staff read them. */
+const EVENT_LABELS: Record<string, string> = {
+  import_completed: 'นำเข้าสำเร็จ',
+  import_failed: 'นำเข้าไม่สำเร็จ',
+  playback_start_result: 'เริ่มเล่น',
+  playback_stall: 'เสียงสะดุด',
+  playback_recovered: 'เล่นต่อได้',
+  app_error: 'แอปผิดพลาด',
+  purchase_result: 'ซื้อ Pro',
+  carplay_session_result: 'CarPlay / Android Auto',
+};
+
+/** Opt-in app diagnostics: attempts and failures per event, the most common failure classes, the busiest builds. */
+function ClientDiagnostics({ o }: { o: Overview }) {
+  const t = useT();
+  const c = o.clients;
+  if (c.events === 0) return <p className="dim">{t('ยังไม่มีรายงานจากแอปในช่วงนี้ (แอปส่งเฉพาะเมื่อผู้ใช้ยินยอม)')}</p>;
+  const label = (name: string) => (EVENT_LABELS[name] ? t(EVENT_LABELS[name]) : name);
+  return (
+    <div className="ov-clients">
+      <p className="dim">{t('{0} รายงานจาก {1} เครื่อง · {2} เหตุการณ์', num(c.reports), num(c.devices), num(c.events))}</p>
+      <table className="ov-errors">
+        <caption className="sr-only">{t('เหตุการณ์จากแอปและสัดส่วนที่ล้มเหลว')}</caption>
+        <thead>
+          <tr>
+            <th scope="col">{t('เหตุการณ์')}</th>
+            <th scope="col">{t('ครั้ง')}</th>
+            <th scope="col">{t('ล้มเหลว')}</th>
+            <th scope="col">{t('เครื่อง')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {c.byEvent.map((e) => (
+            <tr key={e.eventName}>
+              <td>{label(e.eventName)}</td>
+              <td>{num(e.events)}</td>
+              <td>
+                {num(e.failures)} <span className="dim">({pct(e.events ? e.failures / e.events : null)})</span>
+              </td>
+              <td>{num(e.devices)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {c.topFailures.length > 0 && (
+        <table className="ov-errors">
+          <caption className="sr-only">{t('รหัสปัญหาที่พบบ่อยสุด')}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{t('รหัสปัญหา')}</th>
+              <th scope="col">{t('เหตุการณ์')}</th>
+              <th scope="col">{t('ครั้ง')}</th>
+              <th scope="col">{t('เครื่อง')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {c.topFailures.map((f) => (
+              <tr key={`${f.eventName}${f.resultCode}`}>
+                <td className="mo">{f.resultCode}</td>
+                <td>{label(f.eventName)}</td>
+                <td>{num(f.count)}</td>
+                <td>{num(f.devices)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="dim">
+        {t('รุ่นที่ส่งมากสุด')}:{' '}
+        {c.builds.map((b, i) => (
+          <span key={`${b.appBuild}${b.platform}`}>
+            {i > 0 && ' · '}
+            <span className="mo">{b.appBuild}</span> {b.platform === 'ios' ? 'iOS' : 'Android'} {t('ล้มเหลว {0}/{1}', num(b.failures), num(b.events))}
+          </span>
+        ))}
+      </p>
+    </div>
+  );
+}
+
 function Problem({ status }: { status: number }) {
   const t = useT();
   return (
@@ -287,6 +369,10 @@ export function OverviewView({ overview: o, status, window }: { overview?: Overv
             <Incidents o={o} className="ov-list" />
             <h3>Top 5xx routes</h3>
             <TopErrors o={o} />
+          </div>
+          <div className="pn">
+            <h3>App diagnostics</h3>
+            <ClientDiagnostics o={o} />
           </div>
         </div>
         <Footnote o={o} />
@@ -341,6 +427,10 @@ export function OverviewView({ overview: o, status, window }: { overview?: Overv
           <h4>{t('คำขอ {0} ครั้ง', num(o.api.requests))}</h4>
           <TrafficChart o={o} height={110} />
         </div>
+        <div className="adm-panel">
+          <h4>{t('รายงานจากแอป')}</h4>
+          <ClientDiagnostics o={o} />
+        </div>
         <Footnote o={o} />
       </div>
     );
@@ -378,6 +468,10 @@ export function OverviewView({ overview: o, status, window }: { overview?: Overv
             <h4>{t('เส้นทางที่ตอบ 5xx บ่อยสุด')}</h4>
             <TopErrors o={o} />
           </section>
+          <section className="b-err">
+            <h4>{t('รายงานจากแอป')}</h4>
+            <ClientDiagnostics o={o} />
+          </section>
         </div>
         <Footnote o={o} />
       </div>
@@ -390,6 +484,7 @@ export function OverviewView({ overview: o, status, window }: { overview?: Overv
       { id: 'traffic', title: t('คำขอ API'), sub: t('{0} คำขอ · 5xx {1}', num(o.api.requests), pct(o.api.errorRate)), sev: 'info' },
       { id: 'stations', title: t('สุขภาพสถานี'), sub: k[3].sub, sev: 'info' },
       { id: 'queues', title: t('คิวงานเบื้องหลัง'), sub: k[4].sub, sev: 'info' },
+      { id: 'clients', title: t('รายงานจากแอป'), sub: t('{0} เหตุการณ์ · ล้มเหลว {1}', num(o.clients.events), num(o.clients.byEvent.reduce((n, e) => n + e.failures, 0))), sev: 'info' },
     ];
     const cur = items[Math.min(sel, items.length - 1)];
     return (
@@ -442,6 +537,8 @@ export function OverviewView({ overview: o, status, window }: { overview?: Overv
                   <dd className="mo">{o.queues.diagnosticReports}</dd>
                 </div>
               </dl>
+            ) : cur.id === 'clients' ? (
+              <ClientDiagnostics o={o} />
             ) : (
               <>
                 <TrafficChart o={o} />
@@ -488,6 +585,15 @@ export function OverviewView({ overview: o, status, window }: { overview?: Overv
           </span>
         </div>
         <Incidents o={o} className="fv-tx ov-list" />
+      </section>
+      <section className="fv-card" aria-labelledby="fv-ov-clients">
+        <div className="fv-card-head">
+          <div>
+            <h2 id="fv-ov-clients">{t('รายงานจากแอป')}</h2>
+            <small>{t('{0} ล่าสุด · เฉพาะผู้ที่ยินยอมส่ง', winLabel(t, o.window.id))}</small>
+          </div>
+        </div>
+        <ClientDiagnostics o={o} />
       </section>
       <Footnote o={o} />
     </div>

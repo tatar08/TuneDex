@@ -24,6 +24,9 @@ export const ERROR_RATE_ALERT = 0.05;
 const STALE_AFTER_MS = 15 * 60_000;
 /** Warn before the 30-day deletion deadline, not on it. */
 const DELETION_WARN_DAYS = 25;
+/** Diagnostic events of reports received in the window, with the reporting device's platform. */
+const CLIENT_EVENTS = `FROM diagnostic_events e JOIN diagnostic_reports r ON r.id = e.report_id
+  JOIN devices d ON d.user_id = r.user_id AND d.id = r.device_id WHERE r.received_at >= $1 AND r.received_at < $2`;
 
 export type IncidentCode =
   | 'api_error_rate'
@@ -36,6 +39,8 @@ export type IncidentCode =
   | 'account_export_stuck'
   | 'idp_session_end_stuck'
   | 'job_dead_letter'
+  | 'station_rights_expiring'
+  | 'backup_stale'
   | 'no_recent_traffic';
 
 export interface Incident {
@@ -73,6 +78,19 @@ export interface Overview {
     accountDeletions: { open: number; failed: number; oldestRequestedAt: string | null; deadlineDays: number };
     diagnosticReports: number;
   };
+  /**
+   * Opt-in app diagnostics received in the window (Doc 07 numerator/denominator): per event the attempts and
+   * how many carried a failure class (any resultCode), the most common failure classes, and the busiest builds.
+   * Counts and distinct-device counts only.
+   */
+  clients: {
+    reports: number;
+    devices: number;
+    events: number;
+    byEvent: { eventName: string; events: number; failures: number; devices: number }[];
+    topFailures: { eventName: string; resultCode: string; count: number; devices: number }[];
+    builds: { appBuild: string; platform: string; events: number; failures: number }[];
+  };
   incidents: Incident[];
 }
 
@@ -102,7 +120,7 @@ export class OverviewService {
     const range = [from.toISOString(), now.toISOString()];
     const requests = `FROM operational_logs WHERE event_code = 'HTTP_REQUEST' AND logged_at >= $1 AND logged_at < $2`;
 
-    const [[totals], buckets, topErrors, [last], stationRows, [deletions], [diag], [lastCheck], openAlerts] = await Promise.all([
+    const [[totals], buckets, topErrors, [last], stationRows, [deletions], [diag], [lastCheck], openAlerts, byEvent, topFailures, builds] = await Promise.all([
       this.db.query<{ n: string; s5: string; s4: string; p50: number | null; p95: number | null }>(
         `SELECT count(*) AS n, count(*) FILTER (WHERE status >= 500) AS s5, count(*) FILTER (WHERE status >= 400 AND status < 500) AS s4,
                 percentile_disc(0.5) WITHIN GROUP (ORDER BY duration_ms) AS p50,
@@ -127,9 +145,28 @@ export class OverviewService {
         `SELECT count(*) AS open, count(*) FILTER (WHERE status IN ('failed', 'dead_letter')) AS failed, min(requested_at) AS oldest
            FROM account_deletions WHERE status <> 'completed'`,
       ),
-      this.db.query<{ n: string }>(`SELECT count(*) AS n FROM diagnostic_reports WHERE received_at >= $1 AND received_at < $2`, range),
+      this.db.query<{ n: string; devices: string; events: string }>(
+        `SELECT count(*) AS n, count(DISTINCT (user_id, device_id)) AS devices, coalesce(sum(event_count), 0) AS events
+           FROM diagnostic_reports WHERE received_at >= $1 AND received_at < $2`,
+        range,
+      ),
       this.db.query<{ at: Date | null }>(`SELECT max(checked_at) AS at FROM station_health WHERE target = 'published'`),
       this.alerts.open(),
+      this.db.query<{ event_name: string; n: string; failures: string; devices: string }>(
+        `SELECT e.event_name, count(*) AS n, count(*) FILTER (WHERE e.result_code IS NOT NULL) AS failures, count(DISTINCT (r.user_id, r.device_id)) AS devices
+           ${CLIENT_EVENTS} GROUP BY e.event_name ORDER BY n DESC, e.event_name`,
+        range,
+      ),
+      this.db.query<{ event_name: string; result_code: string; n: string; devices: string }>(
+        `SELECT e.event_name, e.result_code, count(*) AS n, count(DISTINCT (r.user_id, r.device_id)) AS devices
+           ${CLIENT_EVENTS} AND e.result_code IS NOT NULL GROUP BY e.event_name, e.result_code ORDER BY n DESC, e.event_name, e.result_code LIMIT 10`,
+        range,
+      ),
+      this.db.query<{ app_build: string; platform: string; n: string; failures: string }>(
+        `SELECT e.app_build, d.platform, count(*) AS n, count(*) FILTER (WHERE e.result_code IS NOT NULL) AS failures
+           ${CLIENT_EVENTS} GROUP BY e.app_build, d.platform ORDER BY n DESC, e.app_build, d.platform LIMIT 5`,
+        range,
+      ),
     ]);
 
     const live = stationRows.filter((s) => !s.disabled).map((s) => s.id);
@@ -187,6 +224,14 @@ export class OverviewService {
       queues: {
         accountDeletions: { open: Number(deletions.open), failed: Number(deletions.failed), oldestRequestedAt: oldest?.toISOString() ?? null, deadlineDays: DELETION_DEADLINE_DAYS },
         diagnosticReports: Number(diag.n),
+      },
+      clients: {
+        reports: Number(diag.n),
+        devices: Number(diag.devices),
+        events: Number(diag.events),
+        byEvent: byEvent.map((r) => ({ eventName: r.event_name, events: Number(r.n), failures: Number(r.failures), devices: Number(r.devices) })),
+        topFailures: topFailures.map((r) => ({ eventName: r.event_name, resultCode: r.result_code, count: Number(r.n), devices: Number(r.devices) })),
+        builds: builds.map((r) => ({ appBuild: r.app_build, platform: r.platform, events: Number(r.n), failures: Number(r.failures) })),
       },
       incidents,
     };

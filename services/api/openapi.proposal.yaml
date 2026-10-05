@@ -632,7 +632,7 @@ paths:
     post:
       summary: App Store Server Notifications V2 (called by Apple)
       description: |
-        No user token: `signedPayload` (and the `signedTransactionInfo` inside it) is verified like a transaction against the pinned Apple root, and the notification's bundle id must match. Redeliveries are recognized by `notificationUUID` and answered 200 without work. Only `REFUND` and `REVOKE` change anything (the purchase is revoked, audited `purchase.revoked` by `system:apple`); unknown purchases are ignored. Not rate limited. Body limit 64 KiB.
+        No user token: `signedPayload` (and the `signedTransactionInfo` inside it) is verified like a transaction against the pinned Apple root, and the notification's bundle id must match. Redeliveries are recognized by `notificationUUID` and answered 200 without work. `REFUND` and `REVOKE` revoke the purchase (audited `purchase.revoked` by `system:apple`); `REFUND_REVERSED` whose transaction carries no `revocationDate` makes a revoked purchase verified again (audited `purchase.restored`). Other types and unknown purchases change nothing. A notification whose `data.environment` is not in `APPLE_ENVIRONMENTS` is answered 200 and changes nothing. Handled ids are kept 30 days. Not rate limited. Body limit 64 KiB.
       security: []
       requestBody:
         required: true
@@ -640,14 +640,13 @@ paths:
       responses:
         '200': { description: 'Accepted (also for redeliveries and notification types that change nothing)', content: { application/json: { schema: { $ref: '#/components/schemas/BillingWebhookAck' } } } }
         '400': { description: 'VALIDATION_FAILED (signedPayload must_be_jws, malformed_body), or PURCHASE_INVALID wrong_app (bundle id mismatch or no notificationUUID)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '401': { description: 'AUTH_REQUIRED: the signed payload or transaction did not verify', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: 'AUTH_REQUIRED: the signed payload or transaction did not verify, or Apple billing is not configured (answered the same way so a caller cannot tell)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '413': { description: 'PAYLOAD_TOO_LARGE, body over 64 KiB', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '503': { description: 'DEPENDENCY_UNAVAILABLE: Apple billing is not configured', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/webhooks/google:
     post:
       summary: Play real-time developer notifications via Pub/Sub push (called by Google)
       description: |
-        No user token. `Authorization: Bearer <Google OIDC token>` that Pub/Sub attaches: RS256, issuer accounts.google.com, audience `GOOGLE_PUBSUB_PUSH_AUDIENCE`, `email` = `GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT` with `email_verified: true`. `message.data` is the base64 notification JSON and its `packageName` must match. Redeliveries are recognized by `message.messageId` and answered 204 without work.
+        No user token. `Authorization: Bearer <Google OIDC token>` that Pub/Sub attaches: RS256, issuer accounts.google.com, audience `GOOGLE_PUBSUB_PUSH_AUDIENCE`, `email` = `GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT` with `email_verified: true`. `message.data` is the base64 notification JSON and its `packageName` must match. Redeliveries are recognized by `message.messageId` (kept 30 days) and answered 204 without work.
         A voided purchase is revoked; a pending purchase that completes (oneTimeProductNotification type 1) is re-checked with the Play API, verified and acknowledged; a pending one cancelled (type 2) is revoked. Anything else (test notifications included) is accepted without change. Not rate limited. Body limit 64 KiB.
       security: []
       parameters:
@@ -658,9 +657,9 @@ paths:
       responses:
         '204': { description: Accepted (also for redeliveries and notifications that change nothing) }
         '400': { description: 'VALIDATION_FAILED (message malformed, message.data malformed, malformed_body), or PURCHASE_INVALID wrong_app (packageName mismatch)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '401': { description: 'AUTH_REQUIRED: missing or invalid Pub/Sub token (also when Google''s keys cannot be fetched)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: 'AUTH_REQUIRED: missing or invalid Pub/Sub token (also when Google''s keys cannot be fetched, or Google billing is not configured)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '413': { description: 'PAYLOAD_TOO_LARGE, body over 64 KiB', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '503': { description: 'DEPENDENCY_UNAVAILABLE: Google billing is not configured (checked before the token), or the Play API could not be reached while completing a pending purchase', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { description: 'DEPENDENCY_UNAVAILABLE: the Play API could not be reached while completing a pending purchase (the notification is retried by redelivery)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/config:
     get:
       summary: Signed remote config for the apps (no sign-in)
@@ -2073,7 +2072,7 @@ components:
         retentionDays: { type: integer, const: 90 }
     AdminOverview:
       type: object
-      required: [window, generatedAt, api, stations, queues, incidents]
+      required: [window, generatedAt, api, stations, queues, clients, incidents]
       properties:
         window:
           type: object
@@ -2141,13 +2140,43 @@ components:
                 oldestRequestedAt: { type: [string, 'null'], format: date-time }
                 deadlineDays: { type: integer, example: 30 }
             diagnosticReports: { type: integer, description: Reports received in the window }
+        clients:
+          type: object
+          description: 'Opt-in app diagnostics received in the window (Doc 07 numerator/denominator). A failure is an event with any resultCode. Counts and distinct-device counts only.'
+          required: [reports, devices, events, byEvent, topFailures, builds]
+          properties:
+            reports: { type: integer }
+            devices: { type: integer, description: Distinct reporting devices }
+            events: { type: integer }
+            byEvent:
+              type: array
+              description: Every event name seen, most frequent first
+              items:
+                type: object
+                required: [eventName, events, failures, devices]
+                properties: { eventName: { type: string }, events: { type: integer }, failures: { type: integer }, devices: { type: integer } }
+            topFailures:
+              type: array
+              maxItems: 10
+              items:
+                type: object
+                required: [eventName, resultCode, count, devices]
+                properties: { eventName: { type: string }, resultCode: { type: string }, count: { type: integer }, devices: { type: integer } }
+            builds:
+              type: array
+              maxItems: 5
+              description: Busiest app builds by event count, per platform
+              items:
+                type: object
+                required: [appBuild, platform, events, failures]
+                properties: { appBuild: { type: string }, platform: { type: string, enum: [ios, android] }, events: { type: integer }, failures: { type: integer } }
         incidents:
           type: array
           items:
             type: object
             required: [code, severity, count]
             properties:
-              code: { type: string, enum: [api_error_rate, api_latency, stations_suspect, station_checker_stale, account_deletion_failed, account_deletion_stuck, account_deletion_late, account_export_stuck, idp_session_end_stuck, job_dead_letter, no_recent_traffic] }
+              code: { type: string, enum: [api_error_rate, api_latency, stations_suspect, station_checker_stale, account_deletion_failed, account_deletion_stuck, account_deletion_late, account_export_stuck, idp_session_end_stuck, job_dead_letter, station_rights_expiring, backup_stale, no_recent_traffic] }
               severity: { type: string, enum: [critical, warning] }
               count: { type: integer, description: 'Affected things (stations, requests, deletions; p95 ms for api_latency); meaning depends on code' }
               since: { type: string, format: date-time, description: Present when the incident is an open alert }
