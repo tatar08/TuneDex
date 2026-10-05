@@ -632,7 +632,7 @@ paths:
     post:
       summary: App Store Server Notifications V2 (called by Apple)
       description: |
-        No user token: `signedPayload` (and the `signedTransactionInfo` inside it) is verified like a transaction against the pinned Apple root, and the notification's bundle id must match. Redeliveries are recognized by `notificationUUID` and answered 200 without work. Only `REFUND` and `REVOKE` change anything (the purchase is revoked, audited `purchase.revoked` by `system:apple`); unknown purchases are ignored. A notification whose `data.environment` is not in `APPLE_ENVIRONMENTS` is answered 200 and changes nothing. Handled ids are kept 30 days. Not rate limited. Body limit 64 KiB.
+        No user token: `signedPayload` (and the `signedTransactionInfo` inside it) is verified like a transaction against the pinned Apple root, and the notification's bundle id must match. Redeliveries are recognized by `notificationUUID` and answered 200 without work. `REFUND` and `REVOKE` revoke the purchase (audited `purchase.revoked` by `system:apple`); `REFUND_REVERSED` whose transaction carries no `revocationDate` makes a revoked purchase verified again (audited `purchase.restored`). Other types and unknown purchases change nothing. A notification whose `data.environment` is not in `APPLE_ENVIRONMENTS` is answered 200 and changes nothing. Handled ids are kept 30 days. Not rate limited. Body limit 64 KiB.
       security: []
       requestBody:
         required: true

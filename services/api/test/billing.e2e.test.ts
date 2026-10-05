@@ -136,7 +136,7 @@ describe('Pro purchase verification (/v1/billing, /v1/webhooks)', () => {
     expect((await t.pool.query(`SELECT 1 FROM purchases WHERE user_id = $1`, [userId.other])).rows).toEqual([]);
   });
 
-  it('revokes on an App Store refund notification, once, and a later verify cannot undo it', async () => {
+  it('revokes on an App Store refund notification, once, a later verify cannot undo it, and a reversed refund gives Pro back', async () => {
     const notification = async (type: string, uuid: string, chain = apple) =>
       http().post('/v1/webhooks/apple').send({ signedPayload: await sign({ notificationType: type, notificationUUID: uuid, data: { bundleId: 'app.tunedeck', environment: 'Production', signedTransactionInfo: await sign(tx()) } }, chain) });
     expect((await notification('REFUND', randomUUID(), rogue)).status).toBe(401);
@@ -147,6 +147,16 @@ describe('Pro purchase verification (/v1/billing, /v1/webhooks)', () => {
     expect((await verifyApple('buyer', await sign(tx({ appAccountToken: userId.buyer })))).body.state).toBe('revoked');
     const revoked = await t.pool.query(`SELECT actor, changes FROM audit_events WHERE action = 'purchase.revoked'`);
     expect(revoked.rows).toEqual([{ actor: 'system:apple', changes: { store: 'apple', productId: 'tunedeck.pro.lifetime', reason: 'refund' } }]);
+
+    // Apple reverses the refund: Pro comes back, audited; a reversal whose transaction is still revoked changes nothing.
+    const reversal = async (uuid: string, t2: object) =>
+      http().post('/v1/webhooks/apple').send({ signedPayload: await sign({ notificationType: 'REFUND_REVERSED', notificationUUID: uuid, data: { bundleId: 'app.tunedeck', environment: 'Production', signedTransactionInfo: await sign(t2) } }) });
+    expect((await reversal(randomUUID(), tx({ revocationDate: 1790000500000 }))).status).toBe(200);
+    expect((await http().get('/v1/me/entitlements').set(await bearer('buyer'))).body.pro.apple).toBe('revoked');
+    expect((await reversal(randomUUID(), tx())).status).toBe(200);
+    expect((await http().get('/v1/me/entitlements').set(await bearer('buyer'))).body.pro.apple).toBe('verified');
+    const restored = await t.pool.query(`SELECT actor, changes FROM audit_events WHERE action = 'purchase.restored'`);
+    expect(restored.rows).toEqual([{ actor: 'system:apple', changes: { store: 'apple', productId: 'tunedeck.pro.lifetime', reason: 'refund_reversed' } }]);
   });
 
   it('verifies a Google purchase with the Play API, acknowledges it after storing, and handles pending and voided purchases', async () => {

@@ -291,7 +291,24 @@ export class BillingService implements OnApplicationBootstrap, OnApplicationShut
     }
   }
 
-  /** App Store Server Notifications V2. Only REFUND and REVOKE change anything here. */
+  /**
+   * Undoes a refund the store reversed (Tar chose 2026-10-05: the customer is paying again, so Pro comes back
+   * without them asking). Only a revoked purchase moves, and only while the store's own transaction shows no revocation.
+   */
+  private async restore(store: Store, digest: string, reason: string): Promise<boolean> {
+    return this.db.transaction(async (query) => {
+      const [row] = await query<Row>(
+        `UPDATE purchases SET state = 'verified', revoked_at = NULL, verified_at = coalesce(verified_at, now()), checked_at = now()
+          WHERE store = $1 AND external_digest = $2 AND state = 'revoked' RETURNING *`,
+        [store, digest],
+      );
+      if (!row) return false;
+      await writeAudit(query, { actor: `system:${store}`, action: 'purchase.restored', targetType: 'purchase', targetId: row.id, changes: { store, productId: row.product_id, reason } });
+      return true;
+    });
+  }
+
+  /** App Store Server Notifications V2. REFUND and REVOKE revoke the purchase; REFUND_REVERSED gives it back. */
   async appleNotification(body: unknown): Promise<void> {
     const cfg = this.config.billing.apple;
     if (!cfg) throw this.notConfigured('apple');
@@ -315,6 +332,8 @@ export class BillingService implements OnApplicationBootstrap, OnApplicationShut
     await this.once('apple', n.notificationUUID, n.notificationType, async () => {
       if ((n.notificationType === 'REFUND' || n.notificationType === 'REVOKE') && tx?.originalTransactionId) {
         await this.revoke('apple', digestOf('apple', tx.originalTransactionId), n.notificationType.toLowerCase());
+      } else if (n.notificationType === 'REFUND_REVERSED' && tx?.originalTransactionId && !tx.revocationDate) {
+        await this.restore('apple', digestOf('apple', tx.originalTransactionId), 'refund_reversed');
       }
     });
   }
