@@ -190,11 +190,12 @@ export function PrivacyView({
         {exportJob?.status === 'ready' ? (
           <>
             <p className="status" data-testid="export-ready">{t.exportReady(fmt.format(new Date(exportJob.expiresAt)))}</p>
-            <p>
-              <a className="btn" href={`/bff/account/exports/${exportJob.id}/file`} download>
+            <form method="post" action={`/bff/account/exports/${exportJob.id}/file`}>
+              <input type="hidden" name="csrf" value={csrfToken} />
+              <button type="submit" className="btn" data-testid="export-download">
                 {t.exportDownload}
-              </a>
-            </p>
+              </button>
+            </form>
           </>
         ) : exportJob?.status === 'pending' || exportStarting ? (
           <p className="status" aria-live="polite">

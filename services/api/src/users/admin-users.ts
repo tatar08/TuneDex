@@ -1,4 +1,5 @@
 import { Body, Controller, HttpCode, HttpStatus, Injectable, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { allLimited } from '../common/concurrency';
 import type { Request, Response } from 'express';
 import { writeAudit } from '../audit/audit';
 import { parseExportReason } from '../audit/audit-search';
@@ -77,28 +78,28 @@ export class AdminUsersService {
     });
     if (!userId) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
 
-    const [[u], [prefs], devices, [diag], [deletion], [access]] = await Promise.all([
-      this.db.query<{ id: string; email: string | null; email_verified: boolean; status: UserSupportView['user']['status']; created_at: Date; deleted_at: Date | null }>(
+    const [[u], [prefs], devices, [diag], [deletion], [access]] = await allLimited([
+      () => this.db.query<{ id: string; email: string | null; email_verified: boolean; status: UserSupportView['user']['status']; created_at: Date; deleted_at: Date | null }>(
         'SELECT id, email, email_verified, status, created_at, deleted_at FROM users WHERE id = $1',
         [userId],
       ),
-      this.db.query<{ revision: string; updated_at: Date }>('SELECT revision, updated_at FROM account_preferences WHERE owner_id = $1', [userId]),
-      this.db.query<{ id: string; platform: 'ios' | 'android'; os_major: number; app_build: string; applied_settings_revision: string; created_at: Date; last_seen_at: Date; revoked_at: Date | null }>(
+      () => this.db.query<{ revision: string; updated_at: Date }>('SELECT revision, updated_at FROM account_preferences WHERE owner_id = $1', [userId]),
+      () => this.db.query<{ id: string; platform: 'ios' | 'android'; os_major: number; app_build: string; applied_settings_revision: string; created_at: Date; last_seen_at: Date; revoked_at: Date | null }>(
         `SELECT id, platform, os_major, app_build, applied_settings_revision, created_at, last_seen_at, revoked_at
            FROM devices WHERE user_id = $1 ORDER BY revoked_at IS NOT NULL, last_seen_at DESC`,
         [userId],
       ),
-      this.db.query<{ n: string }>(`SELECT count(*) AS n FROM diagnostic_reports WHERE user_id = $1 AND received_at > now() - make_interval(days => $2)`, [userId, DIAGNOSTICS_DAYS]),
-      this.db.query<{ status: 'pending' | 'failed' | 'dead_letter' | 'completed'; requested_at: Date }>(
+      () => this.db.query<{ n: string }>(`SELECT count(*) AS n FROM diagnostic_reports WHERE user_id = $1 AND received_at > now() - make_interval(days => $2)`, [userId, DIAGNOSTICS_DAYS]),
+      () => this.db.query<{ status: 'pending' | 'failed' | 'dead_letter' | 'completed'; requested_at: Date }>(
         'SELECT status, requested_at FROM account_deletions WHERE user_id = $1 ORDER BY requested_at DESC LIMIT 1',
         [userId],
       ),
-      this.db.query<{ id: string; expires_at: Date }>(
+      () => this.db.query<{ id: string; expires_at: Date }>(
         `SELECT id, expires_at FROM support_access_grants
           WHERE user_id = $1 AND staff_user_id = $2 AND revoked_at IS NULL AND expires_at > now() ORDER BY expires_at DESC LIMIT 1`,
         [userId, actor.userId],
       ),
-    ]);
+    ], 4);
     const revision = Number(prefs?.revision ?? 0);
     return {
       matchedBy,

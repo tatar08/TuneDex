@@ -1,4 +1,5 @@
 import { Inject, Injectable, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
+import { allLimited } from '../common/concurrency';
 import type { Pool } from 'pg';
 import { StructuredLogger } from '../common/logger';
 import { APP_CONFIG, AppConfig } from '../config';
@@ -123,32 +124,32 @@ export class AlertService implements OnApplicationBootstrap, OnApplicationShutdo
     const at = now.toISOString();
     const req = `FROM operational_logs WHERE event_code = 'HTTP_REQUEST' AND logged_at >= $1 AND logged_at < $2`;
     const since = (ms: number) => new Date(now.getTime() - ms).toISOString();
-    const [[errors], [latency], [deletions], queues, [lastCheck], [live], [expiring], [backup]] = await Promise.all([
-      this.db.query<{ n: string; s5: string }>(`SELECT count(*) AS n, count(*) FILTER (WHERE status >= 500) AS s5 ${req}`, [since(RULES.errorRate.windowMs), at]),
-      this.db.query<{ n: string; p95: number | null }>(`SELECT count(*) AS n, percentile_disc(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95 ${req}`, [
+    const [[errors], [latency], [deletions], queues, [lastCheck], [live], [expiring], [backup]] = await allLimited([
+      () => this.db.query<{ n: string; s5: string }>(`SELECT count(*) AS n, count(*) FILTER (WHERE status >= 500) AS s5 ${req}`, [since(RULES.errorRate.windowMs), at]),
+      () => this.db.query<{ n: string; p95: number | null }>(`SELECT count(*) AS n, percentile_disc(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95 ${req}`, [
         since(RULES.latency.windowMs),
         at,
       ]),
       // Failed covers retrying and dead-lettered requests: both still have to finish within 30 days.
-      this.db.query<{ failed: string; late: string }>(
+      () => this.db.query<{ failed: string; late: string }>(
         `SELECT count(*) FILTER (WHERE status IN ('failed', 'dead_letter')) AS failed, count(*) FILTER (WHERE requested_at < $1) AS late
            FROM account_deletions WHERE status <> 'completed'`,
         [since(RULES.deletionLateDays * 86_400_000)],
       ),
-      this.db.query<{ kind: JobKind; dead: string; stuck: string }>(
+      () => this.db.query<{ kind: JobKind; dead: string; stuck: string }>(
         `${jobsCte(this.config.idpAdmin !== null)}
          SELECT kind, count(*) FILTER (WHERE state = 'dead_letter') AS dead, count(*) FILTER (WHERE due < $1) AS stuck FROM jobs GROUP BY kind`,
         [since(RULES.queueStuckMs)],
       ),
-      this.db.query<{ at: Date | null }>(`SELECT max(checked_at) AS at FROM station_health WHERE target = 'published'`),
-      this.db.query<{ n: string }>(`SELECT count(*) AS n FROM radio_stations WHERE published IS NOT NULL AND disabled_at IS NULL`),
-      this.db.query<{ n: string }>(
+      () => this.db.query<{ at: Date | null }>(`SELECT max(checked_at) AS at FROM station_health WHERE target = 'published'`),
+      () => this.db.query<{ n: string }>(`SELECT count(*) AS n FROM radio_stations WHERE published IS NOT NULL AND disabled_at IS NULL`),
+      () => this.db.query<{ n: string }>(
         `SELECT count(*) AS n FROM radio_stations
           WHERE published IS NOT NULL AND disabled_at IS NULL AND rights_expires_at > $1 AND rights_expires_at <= $1::timestamptz + make_interval(days => $2)`,
         [at, RULES.rightsExpiringDays],
       ),
-      this.db.query<{ at: Date | null }>(`SELECT max(finished_at) AS at FROM backup_runs`),
-    ]);
+      () => this.db.query<{ at: Date | null }>(`SELECT max(finished_at) AS at FROM backup_runs`),
+    ], 4);
 
     const n = Number(errors.n);
     const s5 = Number(errors.s5);

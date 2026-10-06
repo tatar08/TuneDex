@@ -1,4 +1,5 @@
 import { HttpStatus } from '@nestjs/common';
+import { UNSAFE_TEXT } from '../common/text-safety';
 import { ApiError } from '../common/api-error';
 
 /**
@@ -94,7 +95,7 @@ export function parseRelease(body: unknown): { reason: string; validDays: number
   const b = isObject(body) ? body : {};
   onlyKeys('', b, ['reason', 'validDays']);
   const reason = typeof b.reason === 'string' ? b.reason.normalize('NFC').trim() : '';
-  if (reason.length < 10 || reason.length > 500 || /[\u0000-\u001f\u007f-\u009f]/.test(reason)) throw invalid('reason', 'length');
+  if (reason.length < 10 || reason.length > 500 || UNSAFE_TEXT.test(reason)) throw invalid('reason', 'length');
   const validDays = b.validDays === undefined ? VALID_DAYS.default : b.validDays;
   if (!Number.isInteger(validDays) || (validDays as number) < VALID_DAYS.min || (validDays as number) > VALID_DAYS.max) {
     throw invalid('validDays', 'out_of_range');

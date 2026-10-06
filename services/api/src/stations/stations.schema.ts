@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { UNSAFE_TEXT } from '../common/text-safety';
 import { HttpStatus } from '@nestjs/common';
 import { ApiError } from '../common/api-error';
 
@@ -30,9 +31,7 @@ export function parseStationId(id: string, field = 'stationId'): string {
   return id.toLowerCase();
 }
 
-// Control characters and bidi overrides never belong in a display name.
-const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/;
-
+// Control characters, zero-width and bidi marks never belong in a display name (UNSAFE_TEXT).
 export function text(field: string, v: unknown, max: number): string {
   if (typeof v !== 'string') throw invalid(field, 'must_be_string');
   const s = v.normalize('NFC').trim();

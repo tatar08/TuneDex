@@ -121,7 +121,8 @@ function decodeCursor(cursor: unknown): number | null {
 
 export function parsePull(q: Record<string, unknown>): { cursor: number | null; limit: number; deviceId: string | null } {
   for (const k of Object.keys(q)) if (!['cursor', 'limit', 'deviceId'].includes(k)) throw invalid(k, 'unknown_field');
-  const limit = q.limit === undefined ? PULL_DEFAULT : Number(q.limit);
+  // Plain decimal digits only: Number() alone would also take '1e1', '0x10' and ' 5'.
+  const limit = q.limit === undefined ? PULL_DEFAULT : typeof q.limit === 'string' && /^[0-9]{1,3}$/.test(q.limit) ? Number(q.limit) : NaN;
   if (!Number.isInteger(limit) || limit < 1 || limit > PULL_MAX) throw invalid('limit', 'out_of_range');
   return { cursor: decodeCursor(q.cursor), limit, deviceId: q.deviceId === undefined ? null : uuid(q.deviceId, 'deviceId') };
 }

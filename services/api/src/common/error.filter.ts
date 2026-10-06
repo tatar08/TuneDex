@@ -1,6 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { ApiError, ErrorCode, MESSAGE_KEYS } from './api-error';
+import { ApiError, DependencyUnavailableError, ErrorCode, MESSAGE_KEYS } from './api-error';
 import { StructuredLogger } from './logger';
 
 @Catch()
@@ -20,6 +20,17 @@ export class ErrorEnvelopeFilter implements ExceptionFilter {
         traceId: req.traceId,
         errorName: err?.name,
         errorCode: typeof err?.code === 'string' ? err.code : undefined,
+      });
+    }
+    if (exception instanceof DependencyUnavailableError && exception.reason === 'query_timeout') {
+      // A slow query, not an outage: name the route so it can be found and fixed.
+      this.logger.log('WARN', {
+        eventCode: 'DB_QUERY_TIMEOUT',
+        requestId: req.requestId,
+        traceId: req.traceId,
+        method: req.method,
+        route: req.route?.path ? `${req.baseUrl}${req.route.path}` : 'unmatched',
+        errorCode: '57014',
       });
     }
     // Any answer that tells the client how long to wait also says it in the standard header.

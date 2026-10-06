@@ -486,6 +486,30 @@ const REAUTH_SKEW_SECONDS = 30;
 const REFRESH_SKEW_MS = 30_000;
 const MAX_BODY_BYTES = 16 * 1024;
 
+/**
+ * Reads a request body as text, stopping as soon as it passes `max` bytes (a declared Content-Length over the
+ * limit is refused before reading anything). Null means too large, so a huge body is never held in memory.
+ */
+export async function readBodyCapped(req: Request, max = MAX_BODY_BYTES): Promise<string | null> {
+  const declared = Number(req.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > max) return null;
+  if (!req.body) return '';
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 export function createBff(deps: BffDeps) {
   const { config, oidc, store } = deps;
   const fetchImpl = deps.fetchImpl ?? fetch;
@@ -537,10 +561,30 @@ export function createBff(deps: BffDeps) {
     return session ? { id, session } : null;
   }
 
+  /**
+   * Keycloak rotates refresh tokens and accepts each one once, so two requests refreshing the same session at
+   * the same moment would sign the user out. Refreshes are shared per session within this instance, and a
+   * refresh another instance already made is picked up from the shared session store.
+   */
+  const refreshing = new Map<string, Promise<Session['tokens'] | null>>();
+
   /** Returns a usable access token, refreshing it near expiry; null means the session has ended. */
   async function accessToken(ctx: SessionContext, force = false): Promise<string | null> {
     const { tokens } = ctx.session;
     if (!force && tokens.expiresAt - REFRESH_SKEW_MS > Date.now()) return tokens.accessToken;
+    let flight = refreshing.get(ctx.id);
+    if (!flight) {
+      flight = refresh(ctx).finally(() => refreshing.delete(ctx.id));
+      refreshing.set(ctx.id, flight);
+    }
+    const fresh = await flight;
+    // Every request sharing the refresh carries the new tokens, so a later store.update never writes old ones back.
+    if (fresh) ctx.session.tokens = fresh;
+    return fresh?.accessToken ?? null;
+  }
+
+  async function refresh(ctx: SessionContext): Promise<Session['tokens'] | null> {
+    const { tokens } = ctx.session;
     if (!tokens.refreshToken) {
       await store.delete(ctx.id);
       return null;
@@ -550,6 +594,11 @@ export function createBff(deps: BffDeps) {
       next = await oidc.refresh(tokens.refreshToken);
     } catch (err) {
       if (err instanceof OidcError && err.kind === 'invalid_grant') {
+        // Another instance may have used this refresh token a moment ago: take the tokens it stored.
+        const stored = await store.touch(ctx.id);
+        if (stored && stored.tokens.refreshToken !== tokens.refreshToken && stored.tokens.expiresAt - REFRESH_SKEW_MS > Date.now()) {
+          return stored.tokens;
+        }
         await store.delete(ctx.id);
         return null;
       }
@@ -557,7 +606,7 @@ export function createBff(deps: BffDeps) {
     }
     ctx.session.tokens = { ...next, idToken: next.idToken ?? tokens.idToken };
     await store.update(ctx.id, ctx.session);
-    return next.accessToken;
+    return ctx.session.tokens;
   }
 
   /** Calls the API as the session's user; retries once with a refreshed token on 401. */
@@ -651,8 +700,9 @@ export function createBff(deps: BffDeps) {
     if (mutation) {
       if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
       if (!req.headers.get('content-type')?.startsWith('application/json')) return error(415, 'UNSUPPORTED_MEDIA_TYPE', requestId);
-      body = await req.text();
-      if (Buffer.byteLength(body) > MAX_BODY_BYTES) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
+      const text = await readBodyCapped(req);
+      if (text === null) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
+      body = text;
       headers['content-type'] = 'application/json';
       const ifMatch = req.headers.get('if-match');
       if (ifMatch) headers['if-match'] = ifMatch;
@@ -672,8 +722,8 @@ export function createBff(deps: BffDeps) {
       if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
       if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
       if (!req.headers.get('content-type')?.startsWith('application/json')) return error(415, 'UNSUPPORTED_MEDIA_TYPE', requestId);
-      const body = await req.text();
-      if (Buffer.byteLength(body) > MAX_BODY_BYTES) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
+      const body = await readBodyCapped(req);
+      if (body === null) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
       const incoming = new URL(req.url).searchParams;
       const qs = new URLSearchParams();
       for (const k of params) {
@@ -705,17 +755,18 @@ export function createBff(deps: BffDeps) {
 
     /**
      * Server-side read for staff pages: the catalog by name, or only names containing `q`. Null means the user
-     * must sign in again. `truncated` is set when the list stopped at STATION_PAGES_MAX pages.
+     * must sign in again. `truncated` is set when the list stopped at `maxPages` (default STATION_PAGES_MAX) pages;
+     * a side list next to an editor asks for one page only.
      */
     async loadStations(
       ctx: SessionContext,
-      opts: { q?: string } = {},
+      opts: { q?: string; maxPages?: number } = {},
     ): Promise<{ status: number; stations?: AdminStation[]; truncated?: boolean } | null> {
       // The API pages by 100 at most (Doc 17); the catalog screens show the whole list, so follow the pages.
       const stations: AdminStation[] = [];
       const q = opts.q?.trim().slice(0, 80);
       let cursor: string | null = null;
-      for (let page = 0; page < STATION_PAGES_MAX; page++) {
+      for (let page = 0; page < Math.min(opts.maxPages ?? STATION_PAGES_MAX, STATION_PAGES_MAX); page++) {
         const qs = new URLSearchParams({ limit: '100' });
         if (q) qs.set('q', q);
         if (cursor) qs.set('cursor', cursor);
@@ -1001,7 +1052,7 @@ export function createBff(deps: BffDeps) {
         const signedOut = `${config.baseUrl}/login?signedOut=1`;
         if (!ctx) return redirect('/login?signedOut=1', 303, [clear]);
         const form = req.headers.get('content-type')?.includes('application/x-www-form-urlencoded')
-          ? new URLSearchParams(await req.text())
+          ? new URLSearchParams((await readBodyCapped(req)) ?? '')
           : null;
         if (!csrfOk(req, ctx, form?.get('csrf') ?? undefined)) {
           return redirect('/app/settings?error=csrf', 303);
@@ -1093,8 +1144,8 @@ export function createBff(deps: BffDeps) {
         if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
         if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
         if (!req.headers.get('content-type')?.startsWith('application/json')) return error(415, 'UNSUPPORTED_MEDIA_TYPE', requestId);
-        const body = await req.text();
-        if (Buffer.byteLength(body) > MAX_BODY_BYTES) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
+        const body = await readBodyCapped(req);
+        if (body === null) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
         const upstream = await callApi(ctx, '/v1/sync/push', { method: 'POST', headers: { 'content-type': 'application/json' }, body }, requestId);
         if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
         return passthrough(upstream, requestId);
@@ -1175,12 +1226,19 @@ export function createBff(deps: BffDeps) {
         return json(200, exportView(await upstream.json()), requestId);
       }),
 
-    /** GET /bff/account/exports/{id}/file: fetches a fresh 15-minute link from the API and streams the file through. */
+    /**
+     * POST /bff/account/exports/{id}/file: fetches a fresh 15-minute link from the API and streams the file through.
+     * A POST with the CSRF token (a plain form on the page, so the browser saves the file), because it mints a link.
+     */
     exportFile: (req: Request, id: string) =>
       timed(req, '/bff/account/exports/:id/file', async (requestId) => {
         if (!DEVICE_ID.test(id)) return notFound(requestId);
         const ctx = await sessionFromCookie(req.headers.get('cookie'));
         if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        const form = req.headers.get('content-type')?.includes('application/x-www-form-urlencoded')
+          ? new URLSearchParams((await readBodyCapped(req)) ?? '')
+          : null;
+        if (!csrfOk(req, ctx, form?.get('csrf') ?? undefined)) return error(403, 'CSRF_REJECTED', requestId);
         const upstream = await callApi(ctx, `/v1/me/exports/${id}/link`, { method: 'POST' }, requestId);
         if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
         if (!upstream.ok) return passthrough(upstream, requestId);
@@ -1252,8 +1310,8 @@ export function createBff(deps: BffDeps) {
         if (!req.headers.get('content-type')?.startsWith('application/json')) {
           return error(415, 'UNSUPPORTED_MEDIA_TYPE', requestId);
         }
-        const body = await req.text();
-        if (Buffer.byteLength(body) > MAX_BODY_BYTES) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
+        const body = await readBodyCapped(req);
+        if (body === null) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
         const headers: Record<string, string> = { 'content-type': 'application/json' };
         const ifMatch = req.headers.get('if-match');
         if (ifMatch) headers['if-match'] = ifMatch;

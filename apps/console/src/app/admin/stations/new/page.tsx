@@ -10,7 +10,7 @@ export default async function NewStationPage({ searchParams }: { searchParams: P
   const { bff, ctx, theme } = await staffPage('/admin/stations/new');
   if (theme !== 'workbench') return <StationEditor />;
   // Workbench keeps the station list beside the editor.
-  const list = await bff.loadStations(ctx).catch(() => ({ status: 503 }) as const);
+  const list = await bff.loadStations(ctx, { maxPages: 1 }).catch(() => ({ status: 503 }) as const);
   if (list === null) redirect('/login?expired=1&returnTo=/admin/stations/new');
   return (
     <WorkbenchSplit stations={'stations' in list && list.stations ? list.stations : []} filter={filterFrom((await searchParams).status)}>

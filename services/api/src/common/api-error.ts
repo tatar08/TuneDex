@@ -84,7 +84,11 @@ export class ApiError extends Error {
 }
 
 export class DependencyUnavailableError extends ApiError {
-  constructor(readonly dependency: string) {
+  /** `reason` 'query_timeout' marks a query that ran past the statement timeout: a slow query, not an outage. */
+  constructor(
+    readonly dependency: string,
+    readonly reason?: 'query_timeout',
+  ) {
     super(HttpStatus.SERVICE_UNAVAILABLE, 'DEPENDENCY_UNAVAILABLE');
   }
 }

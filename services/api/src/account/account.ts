@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { allLimited } from '../common/concurrency';
 import {
   Controller,
   Delete,
@@ -87,24 +88,24 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
       'SELECT id, created_at, locale, email FROM users WHERE id = $1',
       [userId],
     );
-    const [settings, devices, favorites, purchases, roles, reports, events] = await Promise.all([
-      this.settings.get(userId),
+    const [settings, devices, favorites, purchases, roles, reports, events] = await allLimited([
+      () => this.settings.get(userId),
       // The export holds every device, not one page.
-      this.devices.list(userId, null, 10_000),
-      this.sync.favorites(userId),
-      this.db.query<{ store: string; product_id: string; state: string; environment: string; purchased_at: Date | null; verified_at: Date | null; revoked_at: Date | null }>(
+      () => this.devices.list(userId, null, 10_000),
+      () => this.sync.favorites(userId),
+      () => this.db.query<{ store: string; product_id: string; state: string; environment: string; purchased_at: Date | null; verified_at: Date | null; revoked_at: Date | null }>(
         'SELECT store, product_id, state, environment, purchased_at, verified_at, revoked_at FROM purchases WHERE user_id = $1 ORDER BY created_at',
         [userId],
       ),
-      this.db.query<{ role: string; granted_at: Date; revoked_at: Date | null }>(
+      () => this.db.query<{ role: string; granted_at: Date; revoked_at: Date | null }>(
         'SELECT role, granted_at, revoked_at FROM staff_roles WHERE user_id = $1 ORDER BY granted_at',
         [userId],
       ),
-      this.db.query<{ id: string; device_id: string; received_at: Date; event_count: number }>(
+      () => this.db.query<{ id: string; device_id: string; received_at: Date; event_count: number }>(
         'SELECT id, device_id, received_at, event_count FROM diagnostic_reports WHERE user_id = $1 ORDER BY received_at',
         [userId],
       ),
-      this.db.query<Record<string, unknown> & { report_id: string }>(
+      () => this.db.query<Record<string, unknown> & { report_id: string }>(
         // Same field names as the app's upload (Doc 07), so the export reads like what was sent.
         `SELECT report_id, event_id AS "eventId", event_name AS "eventName", schema_version AS "schemaVersion",
                 monotonic_ms::float8 AS "monotonicMs", session_random_id AS "sessionRandomId", duration_ms AS "durationMs",
@@ -113,7 +114,7 @@ export class AccountService implements OnApplicationBootstrap, OnApplicationShut
            FROM diagnostic_events WHERE user_id = $1 ORDER BY report_id, monotonic_ms LIMIT $2`,
         [userId, EXPORT_MAX_EVENTS + 1],
       ),
-    ]);
+    ], 4);
     const byReport = new Map<string, Record<string, unknown>[]>();
     for (const { report_id, ...e } of events.slice(0, EXPORT_MAX_EVENTS)) {
       byReport.set(report_id, [...(byReport.get(report_id) ?? []), e]);

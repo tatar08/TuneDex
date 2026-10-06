@@ -186,10 +186,16 @@ export class DiagnosticsService implements OnApplicationShutdown {
       if (prior) return { result: { reportId: prior.id, accepted: 0, duplicates: batch.events.length } };
       if (Number(device.recent) >= LIMITS.batchesPerMinutePerDevice) return { retryAfter: 60 };
 
+      // The device lock above serialises one device; the same batchId sent from two devices at once lands here.
       const [report] = await query<{ id: string }>(
-        `INSERT INTO diagnostic_reports (user_id, device_id, batch_id, consented, event_count) VALUES ($1, $2, $3, true, 0) RETURNING id`,
+        `INSERT INTO diagnostic_reports (user_id, device_id, batch_id, consented, event_count) VALUES ($1, $2, $3, true, 0)
+         ON CONFLICT (user_id, batch_id) DO NOTHING RETURNING id`,
         [ownerId, batch.deviceId, batch.batchId],
       );
+      if (!report) {
+        const [first] = await query<{ id: string }>('SELECT id FROM diagnostic_reports WHERE user_id = $1 AND batch_id = $2', [ownerId, batch.batchId]);
+        return { result: { reportId: first.id, accepted: 0, duplicates: batch.events.length } };
+      }
       const params: unknown[] = [];
       const rows = batch.events.map((e, i) => {
         params.push(report.id, ownerId, e.eventId, e.eventName, e.schemaVersion, e.monotonicMs, e.sessionRandomId, e.durationMs, e.resultCode, e.networkClass, e.appBuild, e.osMajor, e.deviceClass);
@@ -293,6 +299,13 @@ export class DiagnosticsService implements OnApplicationShutdown {
       total += rows.length;
       if (rows.length < 1000) break;
     }
+    // Support access: one-time codes are useless a day after they expire; grants are kept as long as the
+    // reports they could open (the audit log keeps who was given access, and why).
+    await this.db.query(`DELETE FROM support_access_codes WHERE expires_at < now() - interval '1 day'`);
+    await this.db.query(
+      `DELETE FROM support_access_grants WHERE coalesce(revoked_at, expires_at) < now() - make_interval(days => $1)`,
+      [DIAGNOSTICS_RETENTION_DAYS],
+    );
     return total;
   }
 }

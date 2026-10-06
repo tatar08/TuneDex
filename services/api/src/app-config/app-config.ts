@@ -254,7 +254,10 @@ export class AppConfigService {
       }
       const before = normalize(draft.payload);
       const beforeTargets = normalizeTargets(draft.targets);
-      const { targets: targetsPatch, ...configPatch } = (typeof body === 'object' && body !== null && !Array.isArray(body) ? body : { body }) as Record<string, unknown>;
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+        throw new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', { field: 'body', reason: 'must_be_object' });
+      }
+      const { targets: targetsPatch, ...configPatch } = body as Record<string, unknown>;
       const next = applyPatch(before, configPatch);
       const nextTargets = targetsPatch === undefined ? beforeTargets : applyTargetsPatch(beforeTargets, targetsPatch);
       const fields = [...changedFields(before, next), ...changedTargets(beforeTargets, nextTargets)];

@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Injectable, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { UNSAFE_TEXT } from '../common/text-safety';
 import type { Request, Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { requireRecentMfa } from '../auth/recent-sign-in';
@@ -83,7 +84,7 @@ export function parseAuditQuery(q: Record<string, unknown>, now = new Date()): A
     to,
     // A user's OIDC subject, or `operator:<label>` for the staff CLI.
     actor: text(q, 'actor', /^[A-Za-z0-9._:@|-]{1,128}$/),
-    action: text(q, 'action', /^[a-z_]{1,40}(\.[a-z_]{1,40})?$/),
+    action: text(q, 'action', /^[a-z_]{1,40}(\.[a-z_]{1,40}){0,2}$/),
     targetType: text(q, 'targetType', /^[a-z_]{1,40}$/),
     targetId: text(q, 'targetId', /^[A-Za-z0-9._*-]{1,64}$/),
     requestId: text(q, 'requestId', /^[A-Za-z0-9._-]{8,64}$/),
@@ -229,9 +230,9 @@ export function toCsv(rows: AuditRow[]): string {
 export function parseExportReason(body: unknown): string {
   const reason = typeof body === 'object' && body !== null ? (body as { reason?: unknown }).reason : undefined;
   if (typeof reason !== 'string') throw bad('reason', 'required');
-  const r = reason.trim();
+  const r = reason.normalize('NFC').trim();
   if (r.length < 10 || r.length > 500) throw bad('reason', 'length');
-  if (/[\u0000-\u001f\u007f]/.test(r)) throw bad('reason', 'control_characters');
+  if (UNSAFE_TEXT.test(r)) throw bad('reason', 'control_characters');
   return r;
 }
 

@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Injectable, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { UNSAFE_TEXT } from '../common/text-safety';
 import type { Request, Response } from 'express';
 import { writeAudit } from '../audit/audit';
 import { AuthGuard } from '../auth/auth.guard';
@@ -270,7 +271,7 @@ export function parseBlock(body: unknown): { kind: 'station' | 'host'; value: st
 
 export function parseBlockReason(v: unknown): string {
   const reason = typeof v === 'string' ? v.normalize('NFC').trim() : '';
-  if (reason.length < 10 || reason.length > 500 || /[\u0000-\u001f\u007f-\u009f]/.test(reason)) throw invalid('reason', 'length');
+  if (reason.length < 10 || reason.length > 500 || UNSAFE_TEXT.test(reason)) throw invalid('reason', 'length');
   return reason;
 }
 

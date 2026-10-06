@@ -6,12 +6,15 @@ set -euo pipefail
 : "${ADMIN_DATABASE_URL:?set ADMIN_DATABASE_URL to a scratch server (never printed)}"
 dump="${1:?usage: restore-drill.sh <dump file>}"
 db="tunedeck_drill_$(date -u +%Y%m%d%H%M%S)"
-target="$(python3 -c 'import sys,urllib.parse as u; p=u.urlsplit(sys.argv[1]); print(u.urlunsplit(p._replace(path="/"+sys.argv[2])))' "$ADMIN_DATABASE_URL" "$db")"
+# shellcheck source=pg-env.sh
+. "$(dirname "$0")/pg-env.sh"
+pg_env_from_url ADMIN_DATABASE_URL
+admin_db="${PGDATABASE:-postgres}"
 start=$(date +%s)
-psql -q -v ON_ERROR_STOP=1 "$ADMIN_DATABASE_URL" -c "CREATE DATABASE ${db}"
-trap 'psql -q "$ADMIN_DATABASE_URL" -c "DROP DATABASE IF EXISTS ${db} WITH (FORCE)" >/dev/null' EXIT
-pg_restore --exit-on-error --no-owner --no-privileges --dbname="$target" "$dump"
-q() { psql -tA -v ON_ERROR_STOP=1 "$target" -c "$1"; }
+psql -q -v ON_ERROR_STOP=1 -d "$admin_db" -c "CREATE DATABASE ${db}"
+trap 'psql -q -d "$admin_db" -c "DROP DATABASE IF EXISTS ${db} WITH (FORCE)" >/dev/null' EXIT
+pg_restore --exit-on-error --no-owner --no-privileges --dbname="$db" "$dump"
+q() { psql -tA -v ON_ERROR_STOP=1 -d "$db" -c "$1"; }
 echo "restored into ${db} in $(( $(date +%s) - start )) s"
 echo "latest migration: $(q "SELECT name FROM schema_migrations ORDER BY name DESC LIMIT 1")"
 for t in users devices audit_events radio_stations app_config_releases purchases synced_entities; do

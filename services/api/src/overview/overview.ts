@@ -1,4 +1,5 @@
 import { Controller, Get, HttpStatus, Inject, Injectable, Query, Res, UseGuards } from '@nestjs/common';
+import { allLimited } from '../common/concurrency';
 import type { Response } from 'express';
 import { DELETION_DEADLINE_DAYS } from '../account/account';
 import { AuthGuard } from '../auth/auth.guard';
@@ -120,54 +121,54 @@ export class OverviewService {
     const range = [from.toISOString(), now.toISOString()];
     const requests = `FROM operational_logs WHERE event_code = 'HTTP_REQUEST' AND logged_at >= $1 AND logged_at < $2`;
 
-    const [[totals], buckets, topErrors, [last], stationRows, [deletions], [diag], [lastCheck], openAlerts, byEvent, topFailures, builds] = await Promise.all([
-      this.db.query<{ n: string; s5: string; s4: string; p50: number | null; p95: number | null }>(
+    const [[totals], buckets, topErrors, [last], stationRows, [deletions], [diag], [lastCheck], openAlerts, byEvent, topFailures, builds] = await allLimited([
+      () => this.db.query<{ n: string; s5: string; s4: string; p50: number | null; p95: number | null }>(
         `SELECT count(*) AS n, count(*) FILTER (WHERE status >= 500) AS s5, count(*) FILTER (WHERE status >= 400 AND status < 500) AS s4,
                 percentile_disc(0.5) WITHIN GROUP (ORDER BY duration_ms) AS p50,
                 percentile_disc(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95 ${requests}`,
         range,
       ),
-      this.db.query<{ at: Date; n: string; s5: string; p95: number | null }>(
+      () => this.db.query<{ at: Date; n: string; s5: string; p95: number | null }>(
         `SELECT date_bin($3::interval, logged_at, $1::timestamptz) AS at, count(*) AS n, count(*) FILTER (WHERE status >= 500) AS s5,
                 percentile_disc(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95
            ${requests} GROUP BY 1 ORDER BY 1`,
         [...range, w.bucket],
       ),
-      this.db.query<{ route: string; status: number; n: string }>(
+      () => this.db.query<{ route: string; status: number; n: string }>(
         `SELECT route, status, count(*) AS n ${requests} AND status >= 500 GROUP BY route, status ORDER BY n DESC, route LIMIT 5`,
         range,
       ),
-      this.db.query<{ at: Date | null }>(`SELECT max(logged_at) AS at FROM operational_logs WHERE event_code = 'HTTP_REQUEST'`),
-      this.db.query<{ id: string; disabled: boolean }>(
+      () => this.db.query<{ at: Date | null }>(`SELECT max(logged_at) AS at FROM operational_logs WHERE event_code = 'HTTP_REQUEST'`),
+      () => this.db.query<{ id: string; disabled: boolean }>(
         `SELECT id, disabled_at IS NOT NULL AS disabled FROM radio_stations WHERE published IS NOT NULL`,
       ),
-      this.db.query<{ open: string; failed: string; oldest: Date | null }>(
+      () => this.db.query<{ open: string; failed: string; oldest: Date | null }>(
         `SELECT count(*) AS open, count(*) FILTER (WHERE status IN ('failed', 'dead_letter')) AS failed, min(requested_at) AS oldest
            FROM account_deletions WHERE status <> 'completed'`,
       ),
-      this.db.query<{ n: string; devices: string; events: string }>(
+      () => this.db.query<{ n: string; devices: string; events: string }>(
         `SELECT count(*) AS n, count(DISTINCT (user_id, device_id)) AS devices, coalesce(sum(event_count), 0) AS events
            FROM diagnostic_reports WHERE received_at >= $1 AND received_at < $2`,
         range,
       ),
-      this.db.query<{ at: Date | null }>(`SELECT max(checked_at) AS at FROM station_health WHERE target = 'published'`),
-      this.alerts.open(),
-      this.db.query<{ event_name: string; n: string; failures: string; devices: string }>(
+      () => this.db.query<{ at: Date | null }>(`SELECT max(checked_at) AS at FROM station_health WHERE target = 'published'`),
+      () => this.alerts.open(),
+      () => this.db.query<{ event_name: string; n: string; failures: string; devices: string }>(
         `SELECT e.event_name, count(*) AS n, count(*) FILTER (WHERE e.result_code IS NOT NULL) AS failures, count(DISTINCT (r.user_id, r.device_id)) AS devices
            ${CLIENT_EVENTS} GROUP BY e.event_name ORDER BY n DESC, e.event_name`,
         range,
       ),
-      this.db.query<{ event_name: string; result_code: string; n: string; devices: string }>(
+      () => this.db.query<{ event_name: string; result_code: string; n: string; devices: string }>(
         `SELECT e.event_name, e.result_code, count(*) AS n, count(DISTINCT (r.user_id, r.device_id)) AS devices
            ${CLIENT_EVENTS} AND e.result_code IS NOT NULL GROUP BY e.event_name, e.result_code ORDER BY n DESC, e.event_name, e.result_code LIMIT 10`,
         range,
       ),
-      this.db.query<{ app_build: string; platform: string; n: string; failures: string }>(
+      () => this.db.query<{ app_build: string; platform: string; n: string; failures: string }>(
         `SELECT e.app_build, d.platform, count(*) AS n, count(*) FILTER (WHERE e.result_code IS NOT NULL) AS failures
            ${CLIENT_EVENTS} GROUP BY e.app_build, d.platform ORDER BY n DESC, e.app_build, d.platform LIMIT 5`,
         range,
       ),
-    ]);
+    ], 4);
 
     const live = stationRows.filter((s) => !s.disabled).map((s) => s.id);
     const summaries = await this.health.summaries(live);
