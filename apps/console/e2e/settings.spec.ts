@@ -231,7 +231,7 @@ test('prepare my data after a fresh sign-in, then download it', async ({ browser
   await expect(page.getByTestId('export-ready')).toContainText('ไฟล์พร้อมแล้ว');
   if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/export-ready.png`, fullPage: true });
 
-  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: 'ดาวน์โหลดไฟล์' }).click()]);
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'ดาวน์โหลดไฟล์' }).click()]);
   expect(download.suggestedFilename()).toMatch(/^tunedeck-export-\d{4}-\d{2}-\d{2}\.json$/);
   const exported = JSON.parse(await (await import('node:fs/promises')).readFile((await download.path())!, 'utf8'));
   expect(exported.devices.map((d: { id: string }) => d.id)).toEqual([device]);
