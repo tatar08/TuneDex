@@ -5,12 +5,19 @@ import { DependencyUnavailableError } from '../common/api-error';
 export const PG_POOL = Symbol('PG_POOL');
 
 /** Errors that mean "database unreachable/unavailable" rather than a bug in our SQL. */
+/** Maps a driver error to the API error the caller should see, or returns it unchanged. */
+function translate(err: unknown): unknown {
+  // 57014: the statement ran past statement_timeout. Still a 503 to the client, but logged apart from outages.
+  if ((err as { code?: string })?.code === '57014') return new DependencyUnavailableError('postgres', 'query_timeout');
+  return isAvailabilityError(err) ? new DependencyUnavailableError('postgres') : err;
+}
+
 function isAvailabilityError(err: unknown): boolean {
   const e = err as { code?: string; message?: string };
   if (typeof e?.code === 'string') {
     if (['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EHOSTUNREACH'].includes(e.code)) return true;
-    // 08xxx connection exceptions, 57P0x admin shutdown / cannot connect now, 53300 too many connections, 57014 statement timeout
-    if (/^08/.test(e.code) || /^57P0/.test(e.code) || e.code === '53300' || e.code === '57014') return true;
+    // 08xxx connection exceptions, 57P0x admin shutdown / cannot connect now, 53300 too many connections
+    if (/^08/.test(e.code) || /^57P0/.test(e.code) || e.code === '53300') return true;
   }
   return /timeout|Connection terminated/i.test(e?.message ?? '');
 }
@@ -24,8 +31,7 @@ export class Database {
       const result = await this.pool.query<T>(sql, params);
       return result.rows;
     } catch (err) {
-      if (isAvailabilityError(err)) throw new DependencyUnavailableError('postgres');
-      throw err;
+      throw translate(err);
     }
   }
 
@@ -35,15 +41,13 @@ export class Database {
     try {
       client = await this.pool.connect();
     } catch (err) {
-      if (isAvailabilityError(err)) throw new DependencyUnavailableError('postgres');
-      throw err;
+      throw translate(err);
     }
     const query = async <T extends QueryResultRow>(sql: string, params: unknown[] = []): Promise<T[]> => {
       try {
         return (await client.query<T>(sql, params)).rows;
       } catch (err) {
-        if (isAvailabilityError(err)) throw new DependencyUnavailableError('postgres');
-        throw err;
+        throw translate(err);
       }
     };
     try {
@@ -70,10 +74,16 @@ export class Database {
   }
 }
 
+/** Pool size: DB_POOL_MAX, default 20 (a staff overview alone runs a dozen queries, four at a time). */
+export function poolMax(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env.DB_POOL_MAX);
+  return Number.isInteger(n) && n >= 2 && n <= 200 ? n : 20;
+}
+
 export function createPool(databaseUrl: string): Pool {
   const pool = new Pool({
     connectionString: databaseUrl,
-    max: 10,
+    max: poolMax(),
     connectionTimeoutMillis: 2000,
     idleTimeoutMillis: 30000,
     statement_timeout: 5000,

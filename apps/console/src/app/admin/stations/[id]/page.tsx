@@ -20,7 +20,7 @@ export default async function StationPage({
   const [result, health, list] = await Promise.all([
     bff.loadStation(ctx, id).catch(() => ({ status: 503 }) as const),
     bff.loadStationHealth(ctx, id).catch(() => ({ status: 503 }) as const),
-    theme === 'workbench' ? bff.loadStations(ctx).catch(() => ({ status: 503 }) as const) : Promise.resolve(undefined),
+    theme === 'workbench' ? bff.loadStations(ctx, { maxPages: 1 }).catch(() => ({ status: 503 }) as const) : Promise.resolve(undefined),
   ]);
   if (result === null || health === null || list === null) redirect(`/login?expired=1&returnTo=${encodeURIComponent(returnTo)}`);
   const body = 'station' in result && result.station ? <StationEditor key={result.station.id} station={result.station} history={'checks' in health && health.checks ? health.checks : []} /> : <LoadError status={result.status} lang={await pageLang()} />;

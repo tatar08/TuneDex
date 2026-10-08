@@ -72,7 +72,8 @@ paths:
       summary: Start account deletion (older path, same as DELETE /v1/me)
       description: >-
         Same behaviour as DELETE /v1/me, except that Idempotency-Key is optional here (kept for app builds made before
-        the key existed). Requires auth_time within the last 300 seconds.
+        the key existed). Requires auth_time within the last 300 seconds. As there, a retry after a success gets
+        403 ACCOUNT_DELETING rather than a replay of the ticket.
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
       responses:
@@ -80,7 +81,6 @@ paths:
           description: Deletion started
           headers:
             Cache-Control: { schema: { type: string, example: no-store } }
-            Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Only on a replay }
           content: { application/json: { schema: { $ref: '#/components/schemas/MeDeletionTicket' } } }
         '400': { description: 'VALIDATION_FAILED, details.field = Idempotency-Key (malformed key)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: 'AUTH_REQUIRED, or REAUTH_REQUIRED with details.maxAgeSeconds = 300', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -283,7 +283,7 @@ paths:
   /v1/me/export:
     get:
       summary: The account's data built on the spot (legacy; new clients use POST /v1/me/exports)
-      description: No recent sign-in needed. Audited account.export on every call. At most 10,000 diagnostic events (diagnosticsTruncated says when more exist).
+      description: Needs a sign-in from the last 5 minutes (401 REAUTH_REQUIRED otherwise), since it returns all of the account's data. Audited account.export on every call. At most 10,000 diagnostic events (diagnosticsTruncated says when more exist).
       responses:
         '200':
           description: The export document, as a download
@@ -346,19 +346,17 @@ paths:
       summary: Mint a download link for a ready export
       description: Valid for 15 minutes (never past the export's own expiry); each call replaces the previous link. No request body.
       parameters:
-        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { name: Idempotency-Key, in: header, required: false, description: 'Ignored here: the answer carries a secret (a code, a link, a looked-up account), so it is never stored or replayed; each call does the work again', schema: { type: string } }
       responses:
         '201':
           description: Link created; prefix path with the API base URL
           headers:
             Cache-Control: { schema: { type: string, example: no-store } }
-            Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Only on a replay }
           content: { application/json: { schema: { $ref: '#/components/schemas/MeExportLink' } } }
-        '400': { description: 'VALIDATION_FAILED, details.field = Idempotency-Key (malformed key)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { $ref: '#/components/responses/Error' }
         '403': { description: 'ACCOUNT_DELETING, AUTH_FORBIDDEN or DEVICE_REVOKED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: 'NOT_FOUND: unknown, another account''s, expired or not a UUID', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '409': { description: 'EXPORT_NOT_READY with details.status (pending or failed); or IDEMPOTENCY_KEY_REUSED / IDEMPOTENCY_IN_PROGRESS (Retry-After: 1)', headers: { Retry-After: { schema: { type: integer } } }, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'EXPORT_NOT_READY with details.status (pending or failed)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { description: 'API_RATE_LIMITED, 30 writes a minute per account; details.retryAfterSeconds', headers: { Retry-After: { schema: { type: integer } } }, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '503': { $ref: '#/components/responses/Error' }
   /v1/export-downloads/{token}:
@@ -476,18 +474,15 @@ paths:
         Valid 60 minutes; a new code replaces an unused one. The support member who enters it (with a reason) may read
         this account's diagnostic reports for 7 days. Only a digest is stored. Audited support.code_created. No request body.
       parameters:
-        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { name: Idempotency-Key, in: header, required: false, description: 'Ignored here: the answer carries a secret (a code, a link, a looked-up account), so it is never stored or replayed; each call does the work again', schema: { type: string } }
       responses:
         '201':
           description: Code created (shown only here)
           headers:
             Cache-Control: { schema: { type: string, example: no-store } }
-            Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Only on a replay }
           content: { application/json: { schema: { $ref: '#/components/schemas/MeSupportCode' } } }
-        '400': { description: 'VALIDATION_FAILED, details.field = Idempotency-Key (malformed key)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { $ref: '#/components/responses/Error' }
         '403': { description: 'ACCOUNT_DELETING, AUTH_FORBIDDEN or DEVICE_REVOKED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS (Retry-After: 1)', headers: { Retry-After: { schema: { type: integer } } }, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { description: 'API_RATE_LIMITED, 30 writes a minute per account; details.retryAfterSeconds', headers: { Retry-After: { schema: { type: integer } } }, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '503': { $ref: '#/components/responses/Error' }
   /v1/me/support-access/{id}:
@@ -618,7 +613,7 @@ paths:
           headers:
             Cache-Control: { schema: { type: string, example: no-store } }
           content: { application/json: { schema: { $ref: '#/components/schemas/BillingPurchase' } } }
-        '400': { description: 'VALIDATION_FAILED (details.field: body, store unsupported, signedTransaction must_be_jws, productId / purchaseToken invalid, unknown_field), or PURCHASE_INVALID with details.reason: signature, wrong_app, unknown_product, environment, malformed, account_mismatch (Apple); unknown_product, unknown_purchase, cancelled, account_mismatch (Google)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '400': { description: 'VALIDATION_FAILED (details.field: body, store unsupported, signedTransaction must_be_jws, productId / purchaseToken invalid, unknown_field), or PURCHASE_INVALID with details.reason: signature, wrong_app, unknown_product, environment, malformed, account_unbound, account_mismatch (Apple: appAccountToken must be the signed-in account id); unknown_product, unknown_purchase, cancelled, account_unbound, account_mismatch (Google: obfuscatedExternalAccountId must be the signed-in account id). A purchase bound to an account that was deleted can be restored onto the current one. A purchase the store refunded before it was ever verified stays revoked', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { $ref: '#/components/responses/Error' }
         '403': { description: 'ACCOUNT_DELETING, AUTH_FORBIDDEN or DEVICE_REVOKED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { description: 'PURCHASE_CONFLICT (the purchase belongs to another live account), IDEMPOTENCY_KEY_REUSED, or IDEMPOTENCY_IN_PROGRESS with Retry-After: 1', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -632,7 +627,7 @@ paths:
     post:
       summary: App Store Server Notifications V2 (called by Apple)
       description: |
-        No user token: `signedPayload` (and the `signedTransactionInfo` inside it) is verified like a transaction against the pinned Apple root, and the notification's bundle id must match. Redeliveries are recognized by `notificationUUID` and answered 200 without work. `REFUND` and `REVOKE` revoke the purchase (audited `purchase.revoked` by `system:apple`); `REFUND_REVERSED` whose transaction carries no `revocationDate` makes a revoked purchase verified again (audited `purchase.restored`). Other types and unknown purchases change nothing. A notification whose `data.environment` is not in `APPLE_ENVIRONMENTS` is answered 200 and changes nothing. Handled ids are kept 30 days. Not rate limited. Body limit 64 KiB.
+        No user token: `signedPayload` (and the `signedTransactionInfo` inside it) is verified like a transaction against the pinned Apple root, and the notification's bundle id must match. Redeliveries are recognized by `notificationUUID` and answered 200 without work. `REFUND` and `REVOKE` revoke the purchase (audited `purchase.revoked` by `system:apple`); `REFUND_REVERSED` whose transaction carries no `revocationDate` makes a revoked purchase verified again (audited `purchase.restored`). Other types and unknown purchases change nothing. A notification whose `data.environment` is not in `APPLE_ENVIRONMENTS` is answered 200 and changes nothing. Handled ids are kept 30 days. Rate limited to 600 requests a minute per client address (429 API_RATE_LIMITED). Body limit 64 KiB.
       security: []
       requestBody:
         required: true
@@ -647,7 +642,7 @@ paths:
       summary: Play real-time developer notifications via Pub/Sub push (called by Google)
       description: |
         No user token. `Authorization: Bearer <Google OIDC token>` that Pub/Sub attaches: RS256, issuer accounts.google.com, audience `GOOGLE_PUBSUB_PUSH_AUDIENCE`, `email` = `GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT` with `email_verified: true`. `message.data` is the base64 notification JSON and its `packageName` must match. Redeliveries are recognized by `message.messageId` (kept 30 days) and answered 204 without work.
-        A voided purchase is revoked; a pending purchase that completes (oneTimeProductNotification type 1) is re-checked with the Play API, verified and acknowledged; a pending one cancelled (type 2) is revoked. Anything else (test notifications included) is accepted without change. Not rate limited. Body limit 64 KiB.
+        A voided purchase is revoked; a pending purchase that completes (oneTimeProductNotification type 1) is re-checked with the Play API, verified and acknowledged; a pending one cancelled (type 2) is revoked. Anything else (test notifications included) is accepted without change. Rate limited to 600 requests a minute per client address (429 API_RATE_LIMITED). Body limit 64 KiB.
       security: []
       parameters:
         - { name: Authorization, in: header, required: true, description: 'Bearer <Google-signed OIDC token from Pub/Sub push>, not a TuneDeck access token', schema: { type: string } }
@@ -677,7 +672,7 @@ paths:
         '200':
           description: The signed document
           headers:
-            ETag: { schema: { type: string, example: '"r12-AbCdEfGhIjKlMnOp"' }, description: 'Strong; "r<release>-<kid>", or "d-<channel>-<kid>" for the defaults' }
+            ETag: { schema: { type: string, example: '"r12-AbCdEfGhIjKlMnOp-mgc3x1a0"' }, description: 'Strong; "r<release>-<kid>-<signedAt>", or "d-<channel>-<kid>-<signedAt>" for the defaults; signedAt (base36 ms) changes when the document is re-signed, at most hourly' }
             Cache-Control: { schema: { type: string, example: 'public, max-age=300' }, description: no-cache in the dev environment }
           content: { application/json: { schema: { $ref: '#/components/schemas/ConfigDocument' } } }
         '304':
@@ -791,7 +786,7 @@ paths:
       description: 'Roles: catalog_editor or admin. Audited as directory.block.remove with the reason.'
       parameters:
         - { name: Idempotency-Key, in: header, required: false, description: 'Optional; see POST /v1/admin/stations', schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,128}$' } }
-      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reason' } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AdminExportReason' } } } }
       responses:
         '204': { description: Lifted }
         '400': { $ref: '#/components/responses/Error' }
@@ -1090,7 +1085,7 @@ paths:
         - { name: from, in: query, schema: { type: string, format: date-time }, description: 'ISO 8601 with Z or an offset; default to minus 7 days' }
         - { name: to, in: query, schema: { type: string, format: date-time }, description: 'ISO 8601 with Z or an offset; default now' }
         - { name: actor, in: query, schema: { type: string, pattern: '^[A-Za-z0-9._:@|-]{1,128}$' }, description: 'An OIDC subject (or internal user id), or operator:<label> for the staff CLI' }
-        - { name: action, in: query, schema: { type: string, pattern: '^[a-z_]{1,40}(\.[a-z_]{1,40})?$' }, description: 'A full action (station.publish) or a family (station)' }
+        - { name: action, in: query, schema: { type: string, pattern: '^[a-z_]{1,40}(\.[a-z_]{1,40}){0,2}$' }, description: 'A full action (station.publish, directory.block.add) or a family (station)' }
         - { name: targetType, in: query, schema: { type: string, pattern: '^[a-z_]{1,40}$' } }
         - { name: targetId, in: query, schema: { type: string, pattern: '^[A-Za-z0-9._*-]{1,64}$' } }
         - { name: requestId, in: query, schema: { type: string, pattern: '^[A-Za-z0-9._-]{8,64}$' } }
@@ -1113,7 +1108,7 @@ paths:
         - { name: from, in: query, schema: { type: string, format: date-time } }
         - { name: to, in: query, schema: { type: string, format: date-time } }
         - { name: actor, in: query, schema: { type: string, pattern: '^[A-Za-z0-9._:@|-]{1,128}$' } }
-        - { name: action, in: query, schema: { type: string, pattern: '^[a-z_]{1,40}(\.[a-z_]{1,40})?$' } }
+        - { name: action, in: query, schema: { type: string, pattern: '^[a-z_]{1,40}(\.[a-z_]{1,40}){0,2}$' } }
         - { name: targetType, in: query, schema: { type: string, pattern: '^[a-z_]{1,40}$' } }
         - { name: targetId, in: query, schema: { type: string, pattern: '^[A-Za-z0-9._*-]{1,64}$' } }
         - { name: requestId, in: query, schema: { type: string, pattern: '^[A-Za-z0-9._-]{8,64}$' } }
@@ -1253,7 +1248,7 @@ paths:
       summary: Support lookup of one account by user id, device id or email (support, admin)
       description: 'Roles: support or admin. query is trimmed and lower-cased: a UUID is tried as a user id, then as a device id (a device id on more than one account is a miss); otherwise an email of at most 320 characters, exact and any case (an email on more than one account is a miss). No setting values, stations or roles. Every lookup, misses included, is audited as user.lookup with the reason; the searched email is never written to the audit.'
       parameters:
-        - { name: Idempotency-Key, in: header, required: false, description: 'Optional; see POST /v1/admin/jobs/{jobId}/retry', schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,128}$' } }
+        - { name: Idempotency-Key, in: header, required: false, description: 'Ignored here: the answer carries a secret (a code, a link, a looked-up account), so it is never stored or replayed; each call does the work again', schema: { type: string } }
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AdminUserLookupRequest' } } } }
       responses:
         '200':
@@ -1904,15 +1899,16 @@ components:
         features:
           type: object
           additionalProperties: false
-          required: [catalogBrowse, playlistImport, diagnosticsUpload, radioDirectory, videoPlayback, webBrowser]
+          required: [catalogBrowse, playlistImport, diagnosticsUpload, radioDirectory, videoPlayback, webBrowser, carScreenVideo]
           description: Disable-only switches. true = the build's default (on); false turns a shipped feature off
           properties:
             catalogBrowse: { type: boolean }
             playlistImport: { type: boolean }
             diagnosticsUpload: { type: boolean }
             radioDirectory: { type: boolean, description: Search of the community radio directory (GET /v1/directory/radio) }
-            videoPlayback: { type: boolean, description: 'Video channels from playlists the user imported, on the phone or TV box only (never in CarPlay or Android Auto)' }
-            webBrowser: { type: boolean, description: 'In-app web browser (e.g. YouTube, Bilibili, TikTok sites), on the phone or TV box only' }
+            videoPlayback: { type: boolean, description: 'Video channels from playlists the user imported' }
+            webBrowser: { type: boolean, description: 'In-app web browser (e.g. YouTube, Bilibili, TikTok sites)' }
+            carScreenVideo: { type: boolean, description: 'Video channels and the in-app browser on the CarPlay or Android Auto screen. The user also has their own setting for it; false hides it for everyone.' }
         catalogRefreshHours: { type: integer, minimum: 1, maximum: 168, description: How often the app refreshes the radio catalog in the foreground }
     ConfigTarget:
       type: object
@@ -1932,7 +1928,7 @@ components:
         android: { $ref: '#/components/schemas/ConfigTarget' }
     ConfigDocument:
       type: object
-      required: [jws, schemaVersion, release, environment, targets, publishedAt, expiresAt, config]
+      required: [jws, schemaVersion, release, environment, targets, publishedAt, expiresAt, issuedAt, validUntil, config]
       description: Everything except jws is a convenience copy of the JWS payload, for debugging; apps act only on the verified payload, which holds exactly these fields without jws
       properties:
         jws: { type: string, description: 'Compact JWS, header {alg: EdDSA, kid, typ: tunedeck-config+jws}' }
@@ -1942,6 +1938,8 @@ components:
         targets: { $ref: '#/components/schemas/ConfigTargets' }
         publishedAt: { type: string, format: date-time, nullable: true, description: null for release 0 }
         expiresAt: { type: string, format: date-time, nullable: true, description: 'null for release 0; after it apps use their built-in defaults' }
+        issuedAt: { type: string, format: date-time, description: When this copy was signed (re-signed about every hour) }
+        validUntil: { type: string, format: date-time, description: 'Apps refuse a newly fetched copy whose validUntil has passed (a replayed old copy), and never move to a lower release than one they already verified. At most issuedAt + 24 h, never after expiresAt' }
         config: { $ref: '#/components/schemas/ConfigPayload' }
     DirectoryStation:
       type: object
@@ -2475,9 +2473,9 @@ components:
             android: { type: [integer, 'null'], minimum: 1, maximum: 2147483647 }
         features:
           type: object
-          required: [catalogBrowse, playlistImport, diagnosticsUpload, radioDirectory, videoPlayback, webBrowser]
+          required: [catalogBrowse, playlistImport, diagnosticsUpload, radioDirectory, videoPlayback, webBrowser, carScreenVideo]
           description: 'Disable-only switches: true = the build''s default, false turns a shipped feature off'
-          properties: { catalogBrowse: { type: boolean }, playlistImport: { type: boolean }, diagnosticsUpload: { type: boolean }, radioDirectory: { type: boolean }, videoPlayback: { type: boolean }, webBrowser: { type: boolean } }
+          properties: { catalogBrowse: { type: boolean }, playlistImport: { type: boolean }, diagnosticsUpload: { type: boolean }, radioDirectory: { type: boolean }, videoPlayback: { type: boolean }, webBrowser: { type: boolean }, carScreenVideo: { type: boolean } }
         catalogRefreshHours: { type: integer, minimum: 1, maximum: 168 }
     AdminConfigTargets:
       type: object
@@ -2507,7 +2505,7 @@ components:
         features:
           type: object
           additionalProperties: false
-          properties: { catalogBrowse: { type: boolean }, playlistImport: { type: boolean }, diagnosticsUpload: { type: boolean }, radioDirectory: { type: boolean }, videoPlayback: { type: boolean }, webBrowser: { type: boolean } }
+          properties: { catalogBrowse: { type: boolean }, playlistImport: { type: boolean }, diagnosticsUpload: { type: boolean }, radioDirectory: { type: boolean }, videoPlayback: { type: boolean }, webBrowser: { type: boolean }, carScreenVideo: { type: boolean } }
         catalogRefreshHours: { type: integer, minimum: 1, maximum: 168 }
         targets:
           type: object

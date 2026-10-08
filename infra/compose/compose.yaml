@@ -10,6 +10,7 @@ x-oidc: &oidc
 services:
   postgres:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: tunedeck
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -26,6 +27,7 @@ services:
 
   keycloak:
     image: keycloak/keycloak:26.4
+    restart: unless-stopped
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
@@ -57,6 +59,7 @@ services:
 
   api:
     build: ../../services/api
+    restart: unless-stopped
     command: ["sh", "-c", "node dist/db/migrate.js && exec node dist/main.js"]
     environment:
       <<: *oidc
@@ -76,6 +79,7 @@ services:
 
   console:
     build: ../../apps/console
+    restart: unless-stopped
     environment:
       <<: *oidc
       CONSOLE_BASE_URL: http://localhost:${CONSOLE_HOST_PORT:-3200}

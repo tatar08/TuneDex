@@ -162,8 +162,8 @@ export class BillingService implements OnApplicationBootstrap, OnApplicationShut
     if (!cfg.productIds.includes(tx.productId)) throw refused('unknown_product');
     if (!cfg.environments.includes(tx.environment as 'Production')) throw refused('environment');
     if (typeof tx.originalTransactionId !== 'string' || !tx.originalTransactionId) throw refused('malformed');
-    // The app sets appAccountToken to the signed-in account's id at purchase; a different account cannot claim it.
-    if (tx.appAccountToken !== undefined && (typeof tx.appAccountToken !== 'string' || !UUID.test(tx.appAccountToken) || tx.appAccountToken.toLowerCase() !== userId)) throw refused('account_mismatch');
+    // The app sets appAccountToken to the signed-in account's id at purchase, so a leaked receipt cannot unlock another account.
+    await this.mustBeBoundTo(userId, tx.appAccountToken);
     return this.record(userId, {
       store: 'apple',
       productId: tx.productId,
@@ -182,7 +182,7 @@ export class BillingService implements OnApplicationBootstrap, OnApplicationShut
     const purchase = await this.googleCall(() => this.google!.getProduct(productId, token));
     if (!purchase) throw refused('unknown_purchase');
     if (purchase.purchaseState === 1) throw refused('cancelled');
-    if (purchase.obfuscatedExternalAccountId !== undefined && purchase.obfuscatedExternalAccountId !== userId) throw refused('account_mismatch');
+    await this.mustBeBoundTo(userId, purchase.obfuscatedExternalAccountId);
     const result = await this.record(userId, {
       store: 'google',
       productId,
@@ -202,6 +202,19 @@ export class BillingService implements OnApplicationBootstrap, OnApplicationShut
     await this.google!.acknowledge(productId, token).catch((err) => {
       this.logger.log('WARN', { eventCode: 'GOOGLE_ACK_FAILED', ...(err instanceof GoogleApiError ? { status: err.status } : { errorName: (err as Error)?.name }) });
     });
+  }
+
+  /**
+   * A purchase must name the account it was made from (Apple appAccountToken, Google obfuscatedExternalAccountId).
+   * It names this account, or an account that was deleted since (a customer restoring onto a new account).
+   */
+  private async mustBeBoundTo(userId: string, bound: unknown): Promise<void> {
+    if (bound === undefined || bound === null || bound === '') throw refused('account_unbound');
+    if (typeof bound !== 'string' || !UUID.test(bound)) throw refused('account_mismatch');
+    const owner = bound.toLowerCase();
+    if (owner === userId) return;
+    const [row] = await this.db.query<{ status: string }>(`SELECT status FROM users WHERE id = $1`, [owner]);
+    if (row?.status !== 'deleted') throw refused('account_mismatch');
   }
 
   private async googleCall<T>(work: () => Promise<T>): Promise<T> {
@@ -229,7 +242,9 @@ export class BillingService implements OnApplicationBootstrap, OnApplicationShut
         [p.store, p.digest],
       );
       if (existing && existing.user_id !== userId && existing.owner_status !== 'deleted') throw new ApiError(HttpStatus.CONFLICT, 'PURCHASE_CONFLICT');
-      const state: PurchaseState = existing?.state === 'revoked' ? 'revoked' : p.state;
+      // A refund the store reported before this purchase was first verified keeps it revoked.
+      const [tombstone] = existing ? [] : await query(`SELECT 1 FROM purchase_revocations WHERE store = $1 AND external_digest = $2`, [p.store, p.digest]);
+      const state: PurchaseState = existing?.state === 'revoked' || tombstone ? 'revoked' : p.state;
       let row: Row;
       if (!existing) {
         [row] = await query<Row>(
@@ -261,15 +276,25 @@ export class BillingService implements OnApplicationBootstrap, OnApplicationShut
     });
   }
 
-  /** Marks a purchase revoked after a refund or revocation reported by the store. Unknown purchases are ignored. */
+  /**
+   * Marks a purchase revoked after a refund or revocation reported by the store. A purchase not verified yet gets
+   * a tombstone instead, so verifying its old signed transaction later cannot grant Pro.
+   */
   private async revoke(store: Store, digest: string, reason: string): Promise<boolean> {
     return this.db.transaction(async (query) => {
+      await query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`purchase:${store}:${digest}`]);
       const [row] = await query<Row>(
         `UPDATE purchases SET state = 'revoked', revoked_at = COALESCE(revoked_at, now()), checked_at = now()
           WHERE store = $1 AND external_digest = $2 AND state <> 'revoked' RETURNING *`,
         [store, digest],
       );
-      if (!row) return false;
+      if (!row) {
+        const [known] = await query(`SELECT 1 FROM purchases WHERE store = $1 AND external_digest = $2`, [store, digest]);
+        if (!known) {
+          await query(`INSERT INTO purchase_revocations (store, external_digest, reason) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [store, digest, reason]);
+        }
+        return false;
+      }
       await writeAudit(query, { actor: `system:${store}`, action: 'purchase.revoked', targetType: 'purchase', targetId: row.id, changes: { store, productId: row.product_id, reason } });
       return true;
     });
@@ -297,6 +322,8 @@ export class BillingService implements OnApplicationBootstrap, OnApplicationShut
    */
   private async restore(store: Store, digest: string, reason: string): Promise<boolean> {
     return this.db.transaction(async (query) => {
+      await query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`purchase:${store}:${digest}`]);
+      await query(`DELETE FROM purchase_revocations WHERE store = $1 AND external_digest = $2`, [store, digest]);
       const [row] = await query<Row>(
         `UPDATE purchases SET state = 'verified', revoked_at = NULL, verified_at = coalesce(verified_at, now()), checked_at = now()
           WHERE store = $1 AND external_digest = $2 AND state = 'revoked' RETURNING *`,

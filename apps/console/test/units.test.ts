@@ -162,3 +162,20 @@ describe('page language', () => {
     expect(langFrom('xx')).toBe('th');
   });
 });
+
+describe('readBodyCapped', () => {
+  it('reads a body under the cap and refuses one over it, declared or streamed', async () => {
+    const { readBodyCapped } = await import('../src/lib/bff');
+    expect(await readBodyCapped(new Request('http://x/', { method: 'POST', body: 'hello' }), 16)).toBe('hello');
+    expect(await readBodyCapped(new Request('http://x/', { method: 'POST', body: 'x'.repeat(17) }), 16)).toBeNull();
+    const streamed = new ReadableStream<Uint8Array>({
+      start(c) {
+        for (let i = 0; i < 4; i++) c.enqueue(new Uint8Array(8));
+        c.close();
+      },
+    });
+    const req = new Request('http://x/', { method: 'POST', body: streamed, duplex: 'half' } as RequestInit);
+    expect(await readBodyCapped(req, 16)).toBeNull();
+    expect(await readBodyCapped(new Request('http://x/', { method: 'GET' }), 16)).toBe('');
+  });
+});

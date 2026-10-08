@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Injectable, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { UNSAFE_TEXT } from '../common/text-safety';
 import type { Request, Response } from 'express';
 import { writeAudit } from '../audit/audit';
 import { AuthGuard } from '../auth/auth.guard';
@@ -54,7 +55,7 @@ const CACHE_TTL_MS = 10 * 60_000;
 const CACHE_STALE_MS = 60 * 60_000;
 const CACHE_MAX = 500;
 const UPSTREAM_TIMEOUT_MS = 5000;
-const UPSTREAM_MAX_BYTES = 2 * 1024 * 1024;
+export const UPSTREAM_MAX_BYTES = 2 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HOST = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const UNSAFE = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g;
@@ -129,7 +130,8 @@ export function toDirectoryStation(raw: unknown): DirectoryStation | null {
   return { id, name, country, language, genres, streamUrl, codec, bitrateKbps: bitrate, logoUrl: httpsUrl(r.favicon), homepageUrl: httpsUrl(r.homepage) };
 }
 
-const hostOf = (url: string) => new URL(url).hostname.toLowerCase();
+/** Lower case, without a trailing dot, so `radio.example.com.` cannot slip past a block on `example.com`. */
+const hostOf = (url: string) => new URL(url).hostname.toLowerCase().replace(/\.+$/, '');
 
 /**
  * Search of the Radio Browser community directory through our server (decided by Tar 2026-10-05), so the apps
@@ -139,6 +141,8 @@ const hostOf = (url: string) => new URL(url).hostname.toLowerCase();
 @Injectable()
 export class DirectoryService {
   private readonly cache = new Map<string, { at: number; stations: DirectoryStation[]; full: boolean }>();
+  /** One upstream call per search at a time: concurrent misses for the same search share it. */
+  private readonly inFlight = new Map<string, Promise<{ stations: DirectoryStation[]; full: boolean }>>();
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -170,6 +174,14 @@ export class DirectoryService {
     const key = params.toString();
     const cached = this.cache.get(key);
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached;
+    const running = this.inFlight.get(key);
+    if (running) return running;
+    const call = this.fetchPage(baseUrl, key, q.limit, cached).finally(() => this.inFlight.delete(key));
+    this.inFlight.set(key, call);
+    return call;
+  }
+
+  private async fetchPage(baseUrl: string, key: string, limit: number, cached: { at: number; stations: DirectoryStation[]; full: boolean } | undefined): Promise<{ stations: DirectoryStation[]; full: boolean }> {
     try {
       const res = await this.http(`${baseUrl}/json/stations/search?${key}`, {
         headers: { accept: 'application/json', 'user-agent': `TuneDeck-API/${this.config.build}` },
@@ -182,7 +194,7 @@ export class DirectoryService {
       if (!Array.isArray(raw)) throw new Error('not a list');
       const seen = new Set<string>();
       const stations = raw.map(toDirectoryStation).filter((s): s is DirectoryStation => !!s && !seen.has(s.id) && !!seen.add(s.id));
-      const entry = { at: Date.now(), stations, full: raw.length >= q.limit };
+      const entry = { at: Date.now(), stations, full: raw.length >= limit };
       this.cache.delete(key);
       this.cache.set(key, entry);
       if (this.cache.size > CACHE_MAX) this.cache.delete(this.cache.keys().next().value!);
@@ -259,7 +271,7 @@ export function parseBlock(body: unknown): { kind: 'station' | 'host'; value: st
 
 export function parseBlockReason(v: unknown): string {
   const reason = typeof v === 'string' ? v.normalize('NFC').trim() : '';
-  if (reason.length < 10 || reason.length > 500 || /[\u0000-\u001f\u007f-\u009f]/.test(reason)) throw invalid('reason', 'length');
+  if (reason.length < 10 || reason.length > 500 || UNSAFE_TEXT.test(reason)) throw invalid('reason', 'length');
   return reason;
 }
 

@@ -44,12 +44,17 @@ const FEATURES: { id: ConfigFeature; label: string; hint: string }[] = [
   {
     id: "videoPlayback",
     label: "ดูช่องทีวีจากลิสต์ของผู้ใช้",
-    hint: "เฉพาะบนมือถือและกล่องทีวี ในรถเล่นเสียงอย่างเดียวเสมอ",
+    hint: "ช่องวิดีโอจากเพลย์ลิสต์ที่ผู้ใช้นำเข้าเอง",
   },
   {
     id: "webBrowser",
     label: "เบราว์เซอร์ในแอป",
-    hint: "เปิดเว็บอย่าง YouTube บนมือถือและกล่องทีวี ไม่แสดงในรถ",
+    hint: "เปิดเว็บอย่าง YouTube ภายในแอป",
+  },
+  {
+    id: "carScreenVideo",
+    label: "ภาพบนจอรถ",
+    hint: "ทีวีและเบราว์เซอร์บน CarPlay / Android Auto ผู้ใช้ปิดเองได้ในตั้งค่าแอป ปิดตรงนี้คือปิดทุกคน",
   },
 ];
 const FIELD_LABEL: Record<string, string> = {
@@ -61,6 +66,7 @@ const FIELD_LABEL: Record<string, string> = {
   "features.radioDirectory": "ค้นหาวิทยุทั่วโลก",
   "features.videoPlayback": "ช่องทีวี",
   "features.webBrowser": "เบราว์เซอร์ในแอป",
+  "features.carScreenVideo": "ภาพบนจอรถ",
   catalogRefreshHours: "รอบรีเฟรชแค็ตตาล็อก",
   "targets.ios.include": "ส่งให้ iOS",
   "targets.ios.minBuild": "iOS ตั้งแต่ build",

@@ -444,6 +444,15 @@ describe('session lifetime', () => {
     expect(res.status).toBe(200);
   });
 
+  it('shares one refresh between parallel requests of the same session (each refresh token works once)', async () => {
+    idp.setAccessTtl(-60);
+    const cookie = await signIn('alice-parallel');
+    idp.setAccessTtl(300);
+    const answers = await Promise.all(Array.from({ length: 5 }, () => get(cookie)));
+    expect(answers.map((r) => r.status)).toEqual([200, 200, 200, 200, 200]);
+    expect((await get(cookie)).status).toBe(200);
+  });
+
   it('ends the session when the refresh token is no longer valid', async () => {
     idp.setAccessTtl(-60);
     const cookie = await signIn('alice-revoked');
@@ -775,14 +784,25 @@ describe('account export and deletion', () => {
     }
     expect(status).toEqual({ id: job.id, status: 'ready', requestedAt: expect.any(String), readyAt: expect.any(String), expiresAt: expect.any(String) });
 
-    const file = await bff.exportFile(new Request(`${BASE}/bff/account/exports/${job.id}/file`, { headers: { cookie } }), job.id);
+    const download = async (c: string, csrf?: string) =>
+      bff.exportFile(
+        new Request(`${BASE}/bff/account/exports/${job.id}/file`, {
+          method: 'POST',
+          headers: { cookie: c, origin: BASE, 'content-type': 'application/x-www-form-urlencoded' },
+          body: csrf ? new URLSearchParams({ csrf }).toString() : '',
+        }),
+        job.id,
+      );
+    // It mints a link, so a cross-site page (no token) cannot trigger it.
+    expect((await download(cookie)).status).toBe(403);
+    const file = await download(cookie, await csrfFor(cookie));
     expect(file.status).toBe(200);
     expect(file.headers.get('content-disposition')).toMatch(/^attachment; filename="tunedeck-export-[\d-]+\.json"$/);
     expect((await file.json()).format).toBe('tunedeck-account-export');
 
     // Someone else's export, and malformed ids, are not found.
     const other = await signIn('acct-web-export-other');
-    expect((await bff.exportFile(new Request(`${BASE}/bff/account/exports/${job.id}/file`, { headers: { cookie: other } }), job.id)).status).toBe(404);
+    expect((await download(other, await csrfFor(other))).status).toBe(404);
     expect((await bff.exportStatus(new Request(`${BASE}/bff/account/exports/x`, { headers: { cookie } }), 'x')).status).toBe(404);
   });
 

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Injectable, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Header, Get, HttpCode, HttpStatus, Inject, Injectable, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AccountService } from '../account/account';
 import { AccountExportsService } from '../account/exports';
@@ -227,6 +227,7 @@ export class AdminJobsController {
   /** Body `{ reason }` (10–500 characters), recorded with the outcome. */
   @Post(':id/retry')
   @HttpCode(HttpStatus.OK)
+  @Header('Cache-Control', 'no-store')
   async retry(@Req() req: Request, @Param('id') id: string, @Body() body: unknown) {
     return this.jobs.retry({ userId: req.actor!.userId, requestId: req.requestId }, id, parseExportReason(body));
   }

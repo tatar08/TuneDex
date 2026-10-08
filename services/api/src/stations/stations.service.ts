@@ -170,7 +170,13 @@ export class StationsService implements OnApplicationBootstrap, OnApplicationShu
   async refreshRights(): Promise<number> {
     const rows = await this.db.query(
       `UPDATE radio_stations s SET rights_expires_at = x.until
-         FROM (SELECT id, station_rights_until(id) AS until FROM radio_stations) x
+         FROM (SELECT id, station_rights_until(id) AS until FROM radio_stations c
+                -- Only stations a record may have just changed: one that started in the last week (a week covers
+                -- an API that was down), or one hidden now. Not the whole catalog every sweep.
+                WHERE c.rights_expires_at <= now()
+                   OR EXISTS (SELECT 1 FROM rights_records r
+                               WHERE r.station_id = c.id AND r.status = 'active'
+                                 AND r.valid_from BETWEEN (now() AT TIME ZONE 'UTC')::date - 7 AND (now() AT TIME ZONE 'UTC')::date)) x
         WHERE x.id = s.id AND (x.until IS NULL OR x.until > now()) AND x.until IS DISTINCT FROM s.rights_expires_at
         RETURNING s.id`,
     );
@@ -450,7 +456,7 @@ export class StationsService implements OnApplicationBootstrap, OnApplicationShu
     }>(
       `SELECT a.id::text, a.occurred_at, a.action, a.actor, u.oidc_subject AS actor_subject, a.reason, a.changes
          FROM audit_events a
-         LEFT JOIN users u ON a.actor LIKE 'user:%' AND u.id::text = substr(a.actor, 6)
+         LEFT JOIN users u ON u.id = CASE WHEN a.actor ~ '^user:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN substr(a.actor, 6)::uuid END
         WHERE a.target_type = 'station' AND a.target_id = $1 AND ${HISTORY_ACTIONS}
           AND ($2::bigint IS NULL OR a.id < $2::bigint)
         ORDER BY a.id DESC LIMIT $3`,

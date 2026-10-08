@@ -40,8 +40,21 @@ export interface SignedConfig {
   targets: Targets;
   publishedAt: string | null;
   expiresAt: string | null;
+  /**
+   * When this copy was signed, and until when an app may accept it as fresh (at most a day, never past
+   * expiresAt). A captured old copy cannot be replayed later to roll apps back to an older release.
+   */
+  issuedAt: string;
+  validUntil: string;
   config: AppConfigPayload;
 }
+
+/** A signed copy is re-signed after this long, so validUntil keeps moving forward. */
+const RESIGN_AFTER_MS = 60 * 60_000;
+/** A publish or rollback reaches every instance's public answer within this. */
+const RELEASES_CACHE_MS = 5_000;
+/** How long an app may accept one signed copy. */
+const SIGNED_COPY_VALID_MS = 24 * 60 * 60_000;
 
 export interface ReleaseView {
   release: number;
@@ -160,7 +173,8 @@ const releaseView = (r: ReleaseRow, viewer: string): ReleaseView => ({
 @Injectable()
 export class AppConfigService {
   /** Signed documents by release (0 = defaults, per channel); a release never changes, so entries never go stale. */
-  private readonly cache = new Map<string, { body: { jws: string } & SignedConfig; etag: string }>();
+  private readonly cache = new Map<string, { body: { jws: string } & SignedConfig; etag: string; signedAt: number }>();
+  private readonly releaseRows = new Map<Channel, { at: number; rows: ReleaseRow[] }>();
 
   constructor(
     private readonly db: Database,
@@ -240,7 +254,10 @@ export class AppConfigService {
       }
       const before = normalize(draft.payload);
       const beforeTargets = normalizeTargets(draft.targets);
-      const { targets: targetsPatch, ...configPatch } = (typeof body === 'object' && body !== null && !Array.isArray(body) ? body : { body }) as Record<string, unknown>;
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+        throw new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', { field: 'body', reason: 'must_be_object' });
+      }
+      const { targets: targetsPatch, ...configPatch } = body as Record<string, unknown>;
       const next = applyPatch(before, configPatch);
       const nextTargets = targetsPatch === undefined ? beforeTargets : applyTargetsPatch(beforeTargets, targetsPatch);
       const fields = [...changedFields(before, next), ...changedTargets(beforeTargets, nextTargets)];
@@ -261,6 +278,7 @@ export class AppConfigService {
         requestId: actor.requestId,
       });
     });
+    this.releaseRows.clear();
     return this.view(actor);
   }
 
@@ -294,6 +312,7 @@ export class AppConfigService {
         requestId: actor.requestId,
       });
     });
+    this.releaseRows.clear();
     return this.view(actor);
   }
 
@@ -352,6 +371,7 @@ export class AppConfigService {
         requestId: actor.requestId,
       });
     });
+    this.releaseRows.clear();
     return this.view(actor);
   }
 
@@ -386,7 +406,20 @@ export class AppConfigService {
         requestId: actor.requestId,
       });
     });
+    this.releaseRows.clear();
     return this.view(actor);
+  }
+
+  /**
+   * The newest 50 releases on a channel (releases are few; plenty to find the one that fits), read at most once
+   * every few seconds per instance: every app launch asks for its config, and none of them signs in.
+   */
+  private async recentReleases(channel: Channel): Promise<ReleaseRow[]> {
+    const hit = this.releaseRows.get(channel);
+    if (hit && Date.now() - hit.at < RELEASES_CACHE_MS) return hit.rows;
+    const rows = await this.db.query<ReleaseRow>(`SELECT ${RELEASE_COLUMNS} FROM app_config_releases WHERE environment = $1 ORDER BY release DESC LIMIT 50`, [channel]);
+    this.releaseRows.set(channel, { at: Date.now(), rows });
+    return rows;
   }
 
   /**
@@ -395,13 +428,14 @@ export class AppConfigService {
    * debugging. Apps must act only on the verified JWS.
    */
   async signedCurrent(client: { channel: Channel; platform: Platform | null; build: number | null } = { channel: 'production', platform: null, build: null }): Promise<{ body: { jws: string } & SignedConfig; etag: string }> {
-    // Releases are few; the newest 50 on the channel are plenty to find the one that fits.
-    const rows = await this.db.query<ReleaseRow>(`SELECT ${RELEASE_COLUMNS} FROM app_config_releases WHERE environment = $1 ORDER BY release DESC LIMIT 50`, [client.channel]);
+    const rows = await this.recentReleases(client.channel);
     const row = rows.find((r) => fits(normalizeTargets(r.targets), client.platform, client.build)) ?? null;
     const release = row ? Number(row.release) : 0;
     const key = row ? `r${release}` : `d-${client.channel}`;
     const hit = this.cache.get(key);
-    if (hit) return hit;
+    const now = Date.now();
+    if (hit && now - hit.signedAt < RESIGN_AFTER_MS) return hit;
+    const expires = row?.expires_at.getTime() ?? Infinity;
     const doc: SignedConfig = {
       schemaVersion: row?.schema_version ?? CONFIG_SCHEMA_VERSION,
       release,
@@ -409,12 +443,14 @@ export class AppConfigService {
       targets: row ? normalizeTargets(row.targets) : DEFAULT_TARGETS,
       publishedAt: row?.published_at.toISOString() ?? null,
       expiresAt: row?.expires_at.toISOString() ?? null,
+      issuedAt: new Date(now).toISOString(),
+      validUntil: new Date(Math.min(now + SIGNED_COPY_VALID_MS, expires)).toISOString(),
       config: row ? normalize(row.payload) : DEFAULT_CONFIG,
     };
     const jws = await new CompactSign(new TextEncoder().encode(JSON.stringify(doc)))
       .setProtectedHeader({ alg: 'EdDSA', kid: this.signer.keyId, typ: 'tunedeck-config+jws' })
       .sign(this.signer.key);
-    const entry = { body: { jws, ...doc }, etag: `"${key}-${this.signer.keyId}"` };
+    const entry = { body: { jws, ...doc }, etag: `"${key}-${this.signer.keyId}-${now.toString(36)}"`, signedAt: now };
     if (this.cache.size > 200) this.cache.clear();
     this.cache.set(key, entry);
     return entry;

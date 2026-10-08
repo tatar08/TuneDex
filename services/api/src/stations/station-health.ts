@@ -175,7 +175,15 @@ export class StationHealthService implements OnApplicationBootstrap, OnApplicati
   }
 
   private async prune(): Promise<void> {
-    await this.db.query(`DELETE FROM station_health WHERE checked_at < now() - make_interval(days => $1)`, [HEALTH_RETENTION_DAYS]);
+    // In chunks, so a large backlog never runs into the statement timeout and rolls back every round.
+    for (let i = 0; i < 50; i++) {
+      const gone = await this.db.query(
+        `DELETE FROM station_health WHERE id IN (
+           SELECT id FROM station_health WHERE checked_at < now() - make_interval(days => $1) LIMIT 5000) RETURNING 1`,
+        [HEALTH_RETENTION_DAYS],
+      );
+      if (gone.length < 5000) break;
+    }
     await this.db.query(`DELETE FROM station_check_requests WHERE requested_at < now() - interval '1 day'`);
   }
 

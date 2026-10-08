@@ -1,4 +1,5 @@
 import { HttpStatus, Injectable, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
+import { allLimited } from '../common/concurrency';
 import { IdpError, IdpUsersService } from '../account/idp-users';
 import { StructuredLogger } from '../common/logger';
 import { writeAudit } from '../audit/audit';
@@ -63,6 +64,9 @@ const toView = (r: Row): DeviceView => ({
 export const SESSION_END_WINDOW_DAYS = 30;
 /** A worker holds a due session end this long while it calls Keycloak, so instances do not double up. */
 const SESSION_LEASE_MINUTES = 5;
+/** Session ends taken per tick, and Keycloak calls in flight at once. */
+const SESSION_END_BATCH = 25;
+const SESSION_END_CONCURRENCY = 4;
 
 /** What a session-end attempt left behind. */
 export type SessionEndOutcome = 'ended' | 'retrying' | 'dead_letter' | 'not_configured';
@@ -70,6 +74,7 @@ export type SessionEndOutcome = 'ended' | 'retrying' | 'dead_letter' | 'not_conf
 @Injectable()
 export class DevicesService implements OnApplicationBootstrap, OnApplicationShutdown {
   private timer?: NodeJS.Timeout;
+  private working: Promise<number> | null = null;
 
   constructor(
     private readonly db: Database,
@@ -78,15 +83,24 @@ export class DevicesService implements OnApplicationBootstrap, OnApplicationShut
   ) {}
 
   onApplicationBootstrap(): void {
-    this.timer = setInterval(() => void this.retrySessionEnds().catch(() => undefined), WORKER_TICK_MS);
+    this.timer = setInterval(() => {
+      // A tick still calling Keycloak is left to finish; the next one starts after it.
+      this.working ??= this.retrySessionEnds()
+        .catch(() => 0)
+        .finally(() => (this.working = null));
+    }, WORKER_TICK_MS);
     this.timer.unref();
   }
 
-  onApplicationShutdown(): void {
+  async onApplicationShutdown(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
+    await this.working;
   }
 
-  /** Ends the Keycloak session of each recently signed-out device whose session end is due and not yet confirmed. */
+  /**
+   * Ends the Keycloak session of each recently signed-out device whose session end is due and not yet confirmed.
+   * A small batch, a few calls at a time, so the whole batch finishes well inside the lease it took.
+   */
   async retrySessionEnds(): Promise<number> {
     const rows = await this.db.query<{ user_id: string; id: string; idp_session_id: string; idp_session_attempts: number }>(
       `UPDATE devices SET idp_session_next_attempt_at = now() + make_interval(mins => $2)
@@ -95,13 +109,15 @@ export class DevicesService implements OnApplicationBootstrap, OnApplicationShut
            WHERE revoked_at IS NOT NULL AND revoked_at > now() - make_interval(days => $1) AND idp_session_id IS NOT NULL
              AND idp_session_ended_at IS NULL AND idp_session_dead_at IS NULL
              AND (idp_session_next_attempt_at IS NULL OR idp_session_next_attempt_at <= now())
-           LIMIT 100 FOR UPDATE SKIP LOCKED)
+           LIMIT $3 FOR UPDATE SKIP LOCKED)
         RETURNING user_id, id, idp_session_id, idp_session_attempts`,
-      [SESSION_END_WINDOW_DAYS, SESSION_LEASE_MINUTES],
+      [SESSION_END_WINDOW_DAYS, SESSION_LEASE_MINUTES, SESSION_END_BATCH],
     );
-    let ended = 0;
-    for (const r of rows) if ((await this.endIdpSession(r.user_id, r.id, r.idp_session_id, r.idp_session_attempts)) === 'ended') ended++;
-    return ended;
+    const outcomes = await allLimited(
+      rows.map((r) => () => this.endIdpSession(r.user_id, r.id, r.idp_session_id, r.idp_session_attempts)),
+      SESSION_END_CONCURRENCY,
+    );
+    return outcomes.filter((o) => o === 'ended').length;
   }
 
   /**

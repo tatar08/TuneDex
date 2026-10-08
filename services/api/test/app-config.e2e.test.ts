@@ -47,8 +47,14 @@ describe('remote app config (/v1/config, /v1/admin/config)', () => {
       targets: { ios: { include: true, minBuild: null, maxBuild: null }, android: { include: true, minBuild: null, maxBuild: null } },
       publishedAt: null,
       expiresAt: null,
-      config: { minSupportedBuild: { ios: null, android: null }, features: { catalogBrowse: true, playlistImport: true, diagnosticsUpload: true, radioDirectory: true, videoPlayback: true, webBrowser: true }, catalogRefreshHours: 24 },
+      issuedAt: expect.any(String),
+      validUntil: expect.any(String),
+      config: { minSupportedBuild: { ios: null, android: null }, features: { catalogBrowse: true, playlistImport: true, diagnosticsUpload: true, radioDirectory: true, videoPlayback: true, webBrowser: true, carScreenVideo: true }, catalogRefreshHours: 24 },
     });
+    // Even the defaults, which never expire, are signed with a freshness window of one day.
+    const signedFor = Date.parse(doc.validUntil as string) - Date.parse(doc.issuedAt as string);
+    expect(signedFor).toBe(24 * 60 * 60_000);
+    expect(Math.abs(Date.parse(doc.issuedAt as string) - Date.now())).toBeLessThan(60_000);
     expect(res.headers.etag).toMatch(/^"d-production-/);
     await http().get('/v1/config').set('If-None-Match', res.headers.etag).expect(304);
   });

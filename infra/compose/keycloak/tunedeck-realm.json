@@ -118,7 +118,7 @@
           "requirement": "REQUIRED",
           "priority": 20,
           "autheticatorFlow": false,
-          "userSetupAllowed": true
+          "userSetupAllowed": false
         }
       ]
     }
