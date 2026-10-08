@@ -81,6 +81,8 @@ export function testConfig(databaseUrl: string): AppConfig {
 export function createFakeIdp() {
   const deleted: string[] = [];
   const endedSessions: string[] = [];
+  /** One-time-code credentials per user; a user not listed has one code, `otp-<subject>`. */
+  const otp = new Map<string, { id: string; type: string; createdDate: number }[]>();
   const state = { failDeletes: false, failSessions: false, failLookups: false, tokenRequests: 0, validToken: 'admin-token' };
   const fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = String(input);
@@ -105,6 +107,13 @@ export function createFakeIdp() {
       deleted.push(id);
       return new Response(null, { status: 204 });
     }
+    const creds = /^https:\/\/idp\.test\/admin\/realms\/tunedeck\/users\/([^/]+)\/credentials$/.exec(url);
+    if (creds && (init?.method ?? 'GET') === 'GET') {
+      if ((init?.headers as Record<string, string>).Authorization !== `Bearer ${state.validToken}`) return new Response(null, { status: 401 });
+      if (state.failLookups) return new Response(null, { status: 503 });
+      const id = decodeURIComponent(creds[1]);
+      return Response.json([{ id: `pw-${id}`, type: 'password', createdDate: 1 }, ...(otp.get(id) ?? [{ id: `otp-${id}`, type: 'otp', createdDate: 2 }])]);
+    }
     const session = /^https:\/\/idp\.test\/admin\/realms\/tunedeck\/sessions\/([^/?]+)(\?isOffline=true)?$/.exec(url);
     if (session && init?.method === 'DELETE') {
       if ((init.headers as Record<string, string>).Authorization !== `Bearer ${state.validToken}`) return new Response(null, { status: 401 });
@@ -114,7 +123,7 @@ export function createFakeIdp() {
     }
     return new Response(null, { status: 404 });
   };
-  return { fetch: fetch as typeof globalThis.fetch, deleted, endedSessions, state };
+  return { fetch: fetch as typeof globalThis.fetch, deleted, endedSessions, state, otp };
 }
 
 const ADMIN_URL = process.env.TEST_DATABASE_URL ?? 'postgres://postgres@127.0.0.1:54329/postgres';

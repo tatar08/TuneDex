@@ -62,15 +62,20 @@ export class IdpUsersService {
   }
 
   /**
-   * Whether the user has a one-time-code (TOTP) credential. Staff roles are only granted to people who set one
-   * up, because the realm does not let a password-only sign-in enroll a new code during the MFA step.
+   * Ids of the user's one-time-code (TOTP) credentials at Keycloak, oldest first. Staff roles are only granted to
+   * people who have one, and the ids are pinned then (staff_mfa_pins): Keycloak lets a password-only sign-in enroll
+   * a new code, so a code that was not pinned does not count as the staff member's.
    */
-  async hasOtp(subject: string): Promise<boolean> {
+  async otpCredentialIds(subject: string): Promise<string[]> {
     const admin = this.config.idpAdmin!;
     const res = await this.admin('GET', `${admin.adminBase}/users/${encodeURIComponent(subject)}/credentials`);
     if (!res.ok) throw new IdpError('lookup', res.status);
     const creds = (await res.json()) as unknown;
-    return Array.isArray(creds) && creds.some((c) => typeof c === 'object' && c !== null && (c as { type?: unknown }).type === 'otp');
+    if (!Array.isArray(creds)) throw new IdpError('lookup', res.status);
+    return creds
+      .filter((c): c is { type: string; id: string; createdDate?: number } => typeof c === 'object' && c !== null && c.type === 'otp' && typeof c.id === 'string')
+      .sort((a, b) => (a.createdDate ?? 0) - (b.createdDate ?? 0))
+      .map((c) => c.id);
   }
 
   /** A cached token Keycloak no longer accepts (revoked, keys rotated, server rebuilt) is replaced and the call retried once. */

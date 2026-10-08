@@ -29,6 +29,7 @@ export type ErrorCode =
   | 'PURCHASE_INVALID'
   | 'PURCHASE_CONFLICT'
   | 'MFA_REQUIRED'
+  | 'STAFF_MFA_CHANGED'
   | 'IDEMPOTENCY_KEY_REUSED'
   | 'IDEMPOTENCY_IN_PROGRESS'
   | 'SUPPORT_ACCESS_REQUIRED'
@@ -64,6 +65,7 @@ export const MESSAGE_KEYS: Record<ErrorCode, string> = {
   PURCHASE_INVALID: 'errors.billing.invalid',
   PURCHASE_CONFLICT: 'errors.billing.ownedByAnotherAccount',
   MFA_REQUIRED: 'errors.auth.mfaRequired',
+  STAFF_MFA_CHANGED: 'errors.auth.staffMfaChanged',
   IDEMPOTENCY_KEY_REUSED: 'errors.request.idempotencyKeyReused',
   IDEMPOTENCY_IN_PROGRESS: 'errors.request.inProgress',
   SUPPORT_ACCESS_REQUIRED: 'errors.support.accessRequired',

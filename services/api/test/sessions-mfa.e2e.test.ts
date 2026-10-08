@@ -1,6 +1,8 @@
 import request from 'supertest';
 import { DevicesService } from '../src/devices/devices.service';
+import { IdpUsersService } from '../src/account/idp-users';
 import { Database } from '../src/db/database';
+import { StaffService } from '../src/staff/staff';
 import { runStaffCli } from '../src/staff/staff-cli';
 import { createIdentity, createTestApp, createTestDatabase, TestIdentity } from './harness';
 
@@ -127,6 +129,50 @@ describe('device sign-out ends the Keycloak session, and privileged staff action
     // After 12 hours the session no longer counts.
     await t.pool.query(`UPDATE staff_mfa_sessions SET mfa_at = now() - interval '13 hours'`);
     expect((await http().get('/v1/admin/jobs').set(await as({ sid: 'kc-ops-1', acr: '1' }))).status).toBe(401);
+  });
+
+  it('refuses staff work while the account holds a one-time code that was not pinned', async () => {
+    const lookup = (sub: string) => t.app.get(IdpUsersService).otpCredentialIds(sub);
+    const staff = (...args: string[]) => runStaffCli(args, new Database(t.pool), () => undefined, lookup);
+    await http().get('/v1/me/settings').set('Authorization', `Bearer ${await id.token('mfa-pin')}`).expect(200);
+    t.idp.otp.set('mfa-pin', [{ id: 'code-phone', type: 'otp', createdDate: 10 }]);
+    expect(await staff('grant', 'mfa-pin', 'operator', '--by', 'tar', '--reason', 'pin tests')).toBe(0);
+    const as = async () => ({ Authorization: `Bearer ${await id.token('mfa-pin', { sid: 'kc-pin-1', authTime: now(), acr: '2' })}` });
+    await http().get('/v1/admin/jobs').set(await as()).expect(200);
+
+    // Someone with only the password enrolls a second code (MFA step or account page): staff work stops.
+    t.idp.otp.set('mfa-pin', [{ id: 'code-phone', type: 'otp', createdDate: 10 }, { id: 'code-attacker', type: 'otp', createdDate: 20 }]);
+    (t.app.get(StaffService) as unknown as { pinChecked: Map<string, number> }).pinChecked.clear();
+    const refused = await http().get('/v1/admin/jobs').set(await as());
+    expect(refused.status).toBe(403);
+    expect(refused.body.code).toBe('STAFF_MFA_CHANGED');
+    // A further grant is refused too, until an operator who checked with the person pins the codes again.
+    expect(await staff('grant', 'mfa-pin', 'support', '--by', 'tar', '--reason', 'pin tests')).toBe(4);
+    t.idp.otp.set('mfa-pin', [{ id: 'code-new-phone', type: 'otp', createdDate: 30 }]);
+    expect(await staff('pin-mfa', 'mfa-pin', '--by', 'tar', '--reason', 'new phone, checked on a call')).toBe(0);
+    await http().get('/v1/admin/jobs').set(await as()).expect(200);
+    const audit = await t.pool.query(`SELECT actor, reason, changes FROM audit_events WHERE action = 'staff_mfa.pin' AND actor LIKE 'operator:%' ORDER BY id`);
+    expect(audit.rows).toEqual([{ actor: 'operator:tar', reason: 'new phone, checked on a call', changes: { codes: 1, previously: 1 } }]);
+
+    // With every code removed, staff work stops; Keycloak unreachable is a 503, never a pass.
+    t.idp.otp.set('mfa-pin', []);
+    (t.app.get(StaffService) as unknown as { pinChecked: Map<string, number> }).pinChecked.clear();
+    expect((await http().get('/v1/admin/jobs').set(await as())).body.code).toBe('STAFF_MFA_CHANGED');
+    t.idp.state.failLookups = true;
+    try {
+      expect((await http().get('/v1/admin/jobs').set(await as())).status).toBe(503);
+    } finally {
+      t.idp.state.failLookups = false;
+    }
+  });
+
+  it('pins the codes of staff granted before pins existed on their first MFA request', async () => {
+    const staff = (...args: string[]) => runStaffCli(args, new Database(t.pool), () => undefined);
+    await http().get('/v1/me/settings').set('Authorization', `Bearer ${await id.token('mfa-legacy')}`).expect(200);
+    expect(await staff('grant', 'mfa-legacy', 'operator', '--by', 'tar', '--reason', 'legacy grant')).toBe(0);
+    await http().get('/v1/admin/jobs').set('Authorization', `Bearer ${await id.token('mfa-legacy', { sid: 'kc-legacy', authTime: now(), acr: '2' })}`).expect(200);
+    const pin = await t.pool.query(`SELECT p.credential_ids, p.pinned_by FROM staff_mfa_pins p JOIN users u ON u.id = p.user_id WHERE u.oidc_subject = 'mfa-legacy'`);
+    expect(pin.rows).toEqual([{ credential_ids: ['otp-mfa-legacy'], pinned_by: 'system:first_use' }]);
   });
 
   it('reports a new roles version whenever a role is granted or revoked', async () => {
