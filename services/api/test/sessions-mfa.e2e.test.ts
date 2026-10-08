@@ -143,6 +143,7 @@ describe('device sign-out ends the Keycloak session, and privileged staff action
     // Someone with only the password enrolls a second code (MFA step or account page): staff work stops.
     t.idp.otp.set('mfa-pin', [{ id: 'code-phone', type: 'otp', createdDate: 10 }, { id: 'code-attacker', type: 'otp', createdDate: 20 }]);
     (t.app.get(StaffService) as unknown as { pinChecked: Map<string, number> }).pinChecked.clear();
+    expect((await http().get('/v1/me/staff').set(await as())).body).toMatchObject({ mfa: true, mfaChanged: true });
     const refused = await http().get('/v1/admin/jobs').set(await as());
     expect(refused.status).toBe(403);
     expect(refused.body.code).toBe('STAFF_MFA_CHANGED');
@@ -151,6 +152,7 @@ describe('device sign-out ends the Keycloak session, and privileged staff action
     t.idp.otp.set('mfa-pin', [{ id: 'code-new-phone', type: 'otp', createdDate: 30 }]);
     expect(await staff('pin-mfa', 'mfa-pin', '--by', 'tar', '--reason', 'new phone, checked on a call')).toBe(0);
     await http().get('/v1/admin/jobs').set(await as()).expect(200);
+    expect((await http().get('/v1/me/staff').set(await as())).body.mfaChanged).toBe(false);
     const audit = await t.pool.query(`SELECT actor, reason, changes FROM audit_events WHERE action = 'staff_mfa.pin' AND actor LIKE 'operator:%' ORDER BY id`);
     expect(audit.rows).toEqual([{ actor: 'operator:tar', reason: 'new phone, checked on a call', changes: { codes: 1, previously: 1 } }]);
 

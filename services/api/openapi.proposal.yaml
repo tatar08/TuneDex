@@ -281,7 +281,7 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '403': { description: 'ACCOUNT_DELETING, AUTH_FORBIDDEN or DEVICE_REVOKED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { description: 'API_RATE_LIMITED, 120 reads a minute per account; details.retryAfterSeconds', headers: { Retry-After: { schema: { type: integer } } }, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '503': { $ref: '#/components/responses/Error' }
+        '503': { description: 'DEPENDENCY_UNAVAILABLE, also when Keycloak cannot be asked about a staff member''s one-time codes', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/me/export:
     get:
       summary: The account's data built on the spot (legacy; new clients use POST /v1/me/exports)
@@ -1510,10 +1510,11 @@ components:
         createdAt: { type: string, format: date-time }
     MeStaff:
       type: object
-      required: [roles, mfa, rolesVersion]
+      required: [roles, mfa, mfaChanged, rolesVersion]
       properties:
         roles: { type: array, items: { type: string, enum: [support, catalog_editor, operator, admin, auditor] }, description: Current unrevoked roles, sorted; empty for customers }
         mfa: { type: boolean, description: 'Whether this Keycloak session signed in with MFA within 12 hours (always false without roles; always true in dev without STAFF_MFA_ACR)' }
+        mfaChanged: { type: boolean, description: 'True when the account holds a one-time code an operator has not pinned, so /v1/admin answers 403 STAFF_MFA_CHANGED (false when mfa is false)' }
         rolesVersion: { type: string, minLength: 16, maxLength: 16, description: Digest that changes whenever a role is granted or revoked; end the console session when it changes }
     MeSettingsOverrides:
       type: object

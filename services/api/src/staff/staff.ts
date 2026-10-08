@@ -152,11 +152,13 @@ export class StaffController {
   constructor(private readonly staff: StaffService) {}
 
   @Get()
-  async roles(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<{ roles: StaffRole[]; mfa: boolean; rolesVersion: string }> {
+  async roles(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<{ roles: StaffRole[]; mfa: boolean; mfaChanged: boolean; rolesVersion: string }> {
     res.setHeader('Cache-Control', 'no-store');
     const roles = await this.staff.rolesOf(req.actor!.userId);
     // `mfa` false: the console asks a staff member to sign in again with MFA before showing staff pages.
     const mfa = roles.length > 0 ? await this.staff.sessionHasMfa(req.actor!) : false;
-    return { roles, mfa, rolesVersion: await this.staff.rolesVersion(req.actor!.userId) };
+    // `mfaChanged` true: staff routes answer STAFF_MFA_CHANGED, so the console explains instead of showing pages that fail.
+    const mfaChanged = mfa ? !(await this.staff.mfaCodesPinned(req.actor!)) : false;
+    return { roles, mfa, mfaChanged, rolesVersion: await this.staff.rolesVersion(req.actor!.userId) };
   }
 }

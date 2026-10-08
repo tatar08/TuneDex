@@ -33,6 +33,9 @@ export const EN_CORE: Record<string, string> = {
   'ลองโหลดหน้านี้อีกครั้งภายหลัง': 'Try loading this page again later.',
   'ถ้าคุณเป็นทีมงาน ให้ขอสิทธิ์จากผู้ดูแลระบบ': "If you're on the team, ask an admin for access.",
   'ไปที่การตั้งค่าของฉัน': 'Go to my settings',
+  'รหัสยืนยันตัวตน (TOTP) ของบัญชีนี้มีการเปลี่ยนแปลง': "This account's one-time code (TOTP) has changed",
+  'ระบบพักสิทธิ์ทีมงานไว้ก่อน ถ้าคุณเพิ่งตั้งรหัสใหม่เอง ให้แจ้งผู้ดูแลระบบเพื่อยืนยันกับคุณแล้วลงทะเบียนรหัสใหม่ ถ้าไม่ได้ตั้งเอง ให้เปลี่ยนรหัสผ่านและแจ้งผู้ดูแลระบบทันที':
+    "Staff access is paused. If you just set up a new code yourself, ask an admin to confirm it with you and register it. If you didn't, change your password and tell an admin now.",
   'หน้าทีมงานต้องเข้าสู่ระบบด้วย MFA': 'The staff console needs an MFA sign-in',
   'เข้าสู่ระบบอีกครั้งพร้อมรหัสยืนยันตัวตนแบบใช้ครั้งเดียว แล้วระบบจะพากลับมาที่หน้านี้': "Sign in again with a one-time verification code and you'll be brought back to this page.",
   'เข้าสู่ระบบด้วย MFA': 'Sign in with MFA',

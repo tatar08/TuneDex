@@ -673,11 +673,11 @@ export function createBff(deps: BffDeps) {
   }
 
   /** Reads the caller's staff roles and marks the session as a staff session when there are any. */
-  async function loadStaff(ctx: SessionContext): Promise<{ roles: StaffRole[]; mfa: boolean } | { status: number } | null> {
+  async function loadStaff(ctx: SessionContext): Promise<{ roles: StaffRole[]; mfa: boolean; mfaChanged: boolean } | { status: number } | null> {
     const res = await callApi(ctx, '/v1/me/staff', { method: 'GET' }, `web_${randomUUID()}`);
     if (!res) return null;
     if (!res.ok) return { status: res.status };
-    const { roles, mfa, rolesVersion } = (await res.json()) as { roles: StaffRole[]; mfa?: boolean; rolesVersion?: string };
+    const { roles, mfa, mfaChanged, rolesVersion } = (await res.json()) as { roles: StaffRole[]; mfa?: boolean; mfaChanged?: boolean; rolesVersion?: string };
     // Doc 17: a role granted or revoked since this session started ends the session; the person signs in again.
     if (ctx.session.staffVersion !== undefined && rolesVersion !== undefined && rolesVersion !== ctx.session.staffVersion) {
       await store.delete(ctx.id);
@@ -688,7 +688,7 @@ export function createBff(deps: BffDeps) {
       ctx.session.staffVersion = rolesVersion;
       await store.update(ctx.id, ctx.session);
     }
-    return { roles, mfa: mfa !== false };
+    return { roles, mfa: mfa !== false, mfaChanged: mfaChanged === true };
   }
 
   /** Forwards one staff call to the API. The API enforces roles; the BFF adds session, CSRF and size checks. */
