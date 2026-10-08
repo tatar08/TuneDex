@@ -52,6 +52,19 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     );
   }
 
+  // The account holds a one-time code an operator has not pinned (perhaps added by someone who knew only the password).
+  if (staff.mfaChanged) {
+    return (
+      <div className={`adm adm-denied t-${theme} ${fontVariables}`}>
+        <main>
+          <h1>{t('รหัสยืนยันตัวตน (TOTP) ของบัญชีนี้มีการเปลี่ยนแปลง')}</h1>
+          <p>{t('ระบบพักสิทธิ์ทีมงานไว้ก่อน ถ้าคุณเพิ่งตั้งรหัสใหม่เอง ให้แจ้งผู้ดูแลระบบเพื่อยืนยันกับคุณแล้วลงทะเบียนรหัสใหม่ ถ้าไม่ได้ตั้งเอง ให้เปลี่ยนรหัสผ่านและแจ้งผู้ดูแลระบบทันที')}</p>
+          <a href="/app/settings">{t('ไปที่การตั้งค่าของฉัน')}</a>
+        </main>
+      </div>
+    );
+  }
+
   // Catalog counts for the header and menu badge; the page still works if this read fails.
   const counts = await bff.loadStationSummary(ctx).catch(() => null);
   const summary = counts?.summary ?? null;

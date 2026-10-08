@@ -350,7 +350,7 @@ describe('staff routes through the BFF', () => {
     api.staff('grant', 'bff-role-change', 'support', '--by', 'test', '--reason', 'test');
     const cookie = await signIn('bff-role-change');
     const ctx = await bff.sessionFromCookie(cookie);
-    expect(await bff.loadStaff(ctx!)).toEqual({ roles: ['support'], mfa: true });
+    expect(await bff.loadStaff(ctx!)).toEqual({ roles: ['support'], mfa: true, mfaChanged: false });
     api.staff('revoke', 'bff-role-change', 'support', '--by', 'test', '--reason', 'test');
     expect(await bff.loadStaff((await bff.sessionFromCookie(cookie))!)).toBeNull();
     expect(await bff.sessionFromCookie(cookie)).toBeNull();
