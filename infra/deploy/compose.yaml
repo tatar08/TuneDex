@@ -47,7 +47,7 @@ services:
       - pgdata:/var/lib/postgresql/data
       # First start only: a separate database and owner for Keycloak.
       - ./postgres-init:/docker-entrypoint-initdb.d:ro
-    # Bound to this server only, for backup.sh and psql; never published to the internet.
+    # Bound to this server only, for psql and restores; never published to the internet.
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
@@ -129,6 +129,23 @@ services:
       api: { condition: service_started }
       caddy: { condition: service_started }
 
+  # Nightly checked dumps of both databases into the `backups` volume, kept BACKUP_KEEP_DAYS (35). Copy them
+  # off the server, e.g. docker compose cp backup:/backups ./offsite (see README). RPO is the interval, not 15 min.
+  backup:
+    build:
+      context: ..
+      dockerfile: deploy/backup/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://tunedeck:${POSTGRES_PASSWORD}@postgres:5432/tunedeck
+      KEYCLOAK_DATABASE_URL: postgres://keycloak:${KEYCLOAK_DB_PASSWORD}@postgres:5432/keycloak
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-35}
+    volumes:
+      - backups:/backups
+    depends_on:
+      api: { condition: service_started }
+
   caddy:
     image: caddy:2.8
     restart: unless-stopped
@@ -151,3 +168,4 @@ services:
 volumes:
   pgdata:
   caddydata:
+  backups:
