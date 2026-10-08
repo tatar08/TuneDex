@@ -1,0 +1,153 @@
+# TuneDeck backend on one server with a real domain: staging first, the same file for an early production.
+# Caddy gets public certificates (Let's Encrypt) for api., auth. and console.<DOMAIN>; nothing else is published.
+# Differs from ../compose (local test stack): Keycloak runs `start` (not dev) on its own Postgres database,
+# APP_ENV is staging/production, the signing key, MFA and Keycloak admin client are required, and the
+# stream checker is a separate service. See README.md.
+#
+#   cp .env.example .env   # fill every value
+#   docker compose up -d --build
+name: tunedeck-deploy
+
+x-oidc: &oidc
+  OIDC_ISSUER: https://auth.${DOMAIN:?set DOMAIN in .env}/realms/tunedeck
+  NO_PROXY: auth.${DOMAIN},api,postgres,keycloak,localhost,127.0.0.1
+  no_proxy: auth.${DOMAIN},api,postgres,keycloak,localhost,127.0.0.1
+
+x-api-env: &api-env
+  <<: *oidc
+  APP_ENV: ${APP_ENV:?set APP_ENV to staging or production}
+  BUILD_VERSION: ${BUILD_VERSION:-unknown}
+  DATABASE_URL: postgres://tunedeck:${POSTGRES_PASSWORD}@postgres:5432/tunedeck
+  DB_POOL_MAX: ${DB_POOL_MAX:-20}
+  OIDC_AUDIENCE: tunedeck-api
+  OIDC_JWKS_URI: https://auth.${DOMAIN}/realms/tunedeck/protocol/openid-connect/certs
+  KEYCLOAK_ADMIN_CLIENT_ID: tunedeck-api-admin
+  KEYCLOAK_ADMIN_CLIENT_SECRET: ${API_ADMIN_CLIENT_SECRET:?set API_ADMIN_CLIENT_SECRET in .env}
+  STAFF_MFA_ACR: mfa
+  CONFIG_SIGNING_KEY: ${CONFIG_SIGNING_KEY:?set CONFIG_SIGNING_KEY in .env (Ed25519 private key, PEM)}
+  # One proxy (Caddy) in front.
+  TRUST_PROXY_HOPS: "1"
+  ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+  RADIO_BROWSER_BASE_URL: ${RADIO_BROWSER_BASE_URL:-}
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+  STATION_CHECK_ENABLED: ${STATION_CHECK_ENABLED:-false}
+  # Probes run only in the checker service, never in the API.
+  STATION_CHECK_RUNNER: worker
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tunedeck
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: tunedeck
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # First start only: a separate database and owner for Keycloak.
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    # Bound to this server only, for backup.sh and psql; never published to the internet.
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tunedeck -d tunedeck"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  keycloak:
+    image: keycloak/keycloak:26.4
+    restart: unless-stopped
+    command: ["start", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_HOSTNAME: https://auth.${DOMAIN}
+      # TLS ends at Caddy; Keycloak trusts its X-Forwarded-* headers and listens on plain http inside the network.
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env}
+      # Placeholders in ../compose/keycloak/tunedeck-realm.json (imported once, on the first start).
+      TUNEDECK_CONSOLE_BASE_URL: https://console.${DOMAIN}
+      TUNEDECK_CONSOLE_CLIENT_SECRET: ${CONSOLE_CLIENT_SECRET:?set CONSOLE_CLIENT_SECRET in .env}
+      TUNEDECK_API_ADMIN_CLIENT_SECRET: ${API_ADMIN_CLIENT_SECRET}
+    volumes:
+      - ../compose/keycloak:/opt/keycloak/data/import:ro
+      - ../keycloak/themes/tunedeck:/opt/keycloak/themes/tunedeck:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
+  api:
+    build: ../../services/api
+    restart: unless-stopped
+    command: ["sh", "-c", "node dist/db/migrate.js && exec node dist/main.js"]
+    environment:
+      <<: *api-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      caddy: { condition: service_started }
+
+  # Scheduled stream checks (Doc 17). Same image and database as the API; the only service that should get
+  # outbound access to stream hosts (port 443). Starts with: docker compose --profile checker up -d
+  checker:
+    build: ../../services/api
+    restart: unless-stopped
+    profiles: ["checker"]
+    command: ["node", "dist/checker.js"]
+    environment:
+      <<: *api-env
+    depends_on:
+      api: { condition: service_started }
+
+  console:
+    build: ../../apps/console
+    restart: unless-stopped
+    environment:
+      <<: *oidc
+      CONSOLE_BASE_URL: https://console.${DOMAIN}
+      API_BASE_URL: http://api:3100
+      APP_ENV: ${APP_ENV}
+      BUILD_VERSION: ${BUILD_VERSION:-unknown}
+      OIDC_CLIENT_ID: tunedeck-console
+      OIDC_CLIENT_SECRET: ${CONSOLE_CLIENT_SECRET}
+      OIDC_SCOPES: openid
+      OIDC_MFA_ACR: mfa
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env (32+ characters)}
+      SESSION_DATABASE_URL: postgres://tunedeck:${POSTGRES_PASSWORD}@postgres:5432/tunedeck
+    depends_on:
+      api: { condition: service_started }
+      caddy: { condition: service_started }
+
+  caddy:
+    image: caddy:2.8
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env (Let's Encrypt expiry notices)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    ports:
+      - "80:80"
+      - "443:443"
+    # The API and console reach Keycloak at its public name through Caddy, without leaving the server.
+    networks:
+      default:
+        aliases: ["auth.${DOMAIN}"]
+    depends_on:
+      keycloak: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  caddydata:

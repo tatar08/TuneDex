@@ -1,0 +1,37 @@
+# Public HTTPS for the TuneDeck backend (infra/deploy). Caddy gets and renews Let's Encrypt certificates
+# for the three names; DNS A/AAAA records for them must point at this server, with ports 80 and 443 open.
+{
+	email {$ACME_EMAIL}
+	admin off
+}
+
+(common) {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}
+
+api.{$DOMAIN} {
+	import common
+	reverse_proxy api:3100
+}
+
+auth.{$DOMAIN} {
+	import common
+	# The Keycloak admin console and admin REST API stay off the internet; staff administer the realm with
+	# kcadm on the server. The API still reaches /admin/realms/... from inside the Docker network
+	# (deleting Keycloak users, checking staff one-time codes).
+	@admin_outside {
+		path /admin /admin/*
+		not remote_ip private_ranges
+	}
+	respond @admin_outside 404
+	reverse_proxy keycloak:8080
+}
+
+console.{$DOMAIN} {
+	import common
+	reverse_proxy console:3200
+}

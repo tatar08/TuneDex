@@ -61,6 +61,8 @@ The mobile app's Keycloak client is still Codex's to define (client id, redirect
 
 ## Before staging or production
 
+`infra/deploy` is a one-server stack with these done (public HTTPS, Keycloak `start` on Postgres, required keys, separate checker); its README lists what it still leaves to the operator.
+
 Do not reuse the local stack as is. In particular:
 - Run Keycloak with `start` (not `start-dev`), on https with its own PostgreSQL database, and set `KC_HOSTNAME` to the public https URL.
 - Import the realm with real values for the placeholders. Set the console's redirect to its public https URL.
