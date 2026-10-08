@@ -7,7 +7,7 @@
 # with the address in the name), e.g. EDGE_DOMAIN=192-168-1-37.sslip.io. See README.md "HTTPS on the local network".
 x-edge-trust: &edge-trust
   # The containers reach Keycloak through Caddy (network aliases below) and trust Caddy's root.
-  NODE_EXTRA_CA_CERTS: /caddy/caddy/pki/authorities/local/root.crt
+  NODE_EXTRA_CA_CERTS: /edge-ca/root.crt
   OIDC_ISSUER: https://auth.${EDGE_DOMAIN:?set EDGE_DOMAIN in .env}/realms/tunedeck
   NO_PROXY: auth.${EDGE_DOMAIN},keycloak.localhost,api,postgres,localhost,127.0.0.1
   no_proxy: auth.${EDGE_DOMAIN},keycloak.localhost,api,postgres,localhost,127.0.0.1
@@ -34,6 +34,18 @@ services:
       timeout: 2s
       retries: 30
 
+  # Caddy keeps its CA in a root-only folder (0700), and the API and console run as `node`, so this one-shot
+  # copy publishes just the public root certificate, world-readable, into its own volume.
+  edge-ca:
+    image: caddy:2.8
+    entrypoint: ["sh", "-c", "install -m 0644 /data/caddy/pki/authorities/local/root.crt /edge-ca/root.crt"]
+    volumes:
+      - caddydata:/data:ro
+      - edgeca:/edge-ca
+    depends_on:
+      caddy: { condition: service_healthy }
+    restart: "no"
+
   keycloak:
     environment:
       KC_HOSTNAME: https://auth.${EDGE_DOMAIN}
@@ -48,9 +60,9 @@ services:
       # One proxy (Caddy) in front: rate limits count the phone's address, not Caddy's.
       TRUST_PROXY_HOPS: "1"
     volumes:
-      - caddydata:/caddy:ro
+      - edgeca:/edge-ca:ro
     depends_on:
-      caddy: { condition: service_healthy }
+      edge-ca: { condition: service_completed_successfully }
 
   console:
     environment:
@@ -59,9 +71,10 @@ services:
       # Required for an https console; the table is created on first use.
       SESSION_DATABASE_URL: postgres://tunedeck:${POSTGRES_PASSWORD}@postgres:5432/tunedeck
     volumes:
-      - caddydata:/caddy:ro
+      - edgeca:/edge-ca:ro
     depends_on:
-      caddy: { condition: service_healthy }
+      edge-ca: { condition: service_completed_successfully }
 
 volumes:
   caddydata:
+  edgeca:

@@ -46,7 +46,7 @@ The images themselves were not built in that environment.
 1. In `.env`, set `EDGE_DOMAIN` to this machine's LAN address with dashes plus `.sslip.io`, e.g. `EDGE_DOMAIN=192-168-1-37.sslip.io` (sslip.io is public DNS that answers with the address written in the name). Give the machine a fixed address at the router, or the names change.
 2. `docker compose -f compose.yaml -f lan-https.yaml up -d --build`. The hosts are `https://api.<EDGE_DOMAIN>`, `https://auth.<EDGE_DOMAIN>` (Keycloak, the issuer every client and the API use) and `https://console.<EDGE_DOMAIN>`.
 3. Caddy signs the certificates with its own CA. On each test phone, open `https://api.<EDGE_DOMAIN>/staging-ca.crt` and install it: Android: Settings → Security → Install from device storage → CA certificate (opening the file from the browser is refused on Android 11+); iPhone: install the profile, then Settings → General → About → Certificate Trust Settings → full trust. Test phones only; remove it when testing ends. Android apps ignore user-installed CAs unless a debug build's `network_security_config` allows `<certificates src="user"/>` (never in a release build).
-4. Inside the network, the API and console reach `auth.<EDGE_DOMAIN>` through Caddy (network aliases) and trust Caddy's root through `NODE_EXTRA_CA_CERTS`. The console keeps its sessions in Postgres (`SESSION_DATABASE_URL`), which an https console requires.
+4. Inside the network, the API and console reach `auth.<EDGE_DOMAIN>` through Caddy (network aliases) and trust Caddy's root through `NODE_EXTRA_CA_CERTS`. Caddy keeps its CA in a root-only folder, so the one-shot `edge-ca` service copies only the public `root.crt` into the `edgeca` volume, readable by the `node` user the API and console run as. The console keeps its sessions in Postgres (`SESSION_DATABASE_URL`), which an https console requires.
 5. A realm imported before this overlay keeps its old console URLs. Add the https ones once (`KEYCLOAK_ADMIN_PASSWORD` from `.env`):
    ```sh
    KC="docker compose exec keycloak /opt/keycloak/bin/kcadm.sh"
@@ -57,7 +57,13 @@ The images themselves were not built in that environment.
    Tokens issued before the switch name the old issuer and stop working; sign in again.
 6. To keep a CA that phones already trust from an earlier Caddy, copy its `/data/caddy/pki` into the `caddydata` volume before the first start.
 
-The mobile app's Keycloak client is still Codex's to define (client id, redirect URI); add it to the realm once known.
+The app signs in with the public client `tunedeck-mobile` (Authorization Code + PKCE S256, no secret, scopes `openid profile email`), redirect and post-logout URI `com.example.tunedeck:/oauthredirect` (Codex, Consult/005); its access tokens carry the `tunedeck-api` audience. The app must refresh one request at a time: Keycloak ends the whole session when an old refresh token is reused. A realm imported before this client existed needs it added once (same `$KC` as step 5):
+```sh
+$KC create clients -r tunedeck -s clientId=tunedeck-mobile -s publicClient=true -s standardFlowEnabled=true -s directAccessGrantsEnabled=false -s 'redirectUris=["com.example.tunedeck:/oauthredirect"]' -s 'attributes."pkce.code.challenge.method"=S256' -s 'attributes."post.logout.redirect.uris"=com.example.tunedeck:/oauthredirect'
+ID=$($KC get clients -r tunedeck -q clientId=tunedeck-mobile --fields id --format csv --noquotes)
+$KC create clients/$ID/protocol-mappers/models -r tunedeck -s name="tunedeck-api audience" -s protocol=openid-connect -s protocolMapper=oidc-audience-mapper -s 'config."included.custom.audience"=tunedeck-api' -s 'config."access.token.claim"=true' -s 'config."id.token.claim"=false'
+```
+On the phone the issuer is `https://auth.<EDGE_DOMAIN>/realms/tunedeck`.
 
 ## Before staging or production
 
