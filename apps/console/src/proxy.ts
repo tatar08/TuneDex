@@ -25,6 +25,9 @@ export function proxy(request: NextRequest) {
   headers.set('Content-Security-Policy', csp);
   const response = NextResponse.next({ request: { headers } });
   response.headers.set('Content-Security-Policy', csp);
+  // Once the console is served over https, browsers must not fall back to http (Doc 13). Read at runtime: the
+  // same build serves http locally and https on staging.
+  if (process.env.CONSOLE_BASE_URL?.startsWith('https://')) response.headers.set('Strict-Transport-Security', 'max-age=31536000');
   return response;
 }
 
