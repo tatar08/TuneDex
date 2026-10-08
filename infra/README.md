@@ -57,7 +57,13 @@ The images themselves were not built in that environment.
    Tokens issued before the switch name the old issuer and stop working; sign in again.
 6. To keep a CA that phones already trust from an earlier Caddy, copy its `/data/caddy/pki` into the `caddydata` volume before the first start.
 
-The mobile app's Keycloak client is still Codex's to define (client id, redirect URI); add it to the realm once known.
+The app signs in with the public client `tunedeck-mobile` (Authorization Code + PKCE S256, no secret, scopes `openid profile email`), redirect and post-logout URI `com.example.tunedeck:/oauthredirect` (Codex, Consult/005); its access tokens carry the `tunedeck-api` audience. The app must refresh one request at a time: Keycloak ends the whole session when an old refresh token is reused. A realm imported before this client existed needs it added once (same `$KC` as step 5):
+```sh
+$KC create clients -r tunedeck -s clientId=tunedeck-mobile -s publicClient=true -s standardFlowEnabled=true -s directAccessGrantsEnabled=false -s 'redirectUris=["com.example.tunedeck:/oauthredirect"]' -s 'attributes."pkce.code.challenge.method"=S256' -s 'attributes."post.logout.redirect.uris"=com.example.tunedeck:/oauthredirect'
+ID=$($KC get clients -r tunedeck -q clientId=tunedeck-mobile --fields id --format csv --noquotes)
+$KC create clients/$ID/protocol-mappers/models -r tunedeck -s name="tunedeck-api audience" -s protocol=openid-connect -s protocolMapper=oidc-audience-mapper -s 'config."included.custom.audience"=tunedeck-api' -s 'config."access.token.claim"=true' -s 'config."id.token.claim"=false'
+```
+On the phone the issuer is `https://auth.<EDGE_DOMAIN>/realms/tunedeck`.
 
 ## Before staging or production
 
