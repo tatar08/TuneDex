@@ -39,6 +39,26 @@ Checked on 2026-10-04 against Keycloak 26.4, with the API and console on the com
 
 The images themselves were not built in that environment.
 
+## HTTPS on the local network (test phones)
+
+`infra/compose/lan-https.yaml` puts the local stack behind Caddy on port 443 of this machine, so a test phone on the same Wi-Fi can call the API, sign in at Keycloak and open the console over HTTPS. Still a test stack: Keycloak stays in `start-dev`, and anyone on the network can reach these three hosts.
+
+1. In `.env`, set `EDGE_DOMAIN` to this machine's LAN address with dashes plus `.sslip.io`, e.g. `EDGE_DOMAIN=192-168-1-37.sslip.io` (sslip.io is public DNS that answers with the address written in the name). Give the machine a fixed address at the router, or the names change.
+2. `docker compose -f compose.yaml -f lan-https.yaml up -d --build`. The hosts are `https://api.<EDGE_DOMAIN>`, `https://auth.<EDGE_DOMAIN>` (Keycloak, the issuer every client and the API use) and `https://console.<EDGE_DOMAIN>`.
+3. Caddy signs the certificates with its own CA. On each test phone, open `https://api.<EDGE_DOMAIN>/staging-ca.crt` and install it: Android: Settings → Security → Install from device storage → CA certificate (opening the file from the browser is refused on Android 11+); iPhone: install the profile, then Settings → General → About → Certificate Trust Settings → full trust. Test phones only; remove it when testing ends. Android apps ignore user-installed CAs unless a debug build's `network_security_config` allows `<certificates src="user"/>` (never in a release build).
+4. Inside the network, the API and console reach `auth.<EDGE_DOMAIN>` through Caddy (network aliases) and trust Caddy's root through `NODE_EXTRA_CA_CERTS`. The console keeps its sessions in Postgres (`SESSION_DATABASE_URL`), which an https console requires.
+5. A realm imported before this overlay keeps its old console URLs. Add the https ones once (`KEYCLOAK_ADMIN_PASSWORD` from `.env`):
+   ```sh
+   KC="docker compose exec keycloak /opt/keycloak/bin/kcadm.sh"
+   $KC config credentials --server http://localhost:8080 --realm master --user admin --password "$KEYCLOAK_ADMIN_PASSWORD"
+   ID=$($KC get clients -r tunedeck -q clientId=tunedeck-console --fields id --format csv --noquotes)
+   $KC update clients/$ID -r tunedeck -s "redirectUris=[\"https://console.$EDGE_DOMAIN/auth/callback\",\"http://localhost:${CONSOLE_HOST_PORT:-3200}/auth/callback\"]" -s "attributes.\"post.logout.redirect.uris\"=https://console.$EDGE_DOMAIN/*##http://localhost:${CONSOLE_HOST_PORT:-3200}/*"
+   ```
+   Tokens issued before the switch name the old issuer and stop working; sign in again.
+6. To keep a CA that phones already trust from an earlier Caddy, copy its `/data/caddy/pki` into the `caddydata` volume before the first start.
+
+The mobile app's Keycloak client is still Codex's to define (client id, redirect URI); add it to the realm once known.
+
 ## Before staging or production
 
 Do not reuse the local stack as is. In particular:

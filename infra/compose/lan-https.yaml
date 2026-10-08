@@ -1,0 +1,67 @@
+# Opt-in overlay: the local stack over HTTPS on this machine's local network, so test phones on the same
+# Wi-Fi can use the API, sign in at Keycloak and open the console. Still a test stack (Keycloak start-dev).
+#
+#   docker compose -f compose.yaml -f lan-https.yaml up -d --build
+#
+# Needs EDGE_DOMAIN in .env: this machine's LAN address with dashes plus .sslip.io (public DNS that answers
+# with the address in the name), e.g. EDGE_DOMAIN=192-168-1-37.sslip.io. See README.md "HTTPS on the local network".
+x-edge-trust: &edge-trust
+  # The containers reach Keycloak through Caddy (network aliases below) and trust Caddy's root.
+  NODE_EXTRA_CA_CERTS: /caddy/caddy/pki/authorities/local/root.crt
+  OIDC_ISSUER: https://auth.${EDGE_DOMAIN:?set EDGE_DOMAIN in .env}/realms/tunedeck
+  NO_PROXY: auth.${EDGE_DOMAIN},keycloak.localhost,api,postgres,localhost,127.0.0.1
+  no_proxy: auth.${EDGE_DOMAIN},keycloak.localhost,api,postgres,localhost,127.0.0.1
+
+services:
+  caddy:
+    image: caddy:2.8
+    restart: unless-stopped
+    environment:
+      EDGE_DOMAIN: ${EDGE_DOMAIN:?set EDGE_DOMAIN in .env}
+    volumes:
+      - ./lan/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    ports:
+      # Open to the whole local network on purpose. EDGE_BIND narrows it to one interface address.
+      - "${EDGE_BIND:-0.0.0.0}:443:443"
+    networks:
+      default:
+        aliases: ["api.${EDGE_DOMAIN}", "auth.${EDGE_DOMAIN}", "console.${EDGE_DOMAIN}"]
+    healthcheck:
+      # Ready once Caddy has made its CA, which the API and console load at start.
+      test: ["CMD-SHELL", "test -s /data/caddy/pki/authorities/local/root.crt"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  keycloak:
+    environment:
+      KC_HOSTNAME: https://auth.${EDGE_DOMAIN}
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: "true"
+      TUNEDECK_CONSOLE_BASE_URL: https://console.${EDGE_DOMAIN}
+
+  api:
+    environment:
+      <<: *edge-trust
+      OIDC_JWKS_URI: https://auth.${EDGE_DOMAIN}/realms/tunedeck/protocol/openid-connect/certs
+      # One proxy (Caddy) in front: rate limits count the phone's address, not Caddy's.
+      TRUST_PROXY_HOPS: "1"
+    volumes:
+      - caddydata:/caddy:ro
+    depends_on:
+      caddy: { condition: service_healthy }
+
+  console:
+    environment:
+      <<: *edge-trust
+      CONSOLE_BASE_URL: https://console.${EDGE_DOMAIN}
+      # Required for an https console; the table is created on first use.
+      SESSION_DATABASE_URL: postgres://tunedeck:${POSTGRES_PASSWORD}@postgres:5432/tunedeck
+    volumes:
+      - caddydata:/caddy:ro
+    depends_on:
+      caddy: { condition: service_healthy }
+
+volumes:
+  caddydata:

@@ -1,0 +1,28 @@
+# HTTPS on the local network for test phones (lan-https.yaml). Caddy's own CA signs the certificates;
+# install that root on test phones only. Hosts are <name>.<EDGE_DOMAIN>, e.g. api.192-168-1-37.sslip.io.
+{
+	local_certs
+	skip_install_trust
+	admin off
+}
+
+https://api.{$EDGE_DOMAIN} {
+	# The root certificate, for installing on a test phone. It is public; the CA's private key never leaves /data.
+	handle /staging-ca.crt {
+		root * /data/caddy/pki/authorities/local
+		rewrite * /root.crt
+		header Content-Type application/x-x509-ca-cert
+		file_server
+	}
+	handle {
+		reverse_proxy api:3100
+	}
+}
+
+https://auth.{$EDGE_DOMAIN} {
+	reverse_proxy keycloak:8080
+}
+
+https://console.{$EDGE_DOMAIN} {
+	reverse_proxy console:3200
+}
