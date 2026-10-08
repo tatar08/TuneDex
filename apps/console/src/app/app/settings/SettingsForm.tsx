@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { DevicePreferencesView, DeviceView, SettingsView } from '@/lib/bff';
-import { strings } from '@/lib/i18n';
+import { accountLang, strings, type Lang } from '@/lib/i18n';
 import { AppNav } from '../AppNav';
 
 type Values = SettingsView['settings'];
@@ -10,7 +10,7 @@ type Field = keyof Values;
 
 const OPTIONS: Record<Field, string[]> = {
   theme: ['system', 'light', 'dark'],
-  language: ['th', 'en'],
+  language: ['th', 'en', 'system'],
   cellularPolicy: ['allow', 'wifi_only'],
 };
 
@@ -26,8 +26,8 @@ const seenFormat = (lang: string) =>
   new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'th-TH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Bangkok' });
 
 /** Doc 17 /app/settings device overrides: one device can differ from the account; the preview shows what it will use. */
-function DeviceOverrides({ device, account, csrfToken, onAnnounce }: { device: DeviceView; account: Values; csrfToken: string; onAnnounce: (s: string) => void }) {
-  const t = strings(account.language);
+function DeviceOverrides({ device, account, lang, csrfToken, onAnnounce }: { device: DeviceView; account: Values; lang: Lang; csrfToken: string; onAnnounce: (s: string) => void }) {
+  const t = strings(lang);
   const [saved, setSaved] = useState({ overrides: device.overrides, revision: device.preferencesRevision });
   const [draft, setDraft] = useState<Partial<Values>>(device.overrides);
   const [busy, setBusy] = useState(false);
@@ -117,11 +117,14 @@ export function SettingsForm({
   initial,
   devices,
   csrfToken,
+  browserLang = 'th',
 }: {
   initial: SettingsView;
   /** Null when the device list could not be loaded. */
   devices: DeviceView[] | null;
   csrfToken: string;
+  /** What 'system' resolves to: the browser's Accept-Language, read on the server so the first render matches. */
+  browserLang?: Lang;
 }) {
   const [saved, setSaved] = useState(initial);
   const [values, setValues] = useState<Values>(initial.settings);
@@ -130,12 +133,13 @@ export function SettingsForm({
   const [announce, setAnnounce] = useState('');
   const alertRef = useRef<HTMLDivElement>(null);
 
-  const t = strings(saved.settings.language);
+  const lang = accountLang(saved.settings.language, browserLang);
+  const t = strings(lang);
   const dirty = (Object.keys(values) as Field[]).some((k) => values[k] !== saved.settings[k]);
 
   useEffect(() => {
-    document.documentElement.lang = saved.settings.language;
-  }, [saved.settings.language]);
+    document.documentElement.lang = lang;
+  }, [lang]);
   useEffect(() => {
     if (problem) alertRef.current?.focus();
   }, [problem]);
@@ -161,7 +165,7 @@ export function SettingsForm({
       if (res.ok) {
         setSaved(body as SettingsView);
         setValues((body as SettingsView).settings);
-        setAnnounce(strings((body as SettingsView).settings.language).savedRevision((body as SettingsView).revision));
+        setAnnounce(strings(accountLang((body as SettingsView).settings.language, browserLang)).savedRevision((body as SettingsView).revision));
       } else if (res.status === 412) {
         const latest = await fetch('/bff/settings').then((r) => (r.ok ? (r.json() as Promise<SettingsView>) : null)).catch(() => null);
         if (latest && !rebased && !Object.keys(patch).some((k) => latest.settings[k as Field] !== base[k as Field] && latest.settings[k as Field] !== patch[k as Field])) {
@@ -190,7 +194,7 @@ export function SettingsForm({
     setSaved(problem.server);
     setValues(problem.server.settings);
     setProblem(null);
-    setAnnounce(strings(problem.server.settings.language).savedRevision(problem.server.revision));
+    setAnnounce(strings(accountLang(problem.server.settings.language, browserLang)).savedRevision(problem.server.revision));
   }
 
   function keepMine() {
@@ -205,7 +209,7 @@ export function SettingsForm({
 
   return (
     <main className="shell">
-      <AppNav lang={saved.settings.language} current="/app/settings" csrfToken={csrfToken} />
+      <AppNav lang={lang} current="/app/settings" csrfToken={csrfToken} />
 
       <h1>{t.settingsTitle}</h1>
       <p className="lede">{t.settingsLede}</p>
@@ -290,9 +294,9 @@ export function SettingsForm({
                     <span className="device-name">{t.deviceName(d.platform, d.osMajor)}</span>
                     <span className={`chip${current ? ' ok' : ''}`}>{current ? t.deviceApplied : t.devicePending}</span>
                     <span className="status">
-                      {t.deviceDetail(d.appliedSettingsRevision, d.appBuild, seenFormat(saved.settings.language).format(new Date(d.lastSeenAt)))}
+                      {t.deviceDetail(d.appliedSettingsRevision, d.appBuild, seenFormat(lang).format(new Date(d.lastSeenAt)))}
                     </span>
-                    <DeviceOverrides device={d} account={saved.settings} csrfToken={csrfToken} onAnnounce={setAnnounce} />
+                    <DeviceOverrides device={d} account={saved.settings} lang={lang} csrfToken={csrfToken} onAnnounce={setAnnounce} />
                   </li>
                 );
               })}

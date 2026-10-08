@@ -40,7 +40,10 @@ export class StaffService {
    */
   async mfaCodesPinned(actor: Actor): Promise<boolean> {
     if (actor.mfaRequired === false || !this.config.idpAdmin) return true;
-    if ((this.pinChecked.get(actor.userId) ?? 0) > Date.now()) return true;
+    // Cached per Keycloak session, not per account: a session that signed in after a new code was enrolled (the
+    // attacker's) is always checked against Keycloak, even while the real staff member's session is cached.
+    const cacheKey = `${actor.userId}:${actor.sid ?? ''}`;
+    if ((this.pinChecked.get(cacheKey) ?? 0) > Date.now()) return true;
     const [row] = await this.db.query<{ oidc_subject: string; credential_ids: string[] | null }>(
       'SELECT u.oidc_subject, p.credential_ids FROM users u LEFT JOIN staff_mfa_pins p ON p.user_id = u.id WHERE u.id = $1',
       [actor.userId],
@@ -66,10 +69,10 @@ export class StaffService {
         }
       });
     } else if (!codes.every((c) => row.credential_ids!.includes(c))) {
-      this.pinChecked.delete(actor.userId);
+      this.pinChecked.delete(cacheKey);
       return false;
     }
-    this.pinChecked.set(actor.userId, Date.now() + PIN_CHECK_TTL_MS);
+    this.pinChecked.set(cacheKey, Date.now() + PIN_CHECK_TTL_MS);
     return true;
   }
 

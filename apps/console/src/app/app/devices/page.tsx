@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import type { Lang } from '@/lib/i18n';
+import { accountPageLang } from '@/lib/lang';
 import { getBff } from '@/lib/runtime';
 import { DevicesView } from './DevicesView';
 
@@ -22,7 +23,7 @@ export default async function DevicesPage({ searchParams }: { searchParams: Prom
     bff.loadMe(ctx).catch(() => ({ status: 503 }) as const),
   ]);
   if (settings === null || devices === null || me === null) redirect('/login?expired=1');
-  const lang: Lang = 'view' in settings && settings.view?.settings.language === 'en' ? 'en' : 'th';
+  const lang: Lang = await accountPageLang('view' in settings ? settings.view?.settings.language : undefined);
   const sp = await searchParams;
   // After a re-authentication the user lands back here with the device they were signing out still chosen.
   const revoke = typeof sp.revoke === 'string' && UUID.test(sp.revoke) ? sp.revoke.toLowerCase() : null;

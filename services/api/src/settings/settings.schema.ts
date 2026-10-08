@@ -9,7 +9,8 @@ export const SETTINGS_SCHEMA_VERSION = 1;
 
 export const ALLOWED = {
   theme: ['system', 'light', 'dark'],
-  language: ['th', 'en'],
+  // 'system': follow the device's language (the app resolves it; the web uses the browser's).
+  language: ['th', 'en', 'system'],
   cellularPolicy: ['allow', 'wifi_only'],
 } as const;
 

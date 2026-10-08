@@ -26,6 +26,13 @@ afterEach(() => {
 });
 
 describe('SettingsForm', () => {
+  it("shows English when the account follows the device and the browser prefers English", () => {
+    render(<SettingsForm initial={view(1, { language: 'system' })} devices={[]} csrfToken="c" browserLang="en" />);
+    expect(screen.getByRole('group', { name: 'Language' })).toBeTruthy();
+    expect((screen.getByRole('radio', { name: 'Device language' }) as HTMLInputElement).checked).toBe(true);
+    expect(document.documentElement.lang).toBe('en');
+  });
+
   it('groups each setting as a labelled radio group and explains that no device has signed in yet', () => {
     render(<SettingsForm initial={view(0)} devices={[]} csrfToken="csrf-1" />);
     expect(screen.getByRole('group', { name: 'ธีมของแอป' })).toBeTruthy();

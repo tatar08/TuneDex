@@ -1449,7 +1449,7 @@ components:
       required: [theme, language, cellularPolicy]
       properties:
         theme: { type: string, enum: [system, light, dark] }
-        language: { type: string, enum: [th, en] }
+        language: { type: string, enum: [th, en, system], description: 'system follows the device or browser language' }
         cellularPolicy: { type: string, enum: [allow, wifi_only] }
     SettingsPatch:
       type: object
@@ -1458,7 +1458,7 @@ components:
       description: Only allowlisted keys and values; anything else is 400 (unknown_field / value_not_allowed). Keys left out keep their value.
       properties:
         theme: { type: string, enum: [system, light, dark] }
-        language: { type: string, enum: [th, en] }
+        language: { type: string, enum: [th, en, system], description: 'system follows the device or browser language' }
         cellularPolicy: { type: string, enum: [allow, wifi_only] }
     SettingsView:
       type: object
@@ -1522,7 +1522,7 @@ components:
       description: Only the keys a device sets differently from the account; {} follows the account.
       properties:
         theme: { type: string, enum: [system, light, dark] }
-        language: { type: string, enum: [th, en] }
+        language: { type: string, enum: [th, en, system], description: 'system follows the device or browser language' }
         cellularPolicy: { type: string, enum: [allow, wifi_only] }
     MeDevicePreferencesPut:
       type: object

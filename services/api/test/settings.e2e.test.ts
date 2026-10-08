@@ -147,6 +147,14 @@ describe('GET/PATCH /v1/me/settings', () => {
       expect(res.body.details).toEqual({ field: 'theme', reason: 'value_not_allowed', allowed: ['system', 'light', 'dark'] });
     });
 
+    it('accepts language "system" (follow the device) and refuses unknown languages', async () => {
+      const other = await id.token('user-language-system');
+      const ok = await http().patch('/v1/me/settings').set('Authorization', `Bearer ${other}`).set('If-Match', '"0"').send({ language: 'system' });
+      expect(ok.status).toBe(200);
+      expect(ok.body.settings.language).toBe('system');
+      expect((await patch({ language: 'fr' })).body.details).toMatchObject({ field: 'language', allowed: ['th', 'en', 'system'] });
+    });
+
     it('rejects a non-string value', async () => {
       expect((await patch({ language: 1 })).status).toBe(400);
     });
