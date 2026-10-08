@@ -11,6 +11,7 @@ const th = {
   language: 'ภาษา',
   'language.th': 'ไทย',
   'language.en': 'English',
+  'language.system': 'ตามภาษาเครื่อง',
   cellularPolicy: 'ฟังวิทยุผ่านเน็ตมือถือ',
   'cellularPolicy.allow': 'อนุญาต',
   'cellularPolicy.wifi_only': 'เฉพาะ Wi-Fi',
@@ -200,6 +201,7 @@ const en: typeof th = {
   language: 'Language',
   'language.th': 'ไทย',
   'language.en': 'English',
+  'language.system': 'Device language',
   cellularPolicy: 'Play radio on mobile data',
   'cellularPolicy.allow': 'Allow',
   'cellularPolicy.wifi_only': 'Wi-Fi only',
@@ -380,3 +382,6 @@ const en: typeof th = {
 
 export type Strings = typeof th;
 export const strings = (lang: string): Strings => (lang === 'en' ? en : th);
+
+/** The account's language setting as a page language: 'system' follows the browser (Thai unless it prefers English). */
+export const accountLang = (setting: string | undefined, browser: Lang): Lang => (setting === 'system' ? browser : setting === 'en' ? 'en' : 'th');

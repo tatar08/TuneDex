@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import type { Lang } from '@/lib/i18n';
 import { strings } from '@/lib/i18n';
+import { accountPageLang } from '@/lib/lang';
 import { getBff } from '@/lib/runtime';
 import { AppNav } from '../AppNav';
 
@@ -23,7 +24,7 @@ export default async function OverviewPage() {
     bff.loadEntitlements(ctx).catch(() => ({ status: 503 }) as const),
   ]);
   if (settings === null || devices === null || favorites === null || entitlements === null) redirect('/login?expired=1');
-  const lang: Lang = 'view' in settings && settings.view?.settings.language === 'en' ? 'en' : 'th';
+  const lang: Lang = await accountPageLang('view' in settings ? settings.view?.settings.language : undefined);
   const t = strings(lang);
   // Times read in Thailand time whatever the server's zone, like the other account pages.
   const fmt = new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'th-TH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Bangkok' });

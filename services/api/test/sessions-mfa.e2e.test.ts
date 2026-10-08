@@ -142,6 +142,9 @@ describe('device sign-out ends the Keycloak session, and privileged staff action
 
     // Someone with only the password enrolls a second code (MFA step or account page): staff work stops.
     t.idp.otp.set('mfa-pin', [{ id: 'code-phone', type: 'otp', createdDate: 10 }, { id: 'code-attacker', type: 'otp', createdDate: 20 }]);
+    // The attacker's own Keycloak session is checked at once, even while the real session's check is still cached.
+    const attacker = { Authorization: `Bearer ${await id.token('mfa-pin', { sid: 'kc-pin-attacker', authTime: now(), acr: '2' })}` };
+    expect((await http().get('/v1/admin/jobs').set(attacker)).body.code).toBe('STAFF_MFA_CHANGED');
     (t.app.get(StaffService) as unknown as { pinChecked: Map<string, number> }).pinChecked.clear();
     expect((await http().get('/v1/me/staff').set(await as())).body).toMatchObject({ mfa: true, mfaChanged: true });
     const refused = await http().get('/v1/admin/jobs').set(await as());

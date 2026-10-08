@@ -5,7 +5,8 @@ import { loadConfig } from '@/lib/config';
 import { openTransaction, safeReturnTo, sealTransaction } from '@/lib/cookies';
 import { createLogger, traceIdFrom } from '@/lib/log';
 import { MemorySessionStore } from '@/lib/session';
-import { langFrom } from '@/lib/lang';
+import { langFrom, langFromAcceptLanguage } from '@/lib/lang';
+import { accountLang } from '@/lib/i18n';
 
 const env = {
   CONSOLE_BASE_URL: 'https://console.tunedeck.test',
@@ -160,6 +161,21 @@ describe('page language', () => {
     expect(langFrom('th')).toBe('th');
     expect(langFrom(undefined)).toBe('th');
     expect(langFrom('xx')).toBe('th');
+  });
+
+  it("follows the browser for the account setting 'system', Thai unless English ranks above Thai", () => {
+    expect(langFromAcceptLanguage('en-US,en;q=0.9')).toBe('en');
+    expect(langFromAcceptLanguage('th-TH,th;q=0.9,en;q=0.8')).toBe('th');
+    expect(langFromAcceptLanguage('fr-FR,en;q=0.5,th;q=0.4')).toBe('en');
+    expect(langFromAcceptLanguage('en;q=0.3,th;q=0.7')).toBe('th');
+    expect(langFromAcceptLanguage('en;q=0,fr')).toBe('th');
+    expect(langFromAcceptLanguage('')).toBe('th');
+    expect(langFromAcceptLanguage(null)).toBe('th');
+    expect(accountLang('system', 'en')).toBe('en');
+    expect(accountLang('system', 'th')).toBe('th');
+    expect(accountLang('en', 'th')).toBe('en');
+    expect(accountLang('th', 'en')).toBe('th');
+    expect(accountLang(undefined, 'en')).toBe('th');
   });
 });
 

@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import type { Lang } from '@/lib/i18n';
+import { accountPageLang } from '@/lib/lang';
 import { getBff } from '@/lib/runtime';
 import { RadioView } from './RadioView';
 
@@ -20,7 +21,7 @@ export default async function RadioPage() {
     bff.loadCatalog().catch(() => ({ status: 503 }) as const),
   ]);
   if (settings === null || favorites === null) redirect('/login?expired=1');
-  const lang: Lang = 'view' in settings && settings.view?.settings.language === 'en' ? 'en' : 'th';
+  const lang: Lang = await accountPageLang('view' in settings ? settings.view?.settings.language : undefined);
   return (
     <RadioView
       lang={lang}

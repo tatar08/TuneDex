@@ -1,6 +1,7 @@
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { strings } from '@/lib/i18n';
+import { langFromAcceptLanguage } from '@/lib/lang';
 import { getBff } from '@/lib/runtime';
 import { SettingsForm } from './SettingsForm';
 
@@ -39,6 +40,7 @@ export default async function SettingsPage() {
       initial={result.view}
       devices={'view' in devices && devices.view ? devices.view.devices : null}
       csrfToken={ctx.session.csrfToken}
+      browserLang={langFromAcceptLanguage((await headers()).get('accept-language'))}
     />
   );
 }
