@@ -133,26 +133,27 @@ a.btn { display: inline-block; text-decoration: none; }
 @media (max-width: 640px) { .shell.auth { margin-top: 0; padding-top: 24px; display: flex; flex-direction: column; justify-content: center; } .shell.auth .nav { margin-bottom: auto; } .shell.auth > :last-child { margin-bottom: auto; } }
 
 .shell.wide { max-width: 1100px; }
-/* Radio explorer (Tar 2026-10-09, Codex Consult/009): TuneIn-style light map, Radio Garden-style night look.
+/* Radio explorer (Tar 2026-10-09, Codex Consult/009): TuneIn-style light map, Radio Garden-style night look, minimal
+   cards with Tar's warm orange (#fb9f23) for stations and navy for the main action.
    Look tokens live on .explore-app; data-look="light"/"dark" overrides the system setting. */
 .shell.explore-shell { max-width: 1280px; }
 .explore-app {
-  --x-bg: #ffffff; --x-bar: #ffffff; --x-ocean: #cfe3f1; --x-land: #ffffff; --x-border: #b9cbd9; --x-fg: #1f2937; --x-muted: #5b6472;
-  --x-line: #e5e7eb; --x-soft: #f3f4f6; --x-panel: #ffffff; --x-accent: #c2410c; --x-accent-ink: #ffffff; --x-on: #1f2937; --x-on-ink: #ffffff;
-  --x-dot: #c2410c; --x-dot-ring: #ffffff; --x-row-on: #fff3ea;
+  --x-bg: #f7f9fc; --x-bar: #ffffff; --x-ocean: #eef2f7; --x-land: #ffffff; --x-border: #d5dce5; --x-fg: #111827; --x-muted: #6b7280;
+  --x-line: #e6eaf0; --x-soft: #f1f4f8; --x-panel: #ffffff; --x-accent: #fb9f23; --x-accent-ink: #1f2937; --x-on: #111827; --x-on-ink: #ffffff;
+  --x-dot: #fb9f23; --x-dot-ring: #ffffff; --x-row-on: #fff6ea;
   font-family: "IBM Plex Sans Thai", var(--f-jakarta), system-ui, sans-serif;
   background: var(--x-bg); color: var(--x-fg); border: 1px solid var(--x-line); border-radius: 22px; overflow: hidden; color-scheme: light;
 }
 .explore-app[data-look="dark"] {
   --x-bg: #0b1218; --x-bar: #111b21; --x-ocean: #0e1820; --x-land: #22333a; --x-border: #3a525b; --x-fg: #e6eef0; --x-muted: #a3b4bb;
-  --x-line: #26363d; --x-soft: #18242a; --x-panel: #121c22; --x-accent: #b8f35a; --x-accent-ink: #0b1218; --x-on: #b8f35a; --x-on-ink: #0b1218;
-  --x-dot: #b8f35a; --x-dot-ring: #0b1218; --x-row-on: #1d2c22; color-scheme: dark;
+  --x-line: #26363d; --x-soft: #18242a; --x-panel: #121c22; --x-accent: #fb9f23; --x-accent-ink: #0b1218; --x-on: #f4f6f8; --x-on-ink: #0b1218;
+  --x-dot: #fb9f23; --x-dot-ring: #0b1218; --x-row-on: #2a2215; color-scheme: dark;
 }
 @media (prefers-color-scheme: dark) {
   .explore-app[data-look="auto"] {
     --x-bg: #0b1218; --x-bar: #111b21; --x-ocean: #0e1820; --x-land: #22333a; --x-border: #3a525b; --x-fg: #e6eef0; --x-muted: #a3b4bb;
-    --x-line: #26363d; --x-soft: #18242a; --x-panel: #121c22; --x-accent: #b8f35a; --x-accent-ink: #0b1218; --x-on: #b8f35a; --x-on-ink: #0b1218;
-    --x-dot: #b8f35a; --x-dot-ring: #0b1218; --x-row-on: #1d2c22; color-scheme: dark;
+    --x-line: #26363d; --x-soft: #18242a; --x-panel: #121c22; --x-accent: #fb9f23; --x-accent-ink: #0b1218; --x-on: #f4f6f8; --x-on-ink: #0b1218;
+    --x-dot: #fb9f23; --x-dot-ring: #0b1218; --x-row-on: #2a2215; color-scheme: dark;
   }
 }
 .explore-app :where(button, input, select) { font: inherit; color: inherit; }
@@ -184,10 +185,10 @@ a.btn { display: inline-block; text-decoration: none; }
 .explore-app .leaflet-control-zoom a { width: 44px; height: 44px; line-height: 44px; font-size: 20px; background: var(--x-panel); color: var(--x-fg); border-color: var(--x-line); }
 .explore-panel { border-left: 1px solid var(--x-line); background: var(--x-panel); padding: 16px; display: flex; flex-direction: column; gap: 8px; max-height: min(70vh, 640px); min-height: 360px; overflow-y: auto; min-width: 0; }
 .explore-panel h2 { margin: 4px 0 0; font-size: 17px; font-weight: 600; }
-.explore-pick { display: flex; flex-direction: column; gap: 2px; padding: 14px; border-radius: 14px; background: var(--x-soft); }
+.explore-pick { display: flex; flex-direction: column; gap: 2px; padding: 14px; border-radius: 16px; background: var(--x-panel); border: 1px solid var(--x-line); box-shadow: 0 6px 18px -10px rgb(17 24 39 / 18%); }
 .explore-pick-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .explore-btn { min-height: 44px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--x-line); background: var(--x-panel); cursor: pointer; font-weight: 500; }
-.explore-btn.primary { background: var(--x-accent); border-color: var(--x-accent); color: var(--x-accent-ink); font-weight: 600; }
+.explore-btn.primary { background: var(--x-on); border-color: var(--x-on); color: var(--x-on-ink); font-weight: 600; }
 .explore-name { font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
 .explore-meta { font-size: 13px; color: var(--x-muted); margin: 0; overflow-wrap: anywhere; }
 .explore-group { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 0; font-size: 13.5px; color: var(--x-muted); }

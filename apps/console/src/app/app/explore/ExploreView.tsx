@@ -27,19 +27,19 @@ const LOOK_KEY = 'tunedeck.web.exploreLook';
 /** Same colours as the CSS look tokens in globals.css (.explore-app), for the WebGL globe. */
 const GLOBE: Record<'light' | 'dark', GlobePalette> = {
   light: {
-    ocean: '#cfe3f1',
+    ocean: '#eef2f7',
     land: '#ffffff',
-    border: '#b9cbd9',
-    dot: '#c2410c',
-    dotOn: '#1f2937',
-    glow: '#9cc3e6',
+    border: '#d5dce5',
+    dot: '#fb9f23',
+    dotOn: '#111827',
+    glow: '#c9d6e6',
   },
   dark: {
     ocean: '#0e1820',
     land: '#22333a',
     border: '#3a525b',
-    dot: '#b8f35a',
-    dotOn: '#ffffff',
+    dot: '#fb9f23',
+    dotOn: '#f4f6f8',
     glow: '#2c4752',
   },
 };
