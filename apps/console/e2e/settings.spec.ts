@@ -309,10 +309,29 @@ test('the overview shows each phone’s last sync, and favorites picked on the w
   await page.getByRole('link', { name: 'วิทยุ' }).click();
   await expect(page).toHaveURL(`${base}/app/radio`);
   await expect(page.getByTestId('station')).toHaveCount(3);
-  // The stream address stays on the server.
-  expect(await page.content()).not.toContain('radio.test');
+  // The page plays the public catalog itself, with https media allowed on this page only.
+  await page.getByRole('button', { name: 'เล่น Bangkok Jazz' }).click();
+  await expect(page.getByTestId('player')).toContainText('กำลังเล่น: Bangkok Jazz');
+  await page.getByRole('button', { name: 'หยุด' }).click();
+  await expect(page.getByTestId('player')).toHaveCount(0);
+
+  // The viewer's own M3U list stays in this browser and skips http entries.
+  await page.locator('input[type=file]').setInputFiles({
+    name: 'mine.m3u',
+    mimeType: 'audio/x-mpegurl',
+    buffer: Buffer.from('#EXTM3U\n#EXTINF:-1 group-title="ข่าว",ช่องข่าว\nhttps://tv.example.test/news.m3u8\n#EXTINF:-1,เก่า\nhttp://tv.example.test/old.m3u8\n'),
+  });
+  await expect(page.getByText('เพิ่ม 1 รายการ (ข้าม 1 รายการที่ไม่ใช่ https)')).toBeVisible();
+  await expect(page.getByTestId('channel')).toHaveText(['ช่องข่าว▶✕ข่าว · tv.example.test']);
+  await page.getByRole('button', { name: 'เล่น ช่องข่าว' }).click();
+  await expect(page.getByTestId('player')).toContainText('กำลังเล่น: ช่องข่าว');
+  await page.reload();
+  await expect(page.getByTestId('channel')).toHaveCount(1);
+  await page.getByRole('button', { name: 'ลบ ช่องข่าว' }).click();
+  await expect(page.getByTestId('channel')).toHaveCount(0);
+
   await page.getByRole('button', { name: 'เพิ่ม Chiang Mai News ในสถานีโปรด' }).click();
-  await expect(page.getByTestId('favorite')).toHaveText(['Chiang Mai News↑↓★']);
+  await expect(page.getByTestId('favorite')).toHaveText(['Chiang Mai News▶↑↓★']);
   await page.getByRole('button', { name: 'เพิ่ม Bangkok Jazz ในสถานีโปรด' }).click();
   await expect(page.getByTestId('favorite')).toHaveCount(2);
   await page.getByRole('button', { name: 'เลื่อน Bangkok Jazz ขึ้น' }).click();

@@ -5,6 +5,8 @@ import type { CatalogStation, Favorite, SyncResult } from '@/lib/bff';
 import { Lang, strings } from '@/lib/i18n';
 import { countryName, languageName } from '@/lib/names';
 import { AppNav } from '../AppNav';
+import { MediaPlayer, NowPlaying } from './MediaPlayer';
+import { MyChannels } from './MyChannels';
 
 type Problem = 'conflict' | 'expired' | 'rateLimited' | 'unavailable' | 'gone';
 
@@ -35,10 +37,17 @@ export function RadioView({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [announce, setAnnounce] = useState('');
+  const [now, setNow] = useState<NowPlaying | null>(null);
   const alertRef = useRef<HTMLDivElement>(null);
   const byId = new Map((stations ?? []).map((s) => [s.id, s]));
   const favoriteOf = new Map(favorites.map((f) => [f.stationId, f]));
   const label = (stationId: string) => byId.get(stationId)?.name ?? t.radioStationGone;
+  const playStation = (s: CatalogStation) => setNow({ name: s.name, url: s.streamUrl, hls: s.codec === 'hls' });
+  const playButton = (s: CatalogStation) => (
+    <button type="button" className="btn secondary small" aria-pressed={now?.url === s.streamUrl} aria-label={t.playerPlay(s.name)} onClick={() => playStation(s)}>
+      ▶
+    </button>
+  );
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -108,6 +117,7 @@ export function RadioView({
       <AppNav lang={lang} current="/app/radio" csrfToken={csrfToken} />
       <h1>{t.radioTitle}</h1>
       <p className="lede">{t.radioLede}</p>
+      {now && <MediaPlayer lang={lang} item={now} onStop={() => setNow(null)} />}
       <p className="sr-only" role="status" aria-live="polite">
         {announce}
       </p>
@@ -136,6 +146,7 @@ export function RadioView({
               <li key={f.entityId} data-testid="favorite">
                 <span className="device-name">{label(f.stationId)}</span>
                 <span className="radio-actions">
+                  {byId.has(f.stationId) && playButton(byId.get(f.stationId)!)}
                   <button type="button" className="btn secondary small" disabled={busy || i === 0} aria-label={t.radioUp(label(f.stationId))} onClick={() => move(i, -1)}>
                     ↑
                   </button>
@@ -164,6 +175,7 @@ export function RadioView({
                 <li key={s.id} data-testid="station">
                   <span className="device-name">{s.name}</span>
                   <span className="radio-actions">
+                    {playButton(s)}
                     <button
                       type="button"
                       className="btn secondary small"
@@ -184,6 +196,8 @@ export function RadioView({
           </ul>
         )}
       </section>
+
+      <MyChannels lang={lang} playing={now?.url ?? null} onPlay={setNow} />
     </main>
   );
 }

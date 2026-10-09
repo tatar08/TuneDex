@@ -7,7 +7,7 @@ import { RadioView } from './RadioView';
 
 export const dynamic = 'force-dynamic';
 
-/** Doc 17 /app/radio: the approved catalog and the account's own favorites and their order. No playback here. */
+/** Doc 17 /app/radio: the approved catalog and the account's own favorites and their order. It plays the catalog and the viewer's own links. */
 export default async function RadioPage() {
   const bff = getBff();
   const jar = await cookies();
