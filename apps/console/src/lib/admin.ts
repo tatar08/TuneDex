@@ -88,6 +88,7 @@ export const FIELD_LABELS: Record<string, string> = {
   streamUrl: 'ลิงก์สตรีม',
   codec: 'รูปแบบเสียง',
   bitrateKbps: 'บิตเรต (kbps)',
+  variants: 'ลิงก์สำรองบิตเรตอื่น',
   reason: 'เหตุผล',
 };
 
@@ -126,6 +127,10 @@ export const REASON_LABELS: Record<string, string> = {
   opaque_key: 'ใช้รหัสไฟล์ในที่เก็บส่วนตัว ห้ามใส่ลิงก์',
   max_10: 'ไม่เกิน 10 รายการ',
   unknown_field: 'ช่องนี้ไม่รองรับแล้ว',
+  max_3: 'ไม่เกิน 3 ลิงก์',
+  must_be_object: 'รูปแบบไม่ถูกต้อง',
+  duplicate: 'มีลิงก์ซ้ำกัน',
+  duplicates_stream_url: 'ลิงก์สำรองต้องไม่ซ้ำกับลิงก์สตรีมหลัก',
 };
 
 const dateFmt = { th: new Intl.DateTimeFormat(locale('th'), { dateStyle: 'medium', timeZone: 'Asia/Bangkok' }), en: new Intl.DateTimeFormat(locale('en'), { dateStyle: 'medium', timeZone: 'Asia/Bangkok' }) };

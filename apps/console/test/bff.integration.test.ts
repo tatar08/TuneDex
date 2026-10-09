@@ -868,7 +868,8 @@ describe('world map stations', () => {
         if (url.pathname !== '/v1/directory/radio') return fetch(input, init);
         asked.push(url.search);
         const offset = Number(url.searchParams.get('offset'));
-        const body = offset === 0 ? { stations: [station(1, true), station(2, false)], nextOffset: 50 } : { stations: [station(3, true)], nextOffset: null };
+        const pages: Record<number, unknown[]> = { 0: [station(1, true), station(2, false)], 50: [station(3, true)] };
+        const body = { stations: pages[offset] ?? [], nextOffset: offset === 0 ? 50 : null };
         return new Response(JSON.stringify({ ...body, attribution: 'Radio Browser' }), { status: 200, headers: { 'content-type': 'application/json' } });
       },
     });
@@ -877,14 +878,19 @@ describe('world map stations', () => {
     const cookie = await signIn('map-user', mapped);
     const res = await mapped.getMapStations(req('?country=th', cookie));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { stations: { name: string; lat: number; lon: number }[] };
+    const body = (await res.json()) as { stations: { name: string; lat: number; lon: number }[]; unmapped: { name: string; lat?: number }[] };
     expect(body.stations.map((s) => [s.name, s.lat, s.lon])).toEqual([
       ['Map 1', 13.75, 100.5],
       ['Map 3', 13.75, 100.5],
     ]);
-    expect(asked).toEqual(['?hasGeo=true&limit=50&offset=0&country=TH', '?hasGeo=true&limit=50&offset=50&country=TH']);
+    // The country's stations without coordinates are listed once, without a place.
+    expect(body.unmapped.map((s) => [s.name, s.lat])).toEqual([['Map 2', undefined]]);
+    // Pages are asked for together: four with coordinates and four without.
+    expect([...asked].sort()).toEqual(
+      [0, 50, 100, 150].flatMap((o) => [`?limit=50&hasGeo=true&country=TH&offset=${o}`, `?limit=50&country=TH&offset=${o}`]).sort(),
+    );
     expect((await mapped.getMapStations(req('?country=TH', cookie))).status).toBe(200);
-    expect(asked).toHaveLength(2);
+    expect(asked).toHaveLength(8);
     expect((await mapped.getMapStations(req('?country=Thailand', cookie))).status).toBe(400);
   });
 });

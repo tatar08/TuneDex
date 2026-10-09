@@ -5,7 +5,7 @@ import { ApiError } from '../common/api-error';
 import { encodeCursor } from '../common/pagination';
 import { Database } from '../db/database';
 import { NewRightsRecord, rightsBlocker, RightsRecordView, RightsRow, rightsSummary, RightsSummary, todayUtc, toRightsView } from './rights';
-import { StationDraft } from './stations.schema';
+import { StationDraft, StreamVariant } from './stations.schema';
 
 interface Row {
   id: string;
@@ -73,6 +73,8 @@ export interface PublicStation {
   streamUrl: string;
   codec: string;
   bitrateKbps: number | null;
+  /** Alternates the publisher also serves; [] for stations published before variants existed. */
+  variants: StreamVariant[];
 }
 
 export interface StationActor {
@@ -516,6 +518,7 @@ export class StationsService implements OnApplicationBootstrap, OnApplicationShu
         streamUrl: p.streamUrl,
         codec: p.codec,
         bitrateKbps: p.bitrateKbps,
+        variants: p.variants ?? [],
       };
     });
     const nextCursor = rows.length > size ? Buffer.from(page[page.length - 1].id).toString('base64url') : null;

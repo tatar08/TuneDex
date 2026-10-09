@@ -86,8 +86,8 @@ export interface CatalogStation {
   streamUrl: string;
 }
 
-/** A community station with coordinates, for the world map on /app/explore. */
-export interface MapStation {
+/** A community station as /app/explore lists it. */
+export interface MapListStation {
   id: string;
   name: string;
   country: string | null;
@@ -96,6 +96,10 @@ export interface MapStation {
   codec: string;
   bitrateKbps: number | null;
   streamUrl: string;
+}
+
+/** A community station with coordinates, for the world map on /app/explore. */
+export interface MapStation extends MapListStation {
   lat: number;
   lon: number;
 }
@@ -139,6 +143,14 @@ export interface StationDraft {
   streamUrl: string;
   codec: 'mp3' | 'aac' | 'hls';
   bitrateKbps: number | null;
+  /** Other endpoints the station serves, such as a lower bitrate; absent on snapshots saved before variants existed. */
+  variants?: StreamVariant[];
+}
+
+export interface StreamVariant {
+  streamUrl: string;
+  codec: 'mp3' | 'aac' | 'hls';
+  bitrateKbps: number;
 }
 
 export type RightsState = 'current' | 'missing' | 'territory' | 'not_yet_valid' | 'expired';
@@ -214,12 +226,16 @@ export interface RegionHealth {
 export interface StationHealth {
   state: HealthState;
   regions: RegionHealth[];
+  /** 1-based published variants whose latest check failed; they never change `state`. */
+  failingVariants?: number[];
 }
 
 export interface HealthCheck {
   region: string;
   checkedAt: string;
   target: 'published' | 'draft';
+  /** 0 for the main stream, n for variants[n - 1]; absent from older API builds. */
+  variant?: number;
   ok: boolean;
   reason: string;
   httpStatus: number | null;
@@ -765,51 +781,61 @@ export function createBff(deps: BffDeps) {
   const notFound = (requestId: string) =>
     json(404, { code: 'NOT_FOUND', messageKey: 'errors.request.notFound', requestId, details: {} }, requestId);
 
-  const mapCache = new Map<string, { at: number; stations: MapStation[] }>();
-  const mapInFlight = new Map<string, Promise<{ status: number; stations?: MapStation[] }>>();
+  const mapCache = new Map<string, { at: number; stations: MapStation[]; unmapped: MapListStation[] }>();
+  const mapInFlight = new Map<string, Promise<{ status: number; stations?: MapStation[]; unmapped?: MapListStation[] }>>();
 
   /**
    * Community stations with coordinates, the whole world or one country. Kept 10 minutes in this process and
    * shared by every viewer, so the API's per-address limit (the console is one address) is not spent per page view.
    */
-  function loadMapStations(country: string | null): Promise<{ status: number; stations?: MapStation[] }> {
+  type DirectoryEntry = Omit<MapStation, 'lat' | 'lon'> & { geo?: { lat: number; lon: number } };
+
+  /** One directory page, or null when the API refused or failed it. */
+  async function directoryPage(params: Record<string, string>): Promise<DirectoryEntry[] | null> {
+    const res = await fetchImpl(`${config.apiBaseUrl}/v1/directory/radio?${new URLSearchParams({ limit: '50', ...params })}`, {
+      headers: { accept: 'application/json', 'x-request-id': `web_${randomUUID()}`, traceparent: traceparent() },
+      signal: AbortSignal.timeout(10_000),
+      redirect: 'error',
+    }).catch(() => null);
+    if (!res?.ok) return null;
+    return ((await res.json()) as { stations: DirectoryEntry[] }).stations;
+  }
+
+  /** Pages at offsets 0, 50, … fetched together (a page past the end is just empty); null when every page failed. */
+  async function directoryPages(pages: number, params: Record<string, string>): Promise<DirectoryEntry[] | null> {
+    const got = await Promise.all(Array.from({ length: pages }, (_, i) => directoryPage({ ...params, offset: String(i * 50) })));
+    return got.every((p) => p === null) ? null : got.flatMap((p) => p ?? []);
+  }
+
+  function loadMapStations(country: string | null): Promise<{ status: number; stations?: MapStation[]; unmapped?: MapListStation[] }> {
     const key = country ?? '*';
     const hit = mapCache.get(key);
-    if (hit && Date.now() - hit.at < MAP_CACHE_MS) return Promise.resolve({ status: 200, stations: hit.stations });
+    if (hit && Date.now() - hit.at < MAP_CACHE_MS) return Promise.resolve({ status: 200, stations: hit.stations, unmapped: hit.unmapped });
     const running = mapInFlight.get(key);
     if (running) return running;
     const call = (async () => {
-      const stations: MapStation[] = [];
+      // A country also lists its stations without coordinates, so none of them is out of reach on this page.
+      const [mapped, all] = await Promise.all([
+        directoryPages(country ? 4 : 6, country ? { hasGeo: 'true', country } : { hasGeo: 'true' }),
+        country ? directoryPages(4, { country }) : Promise.resolve([] as DirectoryEntry[]),
+      ]);
+      if (!mapped) return { status: 503 };
       const seen = new Set<string>();
-      let offset: number | null = 0;
-      for (let page = 0; page < (country ? 4 : 10) && offset !== null; page++) {
-        const qs = new URLSearchParams({ hasGeo: 'true', limit: '50', offset: String(offset) });
-        if (country) qs.set('country', country);
-        const res = await fetchImpl(`${config.apiBaseUrl}/v1/directory/radio?${qs}`, {
-          headers: { accept: 'application/json', 'x-request-id': `web_${randomUUID()}`, traceparent: traceparent() },
-          signal: AbortSignal.timeout(10_000),
-          redirect: 'error',
-        });
-        if (!res.ok) {
-          if (stations.length) break;
-          return { status: res.status };
-        }
-        const body = (await res.json()) as { stations: (Omit<MapStation, 'lat' | 'lon'> & { geo?: { lat: number; lon: number } })[]; nextOffset: number | null };
-        for (const { id, name, country: c, language, genres, codec, bitrateKbps, streamUrl, geo } of body.stations) {
-          if (!geo || seen.has(id) || typeof streamUrl !== 'string' || !streamUrl.startsWith('https://')) continue;
-          seen.add(id);
-          stations.push({ id, name, country: c, language, genres, codec, bitrateKbps, streamUrl, lat: geo.lat, lon: geo.lon });
-        }
-        offset = body.nextOffset;
-      }
+      const stations: MapStation[] = [];
+      const unmapped: MapListStation[] = [];
+      const usable = (e: DirectoryEntry) => typeof e.streamUrl === 'string' && e.streamUrl.startsWith('https://') && !seen.has(e.id) && !!seen.add(e.id);
+      for (const { geo, ...e } of mapped) if (geo && usable(e as DirectoryEntry)) stations.push({ ...pick(e), lat: geo.lat, lon: geo.lon });
+      for (const { geo: _geo, ...e } of all ?? []) if (usable(e as DirectoryEntry)) unmapped.push(pick(e));
       mapCache.delete(key);
-      mapCache.set(key, { at: Date.now(), stations });
+      mapCache.set(key, { at: Date.now(), stations, unmapped });
       if (mapCache.size > 300) mapCache.delete(mapCache.keys().next().value!);
-      return { status: 200, stations };
+      return { status: 200, stations, unmapped };
     })().finally(() => mapInFlight.delete(key));
     mapInFlight.set(key, call);
     return call;
   }
+
+  const pick = ({ id, name, country, language, genres, codec, bitrateKbps, streamUrl }: Omit<DirectoryEntry, 'geo'>): MapListStation => ({ id, name, country, language, genres, codec, bitrateKbps, streamUrl });
 
   return {
     names,
@@ -1172,7 +1198,7 @@ export function createBff(deps: BffDeps) {
         if (raw !== null && !/^[A-Za-z]{2}$/.test(raw)) return json(400, { code: 'VALIDATION_FAILED', requestId, details: { field: 'country' } }, requestId);
         const result = await loadMapStations(raw ? raw.toUpperCase() : null);
         if (!result.stations) return error(503, 'UPSTREAM_UNAVAILABLE', requestId);
-        return json(200, { stations: result.stations, attribution: 'Radio Browser (www.radio-browser.info), community data' }, requestId, { 'cache-control': 'private, max-age=300' });
+        return json(200, { stations: result.stations, unmapped: result.unmapped ?? [], attribution: 'Radio Browser (www.radio-browser.info), community data' }, requestId, { 'cache-control': 'private, max-age=300' });
       }),
 
     async loadCatalog(): Promise<{ status: number; stations?: CatalogStation[]; truncated?: boolean }> {

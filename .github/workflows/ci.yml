@@ -1,0 +1,89 @@
+name: CI
+
+# Runs on pull requests only, and skips changes that touch no code, to stay inside GitHub's free minutes.
+on:
+  pull_request:
+    paths:
+      - 'services/api/**'
+      - 'apps/console/**'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push cancels the run still going on the same PR.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Both suites run against a real PostgreSQL, as they do locally (port 54329, trusted postgres user).
+jobs:
+  api:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['54329:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: services/api/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+  console:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['54329:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            services/api/package-lock.json
+            apps/console/package-lock.json
+      # The console's integration and e2e tests start the real API build.
+      - name: Build the API
+        working-directory: services/api
+        run: npm ci && npm run build
+      - name: Install
+        working-directory: apps/console
+        run: npm ci
+      - name: Typecheck
+        working-directory: apps/console
+        run: npm run typecheck
+      - name: Unit and integration tests
+        working-directory: apps/console
+        run: npm test
+      - name: Build
+        working-directory: apps/console
+        run: npm run build
+      - name: Install Chromium
+        working-directory: apps/console
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests
+        working-directory: apps/console
+        run: npm run test:e2e

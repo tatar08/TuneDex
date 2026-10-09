@@ -60,6 +60,11 @@ export function HealthPanel({ station, history }: { station: AdminStation; histo
           {t('ตรวจไม่ผ่านติดกัน 3 ครั้ง ระบบไม่ปิดสถานีเอง ให้แอดมินดูว่าควรแก้ที่อยู่สตรีมหรือปิดสถานีชั่วคราว')}
         </p>
       )}
+      {!!health.failingVariants?.length && (
+        <p className="hl-note" role="note">
+          {t('ลิงก์บิตเรตอื่นที่ {0} เล่นไม่ได้ในการตรวจล่าสุด แอปจะกลับไปใช้ลิงก์หลัก ให้แก้หรือลบลิงก์นี้แล้วเผยแพร่ใหม่', health.failingVariants.join(', '))}
+        </p>
+      )}
       {health.regions.length > 0 && (
         <dl className="hl-regions">
           {health.regions.map((r) => (
@@ -99,6 +104,7 @@ export function HealthPanel({ station, history }: { station: AdminStation; histo
                 <span>{c.ok ? '✓' : '✗'} {probeReason(c.reason, c.httpStatus, t)}</span>
                 <small>
                   {c.region} · {c.target === 'draft' ? t('ร่าง') : t('เผยแพร่')}
+                  {!!c.variant && t(' · ลิงก์บิตเรตอื่นที่ {0}', c.variant)}
                   {c.ok && c.latencyMs !== null && ` · ${c.latencyMs} ms`}
                 </small>
               </li>

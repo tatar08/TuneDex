@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { connection } from 'next/server';
-import { jakarta, sarabun } from './admin/fonts';
+import './fonts';
 import './globals.css';
 
 export const metadata: Metadata = { title: 'TuneDeck', robots: { index: false, follow: false } };
@@ -10,7 +10,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   await connection();
   return (
     <html lang="th">
-      <body className={`${jakarta.variable} ${sarabun.variable}`}>{children}</body>
+      <body>{children}</body>
     </html>
   );
 }

@@ -105,6 +105,29 @@ describe('stream health checks', () => {
     expect((await view(sid)).health.state).toBe('ok');
   });
 
+  it('checks published variants too, without letting a broken one change the station state', async () => {
+    const sid = await published({
+      ...station,
+      streamUrl: 'https://good.example.com/main.mp3',
+      variants: [
+        { streamUrl: 'https://good.example.com/low.mp3', codec: 'mp3', bitrateKbps: 48 },
+        { streamUrl: 'https://gone.example.com/low.aac', codec: 'aac', bitrateKbps: 32 },
+      ],
+    });
+    await checker().runOnce();
+    const { health } = await view(sid);
+    expect(health).toMatchObject({ state: 'ok', failingVariants: [2] });
+    const history = (await http().get(`/v1/admin/stations/${sid}/health`).set(as('editor')).expect(200)).body.checks;
+    expect(history.map((c: { variant: number; ok: boolean }) => [c.variant, c.ok]).sort()).toEqual([
+      [0, true],
+      [1, true],
+      [2, false],
+    ]);
+    network['gone.example.com'] = { addresses: ['93.184.216.34'], page: up };
+    await checker().runOnce();
+    expect((await view(sid)).health.failingVariants).toBeUndefined();
+  });
+
   it('never connects to a private address and stores no URL', async () => {
     const sid = await published({ ...station, streamUrl: 'https://rebind.example.com/secret-token-abc/live' });
     network['rebind.example.com'] = { addresses: ['10.0.0.5'], page: up };

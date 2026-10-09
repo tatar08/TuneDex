@@ -69,8 +69,15 @@ test('an editor drafts a station and a different admin publishes it', async ({ b
 
   // The admin edits it; the editor's earlier tab is now stale and gets the conflict notice.
   await admin.getByLabel('บิตเรต (kbps)').fill('128');
+  // A lower-bitrate link for data saver: one with no bitrate is refused and named, then fixed.
+  const variants = admin.getByLabel('ลิงก์สำรองบิตเรตอื่น');
+  await variants.fill('https://stream.example.com/jazz-48.aac aac');
+  await admin.getByRole('button', { name: 'บันทึกร่าง' }).click();
+  await expect(admin.locator('#err-variants')).toHaveText('ต้องกรอก');
+  await variants.fill('https://stream.example.com/jazz-48.aac aac 48');
   await admin.getByRole('button', { name: 'บันทึกร่าง' }).click();
   await expect(admin.getByText('บันทึกร่างแล้ว · revision 2')).toBeVisible();
+  await expect(admin.getByRole('region', { name: 'เปลี่ยนจากที่เผยแพร่' })).toContainText('https://stream.example.com/jazz-48.aac aac 48');
   await editor.getByLabel('ชื่อสถานี').fill('Bangkok Jazz 24/7');
   await editor.getByRole('button', { name: 'บันทึกร่าง' }).click();
   await expect(editor.locator('.adm-alert')).toContainText('มีคนแก้สถานีนี้ไปก่อนแล้ว');

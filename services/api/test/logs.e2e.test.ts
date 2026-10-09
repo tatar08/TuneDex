@@ -81,10 +81,9 @@ describe('operational logs', () => {
     const second = await search('admin', { severity: 'WARN', status: '401', limit: '2', cursor: first.body.nextCursor });
     expect(second.body.logs).toHaveLength(2);
     const rows = [...first.body.logs, ...second.body.logs] as { timestamp: string; id: string }[];
-    for (let i = 1; i < rows.length; i++) {
-      const [a, b] = [rows[i - 1], rows[i]];
-      expect(a.timestamp > b.timestamp || (a.timestamp === b.timestamp && Number(a.id) > Number(b.id))).toBe(true);
-    }
+    // Newest first, ties broken by id; comparing whole lists shows the rows if the order is ever wrong.
+    const newestFirst = [...rows].sort((a, b) => b.timestamp.localeCompare(a.timestamp) || Number(b.id) - Number(a.id));
+    expect(rows.map((r) => `${r.timestamp} #${r.id}`)).toEqual(newestFirst.map((r) => `${r.timestamp} #${r.id}`));
     expect(new Set([...first.body.logs, ...second.body.logs].map((l: { id: string }) => l.id)).size).toBe(4);
   });
 
