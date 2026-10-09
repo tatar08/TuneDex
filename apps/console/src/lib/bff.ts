@@ -807,19 +807,26 @@ export function createBff(deps: BffDeps) {
     return got.every((p) => p === null) ? null : got.flatMap((p) => p ?? []);
   }
 
-  function loadMapStations(country: string | null): Promise<{ status: number; stations?: MapStation[]; unmapped?: MapListStation[] }> {
-    const key = country ?? '*';
+  /**
+   * `home` (world view only): the viewer's own country, whose stations join the world's most popular ones. The
+   * world list is ranked by listeners worldwide, so without it a country like Thailand shows only a handful.
+   */
+  function loadMapStations(country: string | null, home: string | null = null): Promise<{ status: number; stations?: MapStation[]; unmapped?: MapListStation[] }> {
+    if (country) home = null;
+    const key = country ?? (home ? `*+${home}` : '*');
     const hit = mapCache.get(key);
     if (hit && Date.now() - hit.at < MAP_CACHE_MS) return Promise.resolve({ status: 200, stations: hit.stations, unmapped: hit.unmapped });
     const running = mapInFlight.get(key);
     if (running) return running;
     const call = (async () => {
       // A country also lists its stations without coordinates, so none of them is out of reach on this page.
-      const [mapped, all] = await Promise.all([
+      const [world, near, all] = await Promise.all([
         directoryPages(country ? 4 : 6, country ? { hasGeo: 'true', country } : { hasGeo: 'true' }),
+        home ? directoryPages(2, { hasGeo: 'true', country: home }) : Promise.resolve([] as DirectoryEntry[]),
         country ? directoryPages(4, { country }) : Promise.resolve([] as DirectoryEntry[]),
       ]);
-      if (!mapped) return { status: 503 };
+      if (!world) return { status: 503 };
+      const mapped = [...(near ?? []), ...world];
       const seen = new Set<string>();
       const stations: MapStation[] = [];
       const unmapped: MapListStation[] = [];
@@ -1189,14 +1196,17 @@ export function createBff(deps: BffDeps) {
     /** Server-side read of the public catalog, up to 500 stations. No session needed: the catalog is public. */
     loadMapStations,
 
-    /** GET /bff/directory/map?country=XX: the map's stations for signed-in viewers. */
+    /** GET /bff/directory/map?country=XX or ?home=XX (world view plus the viewer's country): the map's stations for signed-in viewers. */
     getMapStations: (req: Request) =>
       timed(req, '/bff/directory/map', async (requestId) => {
         const ctx = await sessionFromCookie(req.headers.get('cookie'));
         if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
-        const raw = new URL(req.url).searchParams.get('country');
-        if (raw !== null && !/^[A-Za-z]{2}$/.test(raw)) return json(400, { code: 'VALIDATION_FAILED', requestId, details: { field: 'country' } }, requestId);
-        const result = await loadMapStations(raw ? raw.toUpperCase() : null);
+        const params = new URL(req.url).searchParams;
+        const raw = params.get('country');
+        const home = params.get('home');
+        for (const [field, v] of [['country', raw], ['home', home]] as const)
+          if (v !== null && !/^[A-Za-z]{2}$/.test(v)) return json(400, { code: 'VALIDATION_FAILED', requestId, details: { field } }, requestId);
+        const result = await loadMapStations(raw ? raw.toUpperCase() : null, home ? home.toUpperCase() : null);
         if (!result.stations) return error(503, 'UPSTREAM_UNAVAILABLE', requestId);
         return json(200, { stations: result.stations, unmapped: result.unmapped ?? [], attribution: 'Radio Browser (www.radio-browser.info), community data' }, requestId, { 'cache-control': 'private, max-age=300' });
       }),

@@ -41,7 +41,8 @@ test('explore shows community stations on a map or a globe, plays one and adds i
       },
     }),
   );
-  await page.getByLabel('ประเทศ').selectOption('TH');
+  // The country is typed (Thai name, English name or code) with suggestions.
+  await page.getByLabel('ประเทศ').fill('ประเทศไทย');
   await expect(page.getByTestId('explore-station')).toHaveCount(3);
   await expect(page.getByRole('heading', { name: 'โหลดแล้ว 3 สถานี' })).toBeVisible();
   // Stations without coordinates are still listed and playable, with no dot on the map.

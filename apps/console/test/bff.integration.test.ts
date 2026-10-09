@@ -901,5 +901,11 @@ describe('world map stations', () => {
     expect((await mapped.getMapStations(req('?country=TH', cookie))).status).toBe(200);
     expect(asked).toHaveLength(8);
     expect((await mapped.getMapStations(req('?country=Thailand', cookie))).status).toBe(400);
+    // The world view with a home country also asks for two pages of that country's mapped stations.
+    asked.length = 0;
+    expect((await mapped.getMapStations(req('?home=th', cookie))).status).toBe(200);
+    expect(asked.filter((q) => q.includes('country=TH')).sort()).toEqual([0, 50].map((o) => `?limit=50&hasGeo=true&country=TH&offset=${o}`).sort());
+    expect(asked.filter((q) => !q.includes('country='))).toHaveLength(6);
+    expect((await mapped.getMapStations(req('?home=xyz', cookie))).status).toBe(400);
   });
 });
