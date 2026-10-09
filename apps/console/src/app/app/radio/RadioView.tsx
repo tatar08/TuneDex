@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CatalogStation, Favorite, SyncResult } from '@/lib/bff';
 import { Lang, strings } from '@/lib/i18n';
+import { countryName, languageName } from '@/lib/names';
 import { AppNav } from '../AppNav';
 
 type Problem = 'conflict' | 'expired' | 'rateLimited' | 'unavailable' | 'gone';
@@ -175,7 +176,7 @@ export function RadioView({
                     </button>
                   </span>
                   <span className="status">
-                    {[s.country, s.language.toUpperCase(), s.genres.join(', '), s.bitrateKbps ? `${s.codec.toUpperCase()} ${s.bitrateKbps} kbps` : s.codec.toUpperCase()].filter(Boolean).join(' · ')}
+                    {[countryName(s.country, lang), languageName(s.language, lang), s.genres.join(', '), s.bitrateKbps ? `${s.codec.toUpperCase()} ${s.bitrateKbps} kbps` : s.codec.toUpperCase()].filter(Boolean).join(' · ')}
                   </span>
                 </li>
               );
