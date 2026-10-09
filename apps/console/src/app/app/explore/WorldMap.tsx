@@ -4,10 +4,9 @@ import { useEffect, useRef } from 'react';
 import type { LayerGroup, Map as LeafletMap } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { MapStation } from '@/lib/bff';
+import { loadCountryShapes } from '@/lib/world';
 
-export const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-
-/** Flat map (Leaflet + OpenStreetMap tiles). Names go in as text nodes, never as HTML. */
+/** Flat map (Leaflet over bundled country outlines, no tile service). Names go in as text nodes, never as HTML. */
 export function WorldMap({ stations, selected, onSelect, fit }: { stations: MapStation[]; selected: string | null; onSelect: (s: MapStation) => void; fit: boolean }) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<{ L: typeof import('leaflet'); map: LeafletMap; layer: LayerGroup } | null>(null);
@@ -16,10 +15,10 @@ export function WorldMap({ stations, selected, onSelect, fit }: { stations: MapS
 
   useEffect(() => {
     let cancelled = false;
-    void import('leaflet').then((L) => {
+    void Promise.all([import('leaflet'), loadCountryShapes()]).then(([L, countries]) => {
       if (cancelled || !el.current) return;
-      const m = L.map(el.current, { worldCopyJump: true, minZoom: 2, maxZoom: 12 }).setView([20, 10], 2);
-      L.tileLayer(TILE_URL, { maxZoom: 12, attribution: '© OpenStreetMap contributors' }).addTo(m);
+      const m = L.map(el.current, { worldCopyJump: true, minZoom: 2, maxZoom: 9, attributionControl: false }).setView([20, 10], 2);
+      L.geoJSON(countries, { interactive: false, style: { color: '#334155', weight: 0.7, fillColor: '#1e3a2f', fillOpacity: 1 } }).addTo(m);
       map.current = { L, map: m, layer: L.layerGroup().addTo(m) };
       el.current.dispatchEvent(new Event('map-ready'));
     });

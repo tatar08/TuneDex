@@ -743,6 +743,37 @@ paths:
           headers: { Retry-After: { schema: { type: integer } } }
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         '503': { description: 'DEPENDENCY_UNAVAILABLE with details {dependency: radio_directory, reason: not_configured | unreachable}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/directory/radio/countries:
+    get:
+      summary: Community station count per country (no sign-in)
+      description: 'Radio Browser''s own count of working stations per ISO country, for country pins on the map; a country''s search can return fewer after the https and codec filters. Cached an hour, served up to a day old while Radio Browser is down. Same rate limit as the search. Off (503) unless RADIO_BROWSER_BASE_URL is set.'
+      security: []
+      responses:
+        '200':
+          description: Countries with at least one station, most stations first
+          headers: { Cache-Control: { schema: { type: string, example: 'public, max-age=3600' } } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [countries, attribution]
+                properties:
+                  countries:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [country, stations]
+                      properties:
+                        country: { type: string, pattern: '^[A-Z]{2}$' }
+                        stations: { type: integer, minimum: 1 }
+                  attribution: { type: string }
+        '400': { description: 'VALIDATION_FAILED unknown_field for any parameter', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429':
+          description: API_RATE_LIMITED (60 a minute per client address), details.retryAfterSeconds
+          headers: { Retry-After: { schema: { type: integer } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '503': { description: 'DEPENDENCY_UNAVAILABLE with details {dependency: radio_directory, reason: not_configured | unreachable}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/admin/directory/blocks:
     get:
       summary: Community stations taken out of the directory search (catalog_editor, admin)

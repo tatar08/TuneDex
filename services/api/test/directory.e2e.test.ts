@@ -126,6 +126,23 @@ describe('community radio directory (Radio Browser)', () => {
     await http().get('/v1/directory/radio?hasGeo=yes').expect(400);
   });
 
+  it('counts stations per country from Radio Browser and caches the answer', async () => {
+    calls.length = 0;
+    reply = { status: 200, body: [{ name: 'Thailand', iso_3166_1: 'TH', stationcount: 120 }, { name: 'Japan', iso_3166_1: 'jp', stationcount: 300 }, { name: 'Nowhere', iso_3166_1: '', stationcount: 5 }, { name: 'Empty', iso_3166_1: 'ZZ', stationcount: 0 }] };
+    const res = await http().get('/v1/directory/radio/countries').expect(200);
+    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+    expect(res.body.countries).toEqual([
+      { country: 'JP', stations: 300 },
+      { country: 'TH', stations: 120 },
+    ]);
+    expect(calls[0].url).toBe(`${BASE}/json/countries?hidebroken=true`);
+    reply = { status: 500, body: 'down' };
+    expect((await http().get('/v1/directory/radio/countries').expect(200)).body.countries).toHaveLength(2);
+    expect(calls).toHaveLength(1);
+    await http().get('/v1/directory/radio/countries?x=1').expect(400);
+    await request(off.app.getHttpServer()).get('/v1/directory/radio/countries').expect(503);
+  });
+
   it('drops streams the players cannot use or that break our stream rules', () => {
     expect(toDirectoryStation(rb(1, { url_resolved: 'http://stream.example.com/a.mp3' }))).toBeNull();
     expect(toDirectoryStation(rb(1, { url_resolved: 'https://10.1.2.3/a.mp3' }))).toBeNull();

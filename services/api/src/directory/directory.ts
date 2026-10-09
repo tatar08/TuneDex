@@ -58,6 +58,7 @@ const CACHE_TTL_MS = 10 * 60_000;
 /** When Radio Browser is down, a cached answer up to this old is served rather than an error. */
 const CACHE_STALE_MS = 60 * 60_000;
 const CACHE_MAX = 500;
+const COUNTRY_TTL_MS = 60 * 60_000;
 const UPSTREAM_TIMEOUT_MS = 5000;
 export const UPSTREAM_MAX_BYTES = 2 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -161,6 +162,7 @@ export class DirectoryService {
   private readonly cache = new Map<string, { at: number; stations: DirectoryStation[]; full: boolean }>();
   /** One upstream call per search at a time: concurrent misses for the same search share it. */
   private readonly inFlight = new Map<string, Promise<{ stations: DirectoryStation[]; full: boolean }>>();
+  private countryCache: { at: number; countries: { country: string; stations: number }[] } | null = null;
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -221,6 +223,41 @@ export class DirectoryService {
     } catch (err) {
       this.logger.log('WARN', { eventCode: 'RADIO_DIRECTORY_UNAVAILABLE', errorName: err instanceof Error ? err.name : 'Error' });
       if (cached && Date.now() - cached.at < CACHE_STALE_MS) return cached;
+      throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'DEPENDENCY_UNAVAILABLE', { dependency: 'radio_directory', reason: 'unreachable' });
+    }
+  }
+
+  /**
+   * Station count per country from Radio Browser, for country pins on the map. Counts are Radio Browser's own
+   * (all its working stations), so a country's search can return fewer after our https and codec filters.
+   */
+  async countries(): Promise<{ countries: { country: string; stations: number }[]; attribution: string }> {
+    const dir = this.config.radioDirectory;
+    if (!dir) throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'DEPENDENCY_UNAVAILABLE', { dependency: 'radio_directory', reason: 'not_configured' });
+    const cached = this.countryCache;
+    if (cached && Date.now() - cached.at < COUNTRY_TTL_MS) return { countries: cached.countries, attribution: DIRECTORY_ATTRIBUTION };
+    try {
+      const res = await this.http(`${dir.baseUrl}/json/countries?hidebroken=true`, {
+        headers: { accept: 'application/json', 'user-agent': `TuneDeck-API/${this.config.build}` },
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      });
+      if (res.status !== 200) throw new Error(`status ${res.status}`);
+      const body = await res.text();
+      if (body.length > UPSTREAM_MAX_BYTES) throw new Error('too large');
+      const raw: unknown = JSON.parse(body);
+      if (!Array.isArray(raw)) throw new Error('not a list');
+      const counts = new Map<string, number>();
+      for (const r of raw as Record<string, unknown>[]) {
+        const code = typeof r?.iso_3166_1 === 'string' ? r.iso_3166_1.toUpperCase() : '';
+        const n = typeof r?.stationcount === 'number' && Number.isInteger(r.stationcount) ? r.stationcount : 0;
+        if (/^[A-Z]{2}$/.test(code) && n > 0) counts.set(code, (counts.get(code) ?? 0) + n);
+      }
+      const countries = [...counts].map(([country, stations]) => ({ country, stations })).sort((a, b) => b.stations - a.stations || a.country.localeCompare(b.country));
+      this.countryCache = { at: Date.now(), countries };
+      return { countries, attribution: DIRECTORY_ATTRIBUTION };
+    } catch (err) {
+      this.logger.log('WARN', { eventCode: 'RADIO_DIRECTORY_UNAVAILABLE', errorName: err instanceof Error ? err.name : 'Error' });
+      if (cached && Date.now() - cached.at < 24 * COUNTRY_TTL_MS) return { countries: cached.countries, attribution: DIRECTORY_ATTRIBUTION };
       throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'DEPENDENCY_UNAVAILABLE', { dependency: 'radio_directory', reason: 'unreachable' });
     }
   }
@@ -303,6 +340,14 @@ export class DirectoryController {
   async search(@Query() q: Record<string, unknown>, @Res({ passthrough: true }) res: Response) {
     const result = await this.directory.search(parseDirectoryQuery(q));
     res.setHeader('Cache-Control', 'public, max-age=300');
+    return result;
+  }
+
+  @Get('countries')
+  async countries(@Query() q: Record<string, unknown>, @Res({ passthrough: true }) res: Response) {
+    for (const k of Object.keys(q)) throw invalid(k, 'unknown_field');
+    const result = await this.directory.countries();
+    res.setHeader('Cache-Control', 'public, max-age=3600');
     return result;
   }
 }

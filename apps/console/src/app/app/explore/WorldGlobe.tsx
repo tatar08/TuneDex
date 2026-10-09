@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { GlobeInstance } from 'globe.gl';
 import type { MapStation } from '@/lib/bff';
+import { loadCountryShapes } from '@/lib/world';
 
 const escape = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-/** 3D globe (globe.gl on WebGL) with the same OpenStreetMap tiles; onFail when the browser has no WebGL. */
+/** 3D globe (globe.gl on WebGL) drawing the same bundled country outlines; onFail when the browser has no WebGL. */
 export function WorldGlobe({ stations, selected, onSelect, onFail, fit }: { stations: MapStation[]; selected: string | null; onSelect: (s: MapStation) => void; onFail: () => void; fit: boolean }) {
   const el = useRef<HTMLDivElement>(null);
   const globe = useRef<GlobeInstance | null>(null);
@@ -19,8 +20,8 @@ export function WorldGlobe({ stations, selected, onSelect, onFail, fit }: { stat
   useEffect(() => {
     let cancelled = false;
     let resize: ResizeObserver | null = null;
-    void import('globe.gl').then(
-      ({ default: Globe }) => {
+    void Promise.all([import('globe.gl'), loadCountryShapes()]).then(
+      ([{ default: Globe }, countries]) => {
         const node = el.current;
         if (cancelled || !node) return;
         try {
@@ -28,13 +29,18 @@ export function WorldGlobe({ stations, selected, onSelect, onFail, fit }: { stat
             .width(node.clientWidth)
             .height(node.clientHeight)
             .backgroundColor('rgba(0,0,0,0)')
-            .globeTileEngineUrl((x: number, y: number, l: number) => `https://tile.openstreetmap.org/${l}/${x}/${y}.png`)
-            .globeTileEngineMaxLevel(12)
+            .showGraticules(true)
+            .polygonsData(countries)
+            .polygonCapColor(() => '#1e3a2f')
+            .polygonSideColor(() => 'rgba(0,0,0,0)')
+            .polygonStrokeColor(() => '#334155')
+            .polygonAltitude(0.004)
             .pointLat('lat')
             .pointLng('lon')
             .pointAltitude(0.006)
             .pointLabel((d: object) => escape((d as MapStation).name))
             .onPointClick((d: object) => pick.current(d as MapStation));
+          (g.globeMaterial() as unknown as { color: { set(c: string): void } }).color.set('#0b2540');
           globe.current = g;
           resize = new ResizeObserver(() => g.width(node.clientWidth).height(node.clientHeight));
           resize.observe(node);
@@ -57,7 +63,7 @@ export function WorldGlobe({ stations, selected, onSelect, onFail, fit }: { stat
     globe.current
       ?.pointsData(stations)
       .pointColor((d: object) => ((d as MapStation).id === selected ? '#facc15' : '#10b981'))
-      .pointRadius((d: object) => ((d as MapStation).id === selected ? 0.9 : 0.45));
+      .pointRadius((d: object) => ((d as MapStation).id === selected ? 1.3 : 0.8));
   }, [ready, stations, selected]);
 
   useEffect(() => {

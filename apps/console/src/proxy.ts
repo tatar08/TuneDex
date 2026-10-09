@@ -10,16 +10,14 @@ export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
   const dev = process.env.NODE_ENV === 'development';
   // /app/radio and /app/explore play catalog, community and the viewer's own https streams, and hls.js fetches HLS
-  // segments itself; the https-wide media and connect sources stay on those pages only. /app/explore also draws
-  // OpenStreetMap tiles (the globe loads them as WebGL textures, so they are fetched as well).
+  // segments itself; the https-wide media and connect sources stay on those pages only.
   const path = request.nextUrl.pathname;
   const player = path === '/app/radio' || path === '/app/explore';
-  const tiles = path === '/app/explore' ? ' https://tile.openstreetmap.org' : '';
   const csp = [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval'" : ''}`,
     "style-src 'self' 'unsafe-inline'",
-    `img-src 'self' data: blob:${tiles}`,
+    "img-src 'self' data: blob:",
     "font-src 'self'",
     player ? "connect-src 'self' https:" : "connect-src 'self'",
     player ? "media-src 'self' https: blob:" : "media-src 'self'",
