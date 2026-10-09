@@ -1,3 +1,9 @@
+/* Bundled families (fonts.ts); the theme blocks below pick from these. */
+.adm-fonts {
+  --f-plex: "IBM Plex Sans Thai"; --f-plex-mono: "IBM Plex Mono"; --f-chakra: "Chakra Petch"; --f-share: "Share Tech Mono";
+  --f-prompt: "Prompt"; --f-bai: "Bai Jamjuree"; --f-jb: "JetBrains Mono"; --f-jakarta: "Plus Jakarta Sans";
+  --f-sarabun: "Sarabun"; --f-grotesk: "Space Grotesk";
+}
 /*
  * Staff console themes (Tar, 2026-10-03): five themes, each with its own layout as designed.
  * Every theme defines the same tokens so shared pieces (editor, alerts, pills) follow it:

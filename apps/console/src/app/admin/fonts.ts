@@ -1,17 +1,27 @@
-import { Bai_Jamjuree, Plus_Jakarta_Sans, Sarabun, Space_Grotesk, Chakra_Petch, IBM_Plex_Mono, IBM_Plex_Sans_Thai, JetBrains_Mono, Noto_Sans_Thai, Prompt, Share_Tech_Mono } from 'next/font/google';
+// Font files ship inside the build (Fontsource packages), so neither the build nor staff browsers call Google Fonts.
+// Plus Jakarta Sans and Sarabun come from the root layout, which every page shares.
+// Each @font-face has a unicode-range and no preload: a browser downloads only the families and scripts a theme shows.
+import '@fontsource/ibm-plex-sans-thai/400.css';
+import '@fontsource/ibm-plex-sans-thai/500.css';
+import '@fontsource/ibm-plex-sans-thai/600.css';
+import '@fontsource/ibm-plex-mono/400.css';
+import '@fontsource/ibm-plex-mono/500.css';
+import '@fontsource/chakra-petch/400.css';
+import '@fontsource/chakra-petch/500.css';
+import '@fontsource/chakra-petch/600.css';
+import '@fontsource/chakra-petch/700.css';
+import '@fontsource/share-tech-mono/400.css';
+import '@fontsource/prompt/400.css';
+import '@fontsource/prompt/500.css';
+import '@fontsource/prompt/600.css';
+import '@fontsource/bai-jamjuree/400.css';
+import '@fontsource/bai-jamjuree/500.css';
+import '@fontsource/bai-jamjuree/600.css';
+import '@fontsource/jetbrains-mono/400.css';
+import '@fontsource/jetbrains-mono/500.css';
+import '@fontsource/space-grotesk/500.css';
+import '@fontsource/space-grotesk/600.css';
+import '@fontsource/space-grotesk/700.css';
 
-// Self-hosted at build time by next/font, so staff browsers never call Google Fonts.
-// Each theme uses only its own families; unused ones are never downloaded.
-export const notoThai = Noto_Sans_Thai({ subsets: ['thai', 'latin'], weight: ['300', '400', '500', '600'], variable: '--f-noto', display: 'swap', preload: false });
-export const plexThai = IBM_Plex_Sans_Thai({ subsets: ['thai', 'latin'], weight: ['400', '500', '600'], variable: '--f-plex', display: 'swap', preload: false });
-export const plexMono = IBM_Plex_Mono({ subsets: ['latin'], weight: ['400', '500'], variable: '--f-plex-mono', display: 'swap', preload: false });
-export const chakra = Chakra_Petch({ subsets: ['thai', 'latin'], weight: ['400', '500', '600', '700'], variable: '--f-chakra', display: 'swap', preload: false });
-export const shareTech = Share_Tech_Mono({ subsets: ['latin'], weight: '400', variable: '--f-share', display: 'swap', preload: false });
-export const prompt = Prompt({ subsets: ['thai', 'latin'], weight: ['400', '500', '600'], variable: '--f-prompt', display: 'swap', preload: false });
-export const bai = Bai_Jamjuree({ subsets: ['thai', 'latin'], weight: ['400', '500', '600'], variable: '--f-bai', display: 'swap', preload: false });
-export const jetbrains = JetBrains_Mono({ subsets: ['latin'], weight: ['400', '500'], variable: '--f-jb', display: 'swap', preload: false });
-export const jakarta = Plus_Jakarta_Sans({ subsets: ['latin'], weight: ['400', '500', '600', '700', '800'], variable: '--f-jakarta', display: 'swap', preload: false });
-export const sarabun = Sarabun({ subsets: ['thai', 'latin'], weight: ['300', '400', '500', '600', '700'], variable: '--f-sarabun', display: 'swap', preload: false });
-export const grotesk = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'], variable: '--f-grotesk', display: 'swap', preload: false });
-
-export const fontVariables = [notoThai, plexThai, plexMono, chakra, shareTech, prompt, bai, jetbrains, jakarta, sarabun, grotesk].map((f) => f.variable).join(' ');
+/** Class that maps each theme's font variables to the bundled families (defined in admin.css). */
+export const fontVariables = 'adm-fonts';
