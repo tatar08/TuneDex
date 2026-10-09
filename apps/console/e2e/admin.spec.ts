@@ -6,6 +6,9 @@ let stack: Stack;
 test.beforeAll(async () => {
   stack = await startStack();
   stack.api.staff('grant', 'e2e-editor', 'catalog_editor', '--by', 'e2e', '--reason', 'test');
+  // The directory test runs every theme on a page that reads the API several times per view; each person gets 120
+  // reads a minute, so it has its own editor rather than spending the one the next tests use.
+  stack.api.staff('grant', 'e2e-dir-editor', 'catalog_editor', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-admin', 'admin', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-ops', 'operator', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-auditor', 'auditor', '--by', 'e2e', '--reason', 'test');
@@ -247,7 +250,7 @@ test('the log page has its own layout in each theme', async ({ browser }) => {
 });
 
 test('editors block and unblock worldwide radio stations in every theme', async ({ browser }) => {
-  const page = await signInAs(browser, 'e2e-editor', '/admin/directory');
+  const page = await signInAs(browser, 'e2e-dir-editor', '/admin/directory');
   const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
   const themes = ['minimal', 'control-room', 'broadcast-rack', 'daylight-bento', 'workbench'];
   for (const [i, theme] of themes.entries()) {
