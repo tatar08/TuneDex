@@ -256,7 +256,7 @@ test('editors block and unblock worldwide radio stations in every theme', async 
     // The search goes through the API; this stack has no Radio Browser server, so it says the search is off.
     await page.getByRole('searchbox', { name: 'ค้นหาชื่อสถานีแบบที่ผู้ใช้เห็น' }).fill('jazz');
     await page.getByRole('searchbox', { name: 'ค้นหาชื่อสถานีแบบที่ผู้ใช้เห็น' }).press('Enter');
-    await expect(page).toHaveURL(`${stack.base}/admin/directory?q=jazz`);
+    await expect(page).toHaveURL(`${stack.base}/admin/directory?country=&q=jazz&status=all`);
     await expect(page.locator('.adm-alert')).toContainText('RADIO_BROWSER_BASE_URL');
 
     const host = `relay${i}.pirate.example.com`;

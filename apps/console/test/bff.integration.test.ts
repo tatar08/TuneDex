@@ -852,12 +852,12 @@ describe('account export and deletion', () => {
 });
 
 describe('world map stations', () => {
-  it('pages the community directory with hasGeo, shares one cached answer and needs a session', async () => {
+  it('takes the API map list in one call, splits a country by coordinates, shares one cached answer and needs a session', async () => {
     const asked: string[] = [];
-    const station = (n: number, geo: boolean) => ({
+    const station = (n: number, geo: boolean, country = 'TH') => ({
       id: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
       name: `Map ${n}`,
-      country: 'TH',
+      country,
       language: 'thai',
       genres: ['jazz'],
       codec: 'mp3',
@@ -874,12 +874,17 @@ describe('world map stations', () => {
       logWriter: () => undefined,
       fetchImpl: async (input, init) => {
         const url = new URL(String(input));
-        if (url.pathname !== '/v1/directory/radio') return fetch(input, init);
-        asked.push(url.search);
-        const offset = Number(url.searchParams.get('offset'));
-        const pages: Record<number, unknown[]> = { 0: [station(1, true), station(2, false)], 50: [station(3, true)] };
-        const body = { stations: pages[offset] ?? [], nextOffset: offset === 0 ? 50 : null };
-        return new Response(JSON.stringify({ ...body, attribution: 'Radio Browser' }), { status: 200, headers: { 'content-type': 'application/json' } });
+        if (!url.pathname.startsWith('/v1/directory/radio')) return fetch(input, init);
+        asked.push(url.pathname + url.search);
+        const stations =
+          url.pathname === '/v1/directory/radio/map'
+            ? url.searchParams.get('country')
+              ? [station(1, true), station(2, false), station(3, true)]
+              : [station(1, true), station(4, true, 'BR')]
+            : url.searchParams.get('offset') === '0'
+              ? [station(5, true, 'VN'), station(1, true)]
+              : [];
+        return new Response(JSON.stringify({ stations, attribution: 'Radio Browser' }), { status: 200, headers: { 'content-type': 'application/json' } });
       },
     });
     const req = (q: string, cookie?: string) => new Request(`${BASE}/bff/directory/map${q}`, { headers: cookie ? { cookie } : {} });
@@ -894,18 +899,21 @@ describe('world map stations', () => {
     ]);
     // The country's stations without coordinates are listed once, without a place.
     expect(body.unmapped.map((s) => [s.name, s.lat])).toEqual([['Map 2', undefined]]);
-    // Pages are asked for together: four with coordinates and four without.
-    expect([...asked].sort()).toEqual(
-      [0, 50, 100, 150].flatMap((o) => [`?limit=50&hasGeo=true&country=TH&offset=${o}`, `?limit=50&country=TH&offset=${o}`]).sort(),
-    );
+    expect(asked).toEqual(['/v1/directory/radio/map?country=TH']);
     expect((await mapped.getMapStations(req('?country=TH', cookie))).status).toBe(200);
-    expect(asked).toHaveLength(8);
+    expect(asked).toHaveLength(1);
     expect((await mapped.getMapStations(req('?country=Thailand', cookie))).status).toBe(400);
-    // The world view with a home country also asks for two pages of that country's mapped stations.
+    // Thailand is already in full in the world list, so a Thai viewer's world view is the plain world list.
     asked.length = 0;
-    expect((await mapped.getMapStations(req('?home=th', cookie))).status).toBe(200);
-    expect(asked.filter((q) => q.includes('country=TH')).sort()).toEqual([0, 50].map((o) => `?limit=50&hasGeo=true&country=TH&offset=${o}`).sort());
-    expect(asked.filter((q) => !q.includes('country='))).toHaveLength(6);
+    const world = (await (await mapped.getMapStations(req('?home=th', cookie))).json()) as { stations: { name: string }[]; unmapped: unknown[] };
+    expect(asked).toEqual(['/v1/directory/radio/map']);
+    expect(world.stations.map((s) => s.name)).toEqual(['Map 1', 'Map 4']);
+    expect(world.unmapped).toEqual([]);
+    // A viewer from elsewhere also gets two pages of their own country's mapped stations, first.
+    asked.length = 0;
+    const vn = (await (await mapped.getMapStations(req('?home=VN', cookie))).json()) as { stations: { name: string }[] };
+    expect([...asked].sort()).toEqual(['/v1/directory/radio/map', ...[0, 50].map((o) => `/v1/directory/radio?limit=50&hasGeo=true&country=VN&offset=${o}`)].sort());
+    expect(vn.stations.map((s) => s.name)).toEqual(['Map 5', 'Map 1', 'Map 4']);
     expect((await mapped.getMapStations(req('?home=xyz', cookie))).status).toBe(400);
   });
 });

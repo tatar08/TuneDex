@@ -63,6 +63,9 @@ export function WorldGlobe({
             .pointLat('lat')
             .pointLng('lon')
             .pointAltitude(0.006)
+            // Thousands of stations: no grow-in animation and fewer sides per dot keep the globe smooth.
+            .pointsTransitionDuration(0)
+            .pointResolution(6)
             .pointLabel((d: object) => escape((d as MapStation).name))
             .onPointClick((d: object) => pick.current(d as MapStation));
           globe.current = g;

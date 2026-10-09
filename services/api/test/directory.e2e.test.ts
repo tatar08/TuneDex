@@ -44,7 +44,8 @@ describe('community radio directory (Radio Browser)', () => {
       config: { radioDirectory: { baseUrl: BASE } },
       directoryFetch: async (url, init) => {
         calls.push({ url, ua: init.headers['user-agent'] });
-        const { status, body } = reply;
+        const { status } = reply;
+        const body = typeof reply.body === 'function' ? (reply.body as (u: URL) => unknown)(new URL(url)) : reply.body;
         return { status, text: async () => (typeof body === 'string' ? body : JSON.stringify(body)) };
       },
     });
@@ -247,5 +248,91 @@ describe('community radio directory (Radio Browser)', () => {
     expect(calls).toHaveLength(1);
     await http().post('/v1/admin/directory/blocks').set(as('admin')).send({ kind: 'host', value: 'dotted-host.example.com', reason: 'complaint from rights holder' }).expect(201);
     expect((await http().get('/v1/directory/radio?q=stampede').expect(200)).body.stations.map((s: { id: string }) => s.id)).toEqual([uuid(30)]);
+  });
+
+  it('lists every station of a country for the map in pages of 500, geo where known, blocked ones left out', async () => {
+    const jp = (n: number) => rb(n, { countrycode: 'JP', geo_lat: n % 2 ? 35.68 : null, geo_long: n % 2 ? 139.69 : null });
+    reply = { status: 200, body: (u: URL) => Array.from({ length: u.searchParams.get('offset') === '0' ? 500 : 120 }, (_, i) => jp(2000 + Number(u.searchParams.get('offset')) + i)) };
+    await http().post('/v1/admin/directory/blocks').set(as('editor')).send({ kind: 'station', value: uuid(2001), reason: 'switched off by the catalog team' }).expect(201);
+    const res = await http().get('/v1/directory/radio/map?country=jp').expect(200);
+    expect(calls.map((c) => new URL(c.url).searchParams.get('offset'))).toEqual(['0', '500']);
+    const asked = new URL(calls[0].url).searchParams;
+    expect([asked.get('countrycode'), asked.get('limit'), asked.get('has_geo_info'), asked.get('is_https')]).toEqual(['JP', '500', null, 'true']);
+    expect(res.body.stations).toHaveLength(619);
+    expect(res.body.truncated).toBe(false);
+    expect(res.body.stations[0]).toMatchObject({ id: uuid(2000) });
+    expect(res.body.stations[0].geo).toBeUndefined();
+    expect(res.body.stations[1]).toMatchObject({ id: uuid(2002) });
+    expect(res.body.stations.find((s: { id: string }) => s.id === uuid(2003)).geo).toEqual({ lat: 35.68, lon: 139.69 });
+    expect(res.headers['cache-control']).toBe('public, max-age=600');
+    // Kept an hour: the next viewer costs Radio Browser nothing.
+    await http().get('/v1/directory/radio/map?country=JP').expect(200);
+    expect(calls).toHaveLength(2);
+    expect((await http().get('/v1/directory/radio/map?country=JPN')).status).toBe(400);
+    expect((await http().get('/v1/directory/radio/map?limit=5')).status).toBe(400);
+  });
+
+  it('builds the world map from the most listened stations plus every featured country with coordinates', async () => {
+    reply = {
+      status: 200,
+      body: (u: URL) => {
+        const cc = u.searchParams.get('countrycode');
+        if (u.searchParams.get('has_geo_info') !== 'true') return [];
+        if (!cc) return [rb(3000, { countrycode: 'BR', geo_lat: -23.5, geo_long: -46.6 })];
+        if (cc === 'TH') return [rb(3001, { geo_lat: 13.75, geo_long: 100.5 }), rb(3000, { countrycode: 'BR', geo_lat: -23.5, geo_long: -46.6 })];
+        if (cc === 'DE') return [rb(3002, { countrycode: 'DE', geo_lat: 52.5, geo_long: 13.4 })];
+        return [];
+      },
+    };
+    const res = await http().get('/v1/directory/radio/map').expect(200);
+    const asked = calls.map((c) => new URL(c.url).searchParams.get('countrycode'));
+    expect(asked).toEqual(expect.arrayContaining([null, 'TH', 'JP', 'KR', 'US', 'DE', 'FR', 'GB', 'IT', 'ES', 'RU']));
+    expect(new URL(calls.find((c) => c.url.includes('countrycode=US'))!.url).searchParams.get('limit')).toBe('500');
+    expect(res.body.stations.map((s: { id: string }) => s.id)).toEqual([uuid(3000), uuid(3001), uuid(3002)]);
+    expect(res.body.stations[1].geo).toEqual({ lat: 13.75, lon: 100.5 });
+  });
+
+  it('serves the world map without one country that failed, and asks again soon', async () => {
+    reply = { status: 200, body: (u: URL) => (u.searchParams.get('countrycode') === 'FR' ? 'oops' : u.searchParams.get('countrycode') ? [] : [rb(3100, { geo_lat: 1, geo_long: 1 })]) };
+    // A fresh service: the earlier test's world list is cached.
+    const fresh = await createTestApp(db.url, id.keyResolver, { config: { radioDirectory: { baseUrl: BASE } }, directoryFetch: async (url) => {
+      calls.push({ url, ua: '' });
+      const body = (reply.body as (u: URL) => unknown)(new URL(url));
+      return { status: 200, text: async () => (typeof body === 'string' ? body : JSON.stringify(body)) };
+    } });
+    try {
+      const res = await request(fresh.app.getHttpServer()).get('/v1/directory/radio/map').expect(200);
+      expect(res.body).toMatchObject({ truncated: true, stations: [{ id: uuid(3100) }] });
+    } finally {
+      await fresh.close();
+    }
+  });
+
+  it('lets staff list a country with each station on or off, and switch one off and on again', async () => {
+    reply = { status: 200, body: () => [rb(4000, { countrycode: 'KR', name: 'Seoul FM' }), rb(4001, { countrycode: 'KR', name: 'Busan Jazz' }), rb(4002, { countrycode: 'KR', name: 'Seoul Talk', url_resolved: 'https://a.kr-host.example.com/x.mp3' })] };
+    await http().post('/v1/admin/directory/blocks').set(as('admin')).send({ kind: 'host', value: 'kr-host.example.com', reason: 'host relays without rights' }).expect(201);
+    const list = async (qs: string) => (await http().get(`/v1/admin/directory/stations?${qs}`).set(as('editor')).expect(200)).body;
+    const all = await list('country=kr');
+    expect(all.stations.map((s: { name: string; active: boolean; block: { kind: string } | null }) => [s.name, s.active, s.block?.kind ?? null])).toEqual([
+      ['Seoul FM', true, null],
+      ['Busan Jazz', true, null],
+      ['Seoul Talk', false, 'host'],
+    ]);
+    expect(all).toMatchObject({ total: 3, nextOffset: null, truncated: false });
+    const off = await http().post('/v1/admin/directory/blocks').set(as('editor')).send({ kind: 'station', value: uuid(4000), reason: 'switched off by the catalog team' }).expect(201);
+    expect((await list('country=KR&status=inactive')).stations.map((s: { name: string }) => s.name)).toEqual(['Seoul FM', 'Seoul Talk']);
+    expect((await list('country=KR&status=active&q=jazz')).stations.map((s: { name: string }) => s.name)).toEqual(['Busan Jazz']);
+    expect((await http().get('/v1/directory/radio/map?country=KR').expect(200)).body.stations.map((s: { name: string }) => s.name)).toEqual(['Busan Jazz']);
+    await http().post(`/v1/admin/directory/blocks/${off.body.id}/remove`).set(as('editor')).send({ reason: 'switched back on after review' }).expect(204);
+    expect((await list('country=KR&status=active')).stations.map((s: { name: string }) => s.name)).toEqual(['Seoul FM', 'Busan Jazz']);
+    const byName = await list('q=seoul');
+    expect(new URL(calls.at(-1)!.url).searchParams.get('name')).toBe('seoul');
+    expect(byName.total).toBe(3);
+
+    for (const qs of ['', 'country=KOR', 'country=KR&status=maybe', 'country=KR&offset=5000', 'country=KR&limit=5']) {
+      expect((await http().get(`/v1/admin/directory/stations?${qs}`).set(as('admin'))).status).toBe(400);
+    }
+    for (const who of ['ops', 'user'] as const) expect((await http().get('/v1/admin/directory/stations?country=KR').set(as(who))).status).toBe(403);
+    expect((await http().get('/v1/admin/directory/stations?country=KR')).status).toBe(401);
   });
 });
