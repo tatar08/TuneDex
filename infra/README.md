@@ -65,6 +65,20 @@ $KC create clients/$ID/protocol-mappers/models -r tunedeck -s name="tunedeck-api
 ```
 On the phone the issuer is `https://auth.<EDGE_DOMAIN>/realms/tunedeck`.
 
+### Sign-in security settings
+
+The realm file turns on Keycloak's sign-in event log (30 days; sign-ins, failed sign-ins, sign-ups, password and 2-step changes, lockouts, without tokens or request bodies) and the admin event log (who changed what, without the changed data). Failed passwords lock an account for 1 minute after 10 tries, growing up to 15 minutes; tries more than a second apart are not "quick", and the count resets after 12 hours. Passwords are 12 to 128 characters. A realm imported before this keeps its old settings; set them once (same `$KC` as step 5):
+```sh
+$KC update realms/tunedeck -s eventsEnabled=true -s eventsExpiration=2592000 \
+  -s 'enabledEventTypes=["LOGIN","LOGIN_ERROR","REGISTER","REGISTER_ERROR","LOGOUT","CODE_TO_TOKEN_ERROR","REFRESH_TOKEN_ERROR","UPDATE_PASSWORD","UPDATE_PASSWORD_ERROR","RESET_PASSWORD","RESET_PASSWORD_ERROR","UPDATE_CREDENTIAL","REMOVE_CREDENTIAL","UPDATE_TOTP","REMOVE_TOTP","DELETE_ACCOUNT","USER_DISABLED_BY_TEMPORARY_LOCKOUT"]' \
+  -s adminEventsEnabled=true -s adminEventsDetailsEnabled=false \
+  -s waitIncrementSeconds=60 -s maxFailureWaitSeconds=900 -s maxDeltaTimeSeconds=43200 \
+  -s quickLoginCheckMilliSeconds=1000 -s minimumQuickLoginWaitSeconds=60 \
+  -s 'passwordPolicy="length(12) and maxLength(128) and notUsername and notEmail"'
+$KC get events -r tunedeck -q type=LOGIN_ERROR --fields time,type,ipAddress,error   # recent failed sign-ins
+```
+Events hold the user id and IP address, so they are personal data; they expire after 30 days, which is how long a deleted account's sign-in history stays in Keycloak.
+
 ## Before staging or production
 
 `infra/deploy` is a one-server stack with these done (public HTTPS, Keycloak `start` on Postgres, required keys, separate checker); its README lists what it still leaves to the operator.
