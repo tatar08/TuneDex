@@ -35,6 +35,10 @@ describe('account exports as jobs (Doc 17 POST /me/exports)', () => {
     expect((await http().get(`/v1/me/exports/${started.body.id}`).set(alice).expect(200)).body).toEqual({
       id: started.body.id, status: 'ready', requestedAt: expect.any(String), readyAt: expect.any(String), expiresAt: expect.any(String),
     });
+    // The link hands out the data, so it needs a recent sign-in too.
+    const staleLink = await http().post(`/v1/me/exports/${started.body.id}/link`).set(await bearer('exp-alice', now() - 301));
+    expect(staleLink.status).toBe(401);
+    expect(staleLink.body.code).toBe('REAUTH_REQUIRED');
     const link = await http().post(`/v1/me/exports/${started.body.id}/link`).set(alice).expect(201);
     const ready = { body: { download: link.body } };
     expect(ready.body.download.path).toMatch(/^\/v1\/export-downloads\/[A-Za-z0-9_-]{43}$/);
@@ -62,11 +66,11 @@ describe('account exports as jobs (Doc 17 POST /me/exports)', () => {
     const job = await http().post('/v1/me/exports').set('Idempotency-Key', crypto.randomUUID()).set(bob).expect(202);
     await t.app.get(AccountExportsService).processQueue();
     // Another account cannot see it, and malformed ids look the same.
-    await http().get(`/v1/me/exports/${job.body.id}`).set(await bearer('exp-mallory')).expect(404);
+    await http().get(`/v1/me/exports/${job.body.id}`).set(await bearer('exp-mallory', now())).expect(404);
     await http().get('/v1/me/exports/not-a-uuid').set(bob).expect(404);
     await http().get('/v1/export-downloads/short').expect(404);
 
-    await http().post(`/v1/me/exports/${job.body.id}/link`).set(await bearer('exp-mallory')).expect(404);
+    await http().post(`/v1/me/exports/${job.body.id}/link`).set(await bearer('exp-mallory', now())).expect(404);
     const { body: download } = await http().post(`/v1/me/exports/${job.body.id}/link`).set(bob).expect(201);
     await t.pool.query(`UPDATE account_exports SET link_expires_at = now() - interval '1 second' WHERE id = $1`, [job.body.id]);
     await http().get(download.path).expect(404);

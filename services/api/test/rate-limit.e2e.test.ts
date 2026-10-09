@@ -82,6 +82,15 @@ describe('rate limits', () => {
     expect(JSON.stringify(rows.rows)).not.toContain('203.0.113');
   });
 
+  it('matches paths exactly, so a different spelling cannot reach a route past the limits', async () => {
+    for (const path of ['/V1/catalog/radio', '/v1/Catalog/radio', '/v1/CATALOG/RADIO', '/v1/Directory/radio']) {
+      expect((await http().get(path).set('X-Forwarded-For', '203.0.113.9')).status).toBe(404);
+    }
+    const alice = { Authorization: `Bearer ${await id.token('rl-case')}` };
+    expect((await http().post('/v1/admin/users/Lookup').set(alice).send({})).status).toBe(404);
+    expect((await http().delete('/V1/ME').set(alice)).status).toBe(404);
+  });
+
   it('never limits health probes or rejected sign-ins', async () => {
     for (let i = 0; i < 10; i++) await http().get('/health/live').expect(200);
     for (let i = 0; i < 10; i++) await http().get('/v1/me/settings').expect(401);

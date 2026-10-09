@@ -800,6 +800,15 @@ describe('account export and deletion', () => {
     expect(file.headers.get('content-disposition')).toMatch(/^attachment; filename="tunedeck-export-[\d-]+\.json"$/);
     expect((await file.json()).format).toBe('tunedeck-account-export');
 
+    // Coming back to the button more than 5 minutes after signing in sends the browser to sign in again,
+    // back to a fresh export, instead of showing an error page.
+    idp.ageSignIn(600);
+    const aged = await signIn('acct-web-export');
+    const again = await download(aged, await csrfFor(aged));
+    expect(again.status).toBe(303);
+    expect(again.headers.get('location')).toBe(`/auth/login?reauth=1&returnTo=${encodeURIComponent('/app/privacy?export=1')}`);
+    expect(await bff.sessionFromCookie(aged)).not.toBeNull();
+
     // Someone else's export, and malformed ids, are not found.
     const other = await signIn('acct-web-export-other');
     expect((await download(other, await csrfFor(other))).status).toBe(404);

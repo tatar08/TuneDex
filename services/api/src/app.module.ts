@@ -123,6 +123,11 @@ export class AppModule {
 export function configureApp(app: NestExpressApplication): INestApplication {
   const logger = app.get(StructuredLogger);
   app.disable('x-powered-by');
+  // Paths are matched exactly, so /V1/Directory/... cannot reach a route while slipping past the rate limits and
+  // idempotency rules, which compare the path as written. Nest has already made Express's router by now, so the
+  // setting alone would not reach it; routes are added later (at init) and read the router's own flag.
+  app.set('case sensitive routing', true);
+  (app.getHttpAdapter().getInstance().router as unknown as { caseSensitive: boolean }).caseSensitive = true;
   // Only our own proxies' X-Forwarded-For is believed; 0 means the socket address.
   const config = app.get<AppConfig>(APP_CONFIG);
   app.set('trust proxy', config.rateLimit.trustProxyHops);
