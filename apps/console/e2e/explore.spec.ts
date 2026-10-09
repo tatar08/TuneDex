@@ -43,17 +43,28 @@ test('explore shows community stations on a map or a globe, plays one and adds i
   );
   await page.getByLabel('ประเทศ').selectOption('TH');
   await expect(page.getByTestId('explore-station')).toHaveCount(3);
-  await expect(page.getByRole('heading', { name: 'สถานีบนแผนที่ 3 สถานี' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'โหลดแล้ว 3 สถานี' })).toBeVisible();
   // Stations without coordinates are still listed and playable, with no dot on the map.
   await expect(page.getByRole('heading', { name: 'สถานีที่ไม่มีตำแหน่งบนแผนที่ 1 สถานี' })).toBeVisible();
   await expect(page.getByTestId('explore-unmapped')).toContainText('Hat Yai Online');
   // Names are text, never markup.
   await expect(page.getByTestId('explore-station').first()).toContainText('Bangkok <b>FM</b>');
   await expect(page.getByTestId('world-map').locator('.leaflet-interactive')).toHaveCount(3);
+  // Picking a dot shows the station without playing it.
+  await page.getByTestId('world-map').getByRole('button', { name: 'Chiang Mai Radio' }).click();
+  await expect(page.getByTestId('explore-pick')).toContainText('Chiang Mai Radio');
+  await expect(page.getByTestId('player')).toHaveCount(0);
+  // Genre chips come from the loaded stations; the light and dark looks are the viewer's choice and are remembered.
+  await expect(page.getByRole('group', { name: 'ประเภท' }).getByRole('button', { name: 'Pop' })).toBeVisible();
+  await page.getByRole('group', { name: 'สีหน้าจอ' }).getByRole('button', { name: 'มืด' }).click();
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/explore-map-dark.png`, fullPage: true });
+  await page.getByRole('group', { name: 'สีหน้าจอ' }).getByRole('button', { name: 'สว่าง' }).click();
   if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/explore-map.png`, fullPage: true });
 
   await page.getByRole('button', { name: 'เล่น Tokyo Wave' }).click();
   await expect(page.getByTestId('player')).toContainText('กำลังเล่น: Tokyo Wave');
+  // A fake stream never starts, so the player says it is still connecting (or that it cannot play), never "playing".
+  await expect(page.getByTestId('player').locator('.player-state')).toHaveAttribute('data-state', /connecting|failed/);
   await expect(page.getByTestId('explore-pick')).toContainText('Tokyo Wave');
   await page.getByRole('button', { name: 'เพิ่มในลิงก์ของฉัน' }).click();
   await expect(page.getByText('เพิ่ม Tokyo Wave ในลิงก์ของฉันแล้ว')).toBeVisible();
@@ -67,6 +78,7 @@ test('explore shows community stations on a map or a globe, plays one and adds i
   if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/explore-globe.png`, fullPage: true });
   await page.reload();
   await expect(page.getByRole('button', { name: 'ลูกโลก' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'สว่าง' })).toHaveAttribute('aria-pressed', 'true');
 
   await page.goto(`${stack.base}/app/radio`);
   await expect(page.getByTestId('channel')).toHaveText(['Tokyo Wave▶✕ญี่ปุ่น · s3.example.test']);

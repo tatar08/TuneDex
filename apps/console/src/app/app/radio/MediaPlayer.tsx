@@ -20,12 +20,14 @@ export function MediaPlayer({ lang, item, onStop }: { lang: Lang; item: NowPlayi
   const ref = useRef<HTMLVideoElement>(null);
   const [hasVideo, setHasVideo] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [playing, setPlaying] = useState(false);
 
   useEffect(() => {
     const video = ref.current;
     if (!video) return;
     setHasVideo(false);
     setFailed(false);
+    setPlaying(false);
     let hls: HlsType | null = null;
     let cancelled = false;
     const play = () => void video.play().catch(() => undefined);
@@ -73,10 +75,16 @@ export function MediaPlayer({ lang, item, onStop }: { lang: Lang; item: NowPlayi
         onLoadedMetadata={check}
         onResize={check}
         onError={() => setFailed(true)}
+        onPlaying={() => setPlaying(true)}
+        onWaiting={() => setPlaying(false)}
       />
-      {failed && (
-        <p role="alert" className="status">
+      {failed ? (
+        <p role="alert" className="status player-state" data-state="failed">
           {t.playerFailed}
+        </p>
+      ) : (
+        <p role="status" className="status player-state" data-state={playing ? 'playing' : 'connecting'}>
+          {playing ? t.playerPlaying : t.playerConnecting}
         </p>
       )}
     </section>
