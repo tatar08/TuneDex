@@ -427,6 +427,25 @@ export interface DirectorySearch {
   nextOffset: number | null;
   attribution: string;
 }
+/** A community station as staff see it on /admin/directory: blocked ones too, with the block that hides it. */
+export interface AdminDirectoryStation extends DirectoryStation {
+  active: boolean;
+  block: { id: string; kind: 'station' | 'host'; value: string } | null;
+}
+export interface AdminDirectoryList {
+  stations: AdminDirectoryStation[];
+  total: number;
+  nextOffset: number | null;
+  truncated: boolean;
+  attribution: string;
+}
+/** What /admin/directory lists: a country and/or part of a name, on or off stations, from `offset`. */
+export interface DirectoryFilter {
+  q: string;
+  country: string;
+  status: 'all' | 'active' | 'inactive';
+  offset: number;
+}
 export interface DirectoryBlock {
   id: string;
   kind: 'station' | 'host';
@@ -785,47 +804,55 @@ export function createBff(deps: BffDeps) {
   const mapInFlight = new Map<string, Promise<{ status: number; stations?: MapStation[]; unmapped?: MapListStation[] }>>();
 
   /**
-   * Community stations with coordinates, the whole world or one country. Kept 10 minutes in this process and
-   * shared by every viewer, so the API's per-address limit (the console is one address) is not spent per page view.
+   * Community stations for /app/explore, the whole world or one country, from the API's map list (one call; the API
+   * reads Radio Browser page by page and keeps the lists an hour). Kept 10 minutes in this process too and shared by
+   * every viewer; cleared when staff switch a station on or off here.
    */
   type DirectoryEntry = Omit<MapStation, 'lat' | 'lon'> & { geo?: { lat: number; lon: number } };
 
-  /** One directory page, or null when the API refused or failed it. */
-  async function directoryPage(params: Record<string, string>): Promise<DirectoryEntry[] | null> {
-    const res = await fetchImpl(`${config.apiBaseUrl}/v1/directory/radio?${new URLSearchParams({ limit: '50', ...params })}`, {
+  async function directoryCall(path: string, timeoutMs: number): Promise<DirectoryEntry[] | null> {
+    const res = await fetchImpl(`${config.apiBaseUrl}${path}`, {
       headers: { accept: 'application/json', 'x-request-id': `web_${randomUUID()}`, traceparent: traceparent() },
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(timeoutMs),
       redirect: 'error',
     }).catch(() => null);
     if (!res?.ok) return null;
     return ((await res.json()) as { stations: DirectoryEntry[] }).stations;
   }
 
-  /** Pages at offsets 0, 50, … fetched together (a page past the end is just empty); null when every page failed. */
-  async function directoryPages(pages: number, params: Record<string, string>): Promise<DirectoryEntry[] | null> {
-    const got = await Promise.all(Array.from({ length: pages }, (_, i) => directoryPage({ ...params, offset: String(i * 50) })));
-    return got.every((p) => p === null) ? null : got.flatMap((p) => p ?? []);
-  }
+  /** Countries the API's world map list already holds in full, so a viewer from there needs nothing extra. */
+  const IN_WORLD_MAP = new Set(['TH', 'JP', 'KR', 'US', ...'AD AL AT BA BE BG BY CH CY CZ DE DK EE ES FI FO FR GB GG GI GR HR HU IE IM IS IT JE LI LT LU LV MC MD ME MK MT NL NO PL PT RO RS RU SE SI SK SM UA VA'.split(' ')]);
 
-  function loadMapStations(country: string | null): Promise<{ status: number; stations?: MapStation[]; unmapped?: MapListStation[] }> {
-    const key = country ?? '*';
+  /**
+   * `home` (world view only): the viewer's own country. The world list holds the most listened stations worldwide
+   * plus the featured regions in full; any other home country adds its own 100 most listened with coordinates.
+   */
+  function loadMapStations(country: string | null, home: string | null = null): Promise<{ status: number; stations?: MapStation[]; unmapped?: MapListStation[] }> {
+    if (country || (home && IN_WORLD_MAP.has(home))) home = null;
+    const key = country ?? (home ? `*+${home}` : '*');
     const hit = mapCache.get(key);
     if (hit && Date.now() - hit.at < MAP_CACHE_MS) return Promise.resolve({ status: 200, stations: hit.stations, unmapped: hit.unmapped });
     const running = mapInFlight.get(key);
     if (running) return running;
     const call = (async () => {
-      // A country also lists its stations without coordinates, so none of them is out of reach on this page.
-      const [mapped, all] = await Promise.all([
-        directoryPages(country ? 4 : 6, country ? { hasGeo: 'true', country } : { hasGeo: 'true' }),
-        country ? directoryPages(4, { country }) : Promise.resolve([] as DirectoryEntry[]),
+      // A first world list makes the API read many pages from Radio Browser, so it gets longer than one search.
+      const [list, near] = await Promise.all([
+        directoryCall(`/v1/directory/radio/map${country ? `?country=${country}` : ''}`, 60_000),
+        home
+          ? Promise.all(['0', '50'].map((offset) => directoryCall(`/v1/directory/radio?${new URLSearchParams({ limit: '50', hasGeo: 'true', country: home!, offset })}`, 10_000))).then((p) => p.flatMap((x) => x ?? []))
+          : Promise.resolve([] as DirectoryEntry[]),
       ]);
-      if (!mapped) return { status: 503 };
+      if (!list) return { status: 503 };
       const seen = new Set<string>();
       const stations: MapStation[] = [];
       const unmapped: MapListStation[] = [];
-      const usable = (e: DirectoryEntry) => typeof e.streamUrl === 'string' && e.streamUrl.startsWith('https://') && !seen.has(e.id) && !!seen.add(e.id);
-      for (const { geo, ...e } of mapped) if (geo && usable(e as DirectoryEntry)) stations.push({ ...pick(e), lat: geo.lat, lon: geo.lon });
-      for (const { geo: _geo, ...e } of all ?? []) if (usable(e as DirectoryEntry)) unmapped.push(pick(e));
+      // A country also lists its stations without coordinates, so none of them is out of reach on this page.
+      for (const { geo, ...e } of [...near, ...list]) {
+        if (typeof e.streamUrl !== 'string' || !e.streamUrl.startsWith('https://') || seen.has(e.id)) continue;
+        seen.add(e.id);
+        if (geo) stations.push({ ...pick(e), lat: geo.lat, lon: geo.lon });
+        else if (country) unmapped.push(pick(e));
+      }
       mapCache.delete(key);
       mapCache.set(key, { at: Date.now(), stations, unmapped });
       if (mapCache.size > 300) mapCache.delete(mapCache.keys().next().value!);
@@ -834,6 +861,12 @@ export function createBff(deps: BffDeps) {
     mapInFlight.set(key, call);
     return call;
   }
+
+  /** A staff block change shows on the map at once rather than after the cache runs out. */
+  const forgetMap = async (res: Response) => {
+    if (res.ok) mapCache.clear();
+    return res;
+  };
 
   const pick = ({ id, name, country, language, genres, codec, bitrateKbps, streamUrl }: Omit<DirectoryEntry, 'geo'>): MapListStation => ({ id, name, country, language, genres, codec, bitrateKbps, streamUrl });
 
@@ -927,26 +960,33 @@ export function createBff(deps: BffDeps) {
         JOB_ID.test(id) ? adminProxy(req, requestId, `/v1/admin/jobs/${id}/retry`, true) : notFound(requestId),
       ),
 
-    /** Server-side read for /admin/directory: the blocks, and what users would find for `q`. Null means sign in again. */
+    /**
+     * Server-side read for /admin/directory: the blocks, and a country's stations (or a name search) each on or off.
+     * Null means sign in again.
+     */
     async loadDirectory(
       ctx: SessionContext,
-      q: string,
-    ): Promise<{ status: number; blocks?: DirectoryBlock[]; search?: DirectorySearch | null; searchStatus?: number } | null> {
+      filter: DirectoryFilter,
+    ): Promise<{ status: number; blocks?: DirectoryBlock[]; search?: AdminDirectoryList | null; searchStatus?: number } | null> {
       const res = await callApi(ctx, '/v1/admin/directory/blocks', { method: 'GET' }, `web_${randomUUID()}`);
       if (!res) return null;
       if (!res.ok) return { status: res.status };
       const { blocks } = (await res.json()) as { blocks: DirectoryBlock[] };
-      const query = q.trim().slice(0, 80);
-      if (!query) return { status: 200, blocks, search: null };
-      const found = await callApi(ctx, `/v1/directory/radio?${new URLSearchParams({ q: query, limit: '50' })}`, { method: 'GET' }, `web_${randomUUID()}`);
+      const q = filter.q.trim().slice(0, 80);
+      const country = /^[A-Za-z]{2}$/.test(filter.country) ? filter.country.toUpperCase() : '';
+      if (!q && !country) return { status: 200, blocks, search: null };
+      const qs = new URLSearchParams({ status: filter.status, offset: String(filter.offset) });
+      if (q) qs.set('q', q);
+      if (country) qs.set('country', country);
+      const found = await callApi(ctx, `/v1/admin/directory/stations?${qs}`, { method: 'GET' }, `web_${randomUUID()}`);
       if (!found) return null;
-      return found.ok ? { status: 200, blocks, search: (await found.json()) as DirectorySearch } : { status: 200, blocks, search: null, searchStatus: found.status };
+      return found.ok ? { status: 200, blocks, search: (await found.json()) as AdminDirectoryList } : { status: 200, blocks, search: null, searchStatus: found.status };
     },
     /** POST /bff/admin/directory/blocks and …/{id}/remove, each with a reason; the API checks roles and audits. */
-    directoryBlock: (req: Request) => timed(req, '/bff/admin/directory/blocks', (requestId) => adminProxy(req, requestId, '/v1/admin/directory/blocks', true)),
+    directoryBlock: (req: Request) => timed(req, '/bff/admin/directory/blocks', async (requestId) => forgetMap(await adminProxy(req, requestId, '/v1/admin/directory/blocks', true))),
     directoryUnblock: (req: Request, id: string) =>
       timed(req, '/bff/admin/directory/blocks/:id/remove', async (requestId) =>
-        /^[1-9]\d{0,17}$/.test(id) ? adminProxy(req, requestId, `/v1/admin/directory/blocks/${id}/remove`, true) : notFound(requestId),
+        /^[1-9]\d{0,17}$/.test(id) ? forgetMap(await adminProxy(req, requestId, `/v1/admin/directory/blocks/${id}/remove`, true)) : notFound(requestId),
       ),
 
     /** Server-side read for /admin/config. Null means the user must sign in again. */
@@ -1189,14 +1229,17 @@ export function createBff(deps: BffDeps) {
     /** Server-side read of the public catalog, up to 500 stations. No session needed: the catalog is public. */
     loadMapStations,
 
-    /** GET /bff/directory/map?country=XX: the map's stations for signed-in viewers. */
+    /** GET /bff/directory/map?country=XX or ?home=XX (world view plus the viewer's country): the map's stations for signed-in viewers. */
     getMapStations: (req: Request) =>
       timed(req, '/bff/directory/map', async (requestId) => {
         const ctx = await sessionFromCookie(req.headers.get('cookie'));
         if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
-        const raw = new URL(req.url).searchParams.get('country');
-        if (raw !== null && !/^[A-Za-z]{2}$/.test(raw)) return json(400, { code: 'VALIDATION_FAILED', requestId, details: { field: 'country' } }, requestId);
-        const result = await loadMapStations(raw ? raw.toUpperCase() : null);
+        const params = new URL(req.url).searchParams;
+        const raw = params.get('country');
+        const home = params.get('home');
+        for (const [field, v] of [['country', raw], ['home', home]] as const)
+          if (v !== null && !/^[A-Za-z]{2}$/.test(v)) return json(400, { code: 'VALIDATION_FAILED', requestId, details: { field } }, requestId);
+        const result = await loadMapStations(raw ? raw.toUpperCase() : null, home ? home.toUpperCase() : null);
         if (!result.stations) return error(503, 'UPSTREAM_UNAVAILABLE', requestId);
         return json(200, { stations: result.stations, unmapped: result.unmapped ?? [], attribution: 'Radio Browser (www.radio-browser.info), community data' }, requestId, { 'cache-control': 'private, max-age=300' });
       }),

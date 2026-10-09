@@ -3,14 +3,19 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { formatLogTime, RATE_LIMITED } from '@/lib/admin';
-import type { DirectoryBlock, DirectorySearch, DirectoryStation } from '@/lib/bff';
+import { COUNTRY_CODES } from '@/app/app/explore/countries';
+import type { AdminDirectoryList, AdminDirectoryStation, DirectoryBlock, DirectoryFilter } from '@/lib/bff';
+import { countryName } from '@/lib/names';
 import { useAdmin, useT } from '../AdminShell';
 
 /**
  * Worldwide radio (Radio Browser community directory, Tar 2026-10-05): staff see what users would find for a
  * search and take a station, or a whole stream host, out of the results, e.g. on a rights holder's complaint
  * (Doc 10). Stations users already added stay in their lists. Data is shared; each theme lays it out its own way.
+ * Staff can also list a whole country and switch each station on or off (Tar 2026-10-09); off is a station block.
  */
+const FEATURED = ['TH', 'JP', 'KR', 'US'];
+const EUROPE = 'AD AL AT BA BE BG BY CH CY CZ DE DK EE ES FI FO FR GB GG GI GR HR HU IE IM IS IT JE LI LT LU LV MC MD ME MK MT NL NO PL PT RO RS RU SE SI SK SM UA VA'.split(' ');
 const PROBLEMS: Record<string, string> = {
   reason: 'กรอกเหตุผล 10–500 ตัวอักษร',
   value: 'รหัสสถานีต้องเป็น UUID ของ Radio Browser หรือโดเมนต้องเป็นชื่อโฮสต์ เช่น stream.example.com',
@@ -44,7 +49,18 @@ async function send(path: string, body: object, csrfToken: string): Promise<stri
 }
 
 /** A button that opens a reason box; `fixed` blocks a known station or host, otherwise kind and value are typed in. */
-function BlockButton({ fixed, label, className = 'btn secondary' }: { fixed?: { kind: 'station' | 'host'; value: string; name: string }; label: string; className?: string }) {
+function BlockButton({
+  fixed,
+  label,
+  verb,
+  className = 'btn secondary',
+}: {
+  fixed?: { kind: 'station' | 'host'; value: string; name: string };
+  label: string;
+  /** The submit button's words; blocking by default. */
+  verb?: string;
+  className?: string;
+}) {
   const { csrfToken, t } = useAdmin();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -107,7 +123,7 @@ function BlockButton({ fixed, label, className = 'btn secondary' }: { fixed?: { 
           )}
           <div className="row">
             <button type="submit" className="btn" disabled={busy}>
-              {busy ? t('กำลังบันทึก…') : t('บล็อก')}
+              {busy ? t('กำลังบันทึก…') : (verb ?? t('บล็อก'))}
             </button>
             <button type="button" className="btn secondary" onClick={() => setOpen(false)}>
               {t('ยกเลิก')}
@@ -119,7 +135,7 @@ function BlockButton({ fixed, label, className = 'btn secondary' }: { fixed?: { 
   );
 }
 
-function Unblock({ block, className = 'btn secondary' }: { block: DirectoryBlock; className?: string }) {
+function Unblock({ block, label, className = 'btn secondary' }: { block: Pick<DirectoryBlock, 'id' | 'value'>; label?: string; className?: string }) {
   const { csrfToken, t } = useAdmin();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -141,7 +157,7 @@ function Unblock({ block, className = 'btn secondary' }: { block: DirectoryBlock
   return (
     <div className="jb-retry">
       <button type="button" className={className} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        {t('ยกเลิกบล็อก')}
+        {label ?? t('ยกเลิกบล็อก')}
       </button>
       {open && (
         <form className="au-export-panel" onSubmit={submit} aria-label={t('ยกเลิกบล็อก {0}', block.value)}>
@@ -156,7 +172,7 @@ function Unblock({ block, className = 'btn secondary' }: { block: DirectoryBlock
           )}
           <div className="row">
             <button type="submit" className="btn" disabled={busy}>
-              {busy ? t('กำลังบันทึก…') : t('ยกเลิกบล็อก')}
+              {busy ? t('กำลังบันทึก…') : (label ?? t('ยกเลิกบล็อก'))}
             </button>
             <button type="button" className="btn secondary" onClick={() => setOpen(false)}>
               {t('ปิด')}
@@ -168,11 +184,42 @@ function Unblock({ block, className = 'btn secondary' }: { block: DirectoryBlock
   );
 }
 
-function SearchForm({ query, className }: { query: string; className?: string }) {
+function SearchForm({ filter, className }: { filter: DirectoryFilter; className?: string }) {
   const t = useT();
+  const named = (codes: string[]) => codes.map((c) => ({ c, name: countryName(c, t.lang) })).sort((a, b) => a.name.localeCompare(b.name, t.lang));
+  const others = named(COUNTRY_CODES.filter((c) => !FEATURED.includes(c) && !EUROPE.includes(c)));
   return (
     <form method="get" action="/admin/directory" className={`dr-search ${className ?? ''}`} role="search">
-      <input type="search" name="q" defaultValue={query} maxLength={80} placeholder={t('ค้นหาชื่อสถานีแบบที่ผู้ใช้เห็น')} aria-label={t('ค้นหาชื่อสถานีแบบที่ผู้ใช้เห็น')} />
+      <select name="country" defaultValue={filter.country} aria-label={t('ประเทศ')}>
+        <option value="">{t('ทุกประเทศ (ค้นด้วยชื่อ)')}</option>
+        <optgroup label={t('ประเทศหลัก')}>
+          {FEATURED.map((c) => (
+            <option key={c} value={c}>
+              {countryName(c, t.lang)}
+            </option>
+          ))}
+        </optgroup>
+        <optgroup label={t('ยุโรป')}>
+          {named(EUROPE).map(({ c, name }) => (
+            <option key={c} value={c}>
+              {name}
+            </option>
+          ))}
+        </optgroup>
+        <optgroup label={t('ประเทศอื่น')}>
+          {others.map(({ c, name }) => (
+            <option key={c} value={c}>
+              {name}
+            </option>
+          ))}
+        </optgroup>
+      </select>
+      <input type="search" name="q" defaultValue={filter.q} maxLength={80} placeholder={t('ค้นหาชื่อสถานีแบบที่ผู้ใช้เห็น')} aria-label={t('ค้นหาชื่อสถานีแบบที่ผู้ใช้เห็น')} />
+      <select name="status" defaultValue={filter.status} aria-label={t('สถานะ')}>
+        <option value="all">{t('ทุกสถานะ')}</option>
+        <option value="active">{t('เปิดอยู่')}</option>
+        <option value="inactive">{t('ปิดอยู่')}</option>
+      </select>
       <button type="submit" className="btn secondary">
         {t('ค้นหา')}
       </button>
@@ -180,32 +227,55 @@ function SearchForm({ query, className }: { query: string; className?: string })
   );
 }
 
-const describe = (s: DirectoryStation) => [s.country, s.language, s.codec.toUpperCase(), s.bitrateKbps ? `${s.bitrateKbps} kbps` : null, ...s.genres.slice(0, 3)].filter(Boolean).join(' · ');
+const describe = (s: AdminDirectoryStation) => [s.country, s.language, s.codec.toUpperCase(), s.bitrateKbps ? `${s.bitrateKbps} kbps` : null, ...s.genres.slice(0, 3)].filter(Boolean).join(' · ');
 
-function StationActions({ s }: { s: DirectoryStation }) {
+/** On or off, and the switch. A station hidden by a host block is switched back on from the block list. */
+function StationActions({ s }: { s: AdminDirectoryStation }) {
   const t = useT();
   return (
     <span className="dr-actions">
-      <BlockButton fixed={{ kind: 'station', value: s.id, name: s.name }} label={t('บล็อกสถานีนี้')} />
-      <BlockButton fixed={{ kind: 'host', value: hostOf(s.streamUrl), name: s.name }} label={t('บล็อกทั้งโฮสต์')} />
+      <span className={s.active ? 'dr-state on' : 'dr-state off'}>{s.active ? t('เปิดอยู่') : t('ปิดอยู่')}</span>
+      {s.active ? (
+        <>
+          <BlockButton fixed={{ kind: 'station', value: s.id, name: s.name }} label={t('ปิดสถานี')} verb={t('ปิดสถานี')} />
+          <BlockButton fixed={{ kind: 'host', value: hostOf(s.streamUrl), name: s.name }} label={t('บล็อกทั้งโฮสต์')} />
+        </>
+      ) : s.block?.kind === 'station' ? (
+        <Unblock block={s.block} label={t('เปิดสถานี')} />
+      ) : (
+        <small className="dim">{t('ปิดทั้งโฮสต์ {0} · เปิดได้จากรายการที่บล็อก', s.block?.value ?? '')}</small>
+      )}
     </span>
   );
 }
 
-function SearchNote({ query, search, searchStatus }: { query: string; search: DirectorySearch | null; searchStatus?: number }) {
+function SearchNote({ filter, search, searchStatus }: { filter: DirectoryFilter; search: AdminDirectoryList | null; searchStatus?: number }) {
   const t = useT();
-  if (!query) return <p className="dim">{t('ค้นหาชื่อสถานีเพื่อดูผลแบบเดียวกับที่ผู้ใช้เห็นในแอป แล้วบล็อกสถานีหรือโฮสต์ที่มีปัญหาได้จากรายการ')}</p>;
+  if (!filter.q && !filter.country) return <p className="dim">{t('เลือกประเทศหรือค้นหาชื่อสถานี แล้วเปิดหรือปิดแต่ละสถานีได้ สถานีที่ปิดจะไม่ขึ้นในการค้นหาและบนแผนที่ของผู้ใช้')}</p>;
   if (!search)
     return (
       <p className="adm-alert" role="alert">
         {searchStatus === 503 ? t('การค้นหาวิทยุทั่วโลกยังไม่เปิด (ตั้ง RADIO_BROWSER_BASE_URL) หรือ Radio Browser ไม่ตอบในขณะนี้') : searchStatus === 429 ? t(RATE_LIMITED) : t('ค้นหาไม่ได้ในขณะนี้')}
       </p>
     );
-  if (search.stations.length === 0) return <p className="dim">{t('ไม่พบสถานีชื่อ “{0}”', query)}</p>;
-  return null;
+  if (search.stations.length === 0) return <p className="dim">{filter.q ? t('ไม่พบสถานีชื่อ “{0}”', filter.q) : t('ไม่พบสถานี')}</p>;
+  const page = (offset: number) => {
+    const qs = new URLSearchParams({ status: filter.status, offset: String(offset) });
+    if (filter.country) qs.set('country', filter.country);
+    if (filter.q) qs.set('q', filter.q);
+    return `/admin/directory?${qs}`;
+  };
+  return (
+    <p className="dr-pager dim">
+      <span>{t('พบ {0} สถานี · แสดง {1}–{2}', search.total, filter.offset + 1, filter.offset + search.stations.length)}</span>
+      {search.truncated && <span>{t('(อ่านได้ถึง 5000 สถานีแรก)')}</span>}
+      {filter.offset > 0 && <a href={page(Math.max(0, filter.offset - 100))}>{t('← ก่อนหน้า')}</a>}
+      {search.nextOffset !== null && <a href={page(search.nextOffset)}>{t('ถัดไป →')}</a>}
+    </p>
+  );
 }
 
-function Attribution({ search }: { search: DirectorySearch | null }) {
+function Attribution({ search }: { search: AdminDirectoryList | null }) {
   const t = useT();
   return (
     <p className="ov-foot dim">
@@ -219,14 +289,14 @@ const blockLabel = (b: DirectoryBlock) => (b.kind === 'host' ? 'โฮสต์'
 export function DirectoryView({
   status,
   blocks,
-  query,
+  filter,
   search,
   searchStatus,
 }: {
   status: number;
   blocks?: DirectoryBlock[];
-  query: string;
-  search: DirectorySearch | null;
+  filter: DirectoryFilter;
+  search: AdminDirectoryList | null;
   searchStatus?: number;
 }) {
   const { theme, t } = useAdmin();
@@ -248,10 +318,10 @@ export function DirectoryView({
           <div className="crumb">
             Catalog<b>{t('วิทยุทั่วโลก')}</b>
           </div>
-          <SearchForm query={query} />
+          <SearchForm filter={filter} />
         </div>
         <div className="pn">
-          <SearchNote query={query} search={search} searchStatus={searchStatus} />
+          <SearchNote filter={filter} search={search} searchStatus={searchStatus} />
           {stations.length > 0 && (
             <table className="jb-table">
               <thead>
@@ -330,9 +400,9 @@ export function DirectoryView({
           <span>{t('บล็อกอยู่ {0} รายการ', blocks.length)}</span>
         </div>
         <div className="br-pick">
-          <SearchForm query={query} />
+          <SearchForm filter={filter} />
         </div>
-        <SearchNote query={query} search={search} searchStatus={searchStatus} />
+        <SearchNote filter={filter} search={search} searchStatus={searchStatus} />
         {stations.length > 0 && (
           <ul className="jb-rack">
             {stations.map((s) => (
@@ -386,9 +456,9 @@ export function DirectoryView({
           <BlockButton label={t('+ บล็อกด้วยรหัสหรือโฮสต์')} />
         </div>
         <div className="search">
-          <SearchForm query={query} />
+          <SearchForm filter={filter} />
         </div>
-        <SearchNote query={query} search={search} searchStatus={searchStatus} />
+        <SearchNote filter={filter} search={search} searchStatus={searchStatus} />
         <div className="jb-bento">
           {stations.map((s) => (
             <section key={s.id} className="b-job">
@@ -427,7 +497,7 @@ export function DirectoryView({
             <h3>
               {t('วิทยุทั่วโลก')} <span>{blocks.length}</span>
             </h3>
-            <SearchForm query={query} className="wb-seg" />
+            <SearchForm filter={filter} className="wb-seg" />
             <BlockButton label={t('+ บล็อกด้วยรหัสหรือโฮสต์')} className="btn" />
           </div>
           {blocks.length === 0 ? (
@@ -462,7 +532,7 @@ export function DirectoryView({
               </>
             )}
             <h3>{t('ผลค้นหาแบบที่ผู้ใช้เห็น')}</h3>
-            <SearchNote query={query} search={search} searchStatus={searchStatus} />
+            <SearchNote filter={filter} search={search} searchStatus={searchStatus} />
             {stations.length > 0 && (
               <ul className="ov-list">
                 {stations.map((s) => (
@@ -494,9 +564,9 @@ export function DirectoryView({
             <h2 id="fv-dir-search">{t('วิทยุทั่วโลก')}</h2>
             <small>{t('สถานีจากชุมชน Radio Browser ที่ผู้ใช้ค้นแล้วเพิ่มเอง')}</small>
           </div>
-          <SearchForm query={query} />
+          <SearchForm filter={filter} />
         </div>
-        <SearchNote query={query} search={search} searchStatus={searchStatus} />
+        <SearchNote filter={filter} search={search} searchStatus={searchStatus} />
         {stations.length > 0 && (
           <ul className="ov-list">
             {stations.map((s) => (

@@ -912,6 +912,11 @@
 .adm .dr-search { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 .adm .dr-search input { font: inherit; color: var(--t); background: var(--p); border: 1px solid var(--l); border-radius: 6px; padding: 5px 8px; min-width: 220px; }
 .adm .dr-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; }
+.adm .dr-search select { font: inherit; color: var(--t); background: var(--p); border: 1px solid var(--l); border-radius: 6px; padding: 5px 8px; max-width: 220px; }
+.adm .dr-state { display: inline-block; padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--l); }
+.adm .dr-state.on { color: #166534; background: #dcfce7; border-color: #86efac; }
+.adm .dr-state.off { color: #991b1b; background: #fee2e2; border-color: #fca5a5; }
+.adm .dr-pager { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 .adm .dr-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
 /* A reason box opened from a button near the left edge opens rightwards, so it stays on screen. */
 .t-daylight-bento .jb-bento .au-export-panel, .t-workbench .det .jb-retry .au-export-panel, .t-workbench .list .lh .au-export-panel { left: 0; right: auto; }

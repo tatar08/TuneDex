@@ -70,6 +70,8 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
   const [look, setLook] = useState<Look>('auto');
   const [systemDark, setSystemDark] = useState(false);
   const [country, setCountry] = useState('');
+  const [countryText, setCountryText] = useState('');
+  const [home, setHome] = useState<string | null>(null);
   const [stations, setStations] = useState<MapStation[] | null>(null);
   const [unmapped, setUnmapped] = useState<MapListStation[]>([]);
   const [failed, setFailed] = useState(false);
@@ -83,6 +85,9 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
 
   useEffect(() => {
     document.documentElement.lang = lang;
+    // The viewer's own country joins the world view: Thai for a Thai page, else the browser's region.
+    const region = lang === 'th' ? 'TH' : /-([A-Z]{2})$/.exec(navigator.language ?? '')?.[1];
+    if (region && COUNTRY_CODES.includes(region)) setHome(region);
     if (remembered(VIEW_KEY) === 'globe') setView('globe');
     const l = remembered(LOOK_KEY);
     if (l === 'light' || l === 'dark') setLook(l);
@@ -102,7 +107,7 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
     setSelected(null);
     setGroup(null);
     setGenre('');
-    fetch(`/bff/directory/map${country ? `?country=${country}` : ''}`, {
+    fetch(`/bff/directory/map${country ? `?country=${country}` : home ? `?home=${home}` : ''}`, {
       headers: { accept: 'application/json' },
     })
       .then(async (res) => {
@@ -120,7 +125,7 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
     return () => {
       live = false;
     };
-  }, [country]);
+  }, [country, home]);
 
   function chooseView(v: View) {
     setView(v);
@@ -136,6 +141,22 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
     () => COUNTRY_CODES.map((c) => ({ code: c, name: countryName(c, lang) })).sort((a, b) => a.name.localeCompare(b.name, lang)),
     [lang],
   );
+  // A typed country matches its name in the page language, its English name or its two-letter code.
+  const countryByText = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const { code, name } of countries) for (const k of [name, countryName(code, 'en'), code]) m.set(k.toLocaleLowerCase(), code);
+    return m;
+  }, [countries]);
+  function typeCountry(text: string) {
+    setCountryText(text);
+    const key = text
+      .trim()
+      .replace(/^ประเทศ\s*/, '')
+      .toLocaleLowerCase();
+    const code = key ? countryByText.get(key) : '';
+    if (code !== undefined && code !== country) setCountry(code);
+  }
+
   // The six most common genres among the loaded stations become the chips.
   const genres = useMemo(() => {
     const count = new Map<string, number>();
@@ -238,17 +259,32 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
               onChange={(e) => setFilter(e.target.value)}
             />
           </span>
-          <label className="sr-only" htmlFor="explore-country">
-            {t.exploreCountry}
-          </label>
-          <select id="explore-country" className="explore-select" value={country} onChange={(e) => setCountry(e.target.value)}>
-            <option value="">{t.exploreWorld}</option>
-            {countries.map((c) => (
-              <option key={c.code} value={c.code}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <span className="explore-country">
+            <label className="sr-only" htmlFor="explore-country">
+              {t.exploreCountry}
+            </label>
+            <input
+              id="explore-country"
+              className="explore-select"
+              list="explore-countries"
+              autoComplete="off"
+              placeholder={t.exploreCountryHint}
+              value={countryText}
+              onChange={(e) => typeCountry(e.target.value)}
+            />
+            <datalist id="explore-countries">
+              {countries.map((c) => (
+                <option key={c.code} value={c.name} />
+              ))}
+            </datalist>
+            {country && (
+              <button type="button" className="explore-clear" aria-label={t.exploreWorld} title={t.exploreWorld} onClick={() => typeCountry('')}>
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </button>
+            )}
+          </span>
           {segmented(
             t.exploreViewLabel,
             view,

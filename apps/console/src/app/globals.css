@@ -161,6 +161,9 @@ a.btn { display: inline-block; text-decoration: none; }
 .explore-search { flex: 1 1 260px; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 16px; border-radius: 999px; background: var(--x-soft); color: var(--x-muted); }
 .explore-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--x-fg); outline: none; font-size: 15px; }
 .explore-search:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+.explore-country { position: relative; flex: 0 1 280px; min-width: 0; display: flex; }
+.explore-country .explore-select { width: 100%; padding-right: 44px; }
+.explore-clear { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border: 0; border-radius: 10px; background: transparent; display: grid; place-items: center; cursor: pointer; color: var(--x-muted); }
 .explore-select { min-height: 48px; max-width: 100%; padding: 0 14px; border-radius: 12px; border: 1px solid var(--x-line); background: var(--x-panel); }
 .explore-seg { display: inline-flex; padding: 3px; border-radius: 12px; background: var(--x-soft); }
 .explore-seg button { min-height: 42px; border: 0; background: transparent; padding: 0 14px; border-radius: 9px; cursor: pointer; color: var(--x-muted); }

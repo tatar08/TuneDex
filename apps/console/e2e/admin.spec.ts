@@ -6,6 +6,9 @@ let stack: Stack;
 test.beforeAll(async () => {
   stack = await startStack();
   stack.api.staff('grant', 'e2e-editor', 'catalog_editor', '--by', 'e2e', '--reason', 'test');
+  // The directory test runs every theme on a page that reads the API several times per view; each person gets 120
+  // reads a minute, so it has its own editor rather than spending the one the next tests use.
+  stack.api.staff('grant', 'e2e-dir-editor', 'catalog_editor', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-admin', 'admin', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-ops', 'operator', '--by', 'e2e', '--reason', 'test');
   stack.api.staff('grant', 'e2e-auditor', 'auditor', '--by', 'e2e', '--reason', 'test');
@@ -247,7 +250,7 @@ test('the log page has its own layout in each theme', async ({ browser }) => {
 });
 
 test('editors block and unblock worldwide radio stations in every theme', async ({ browser }) => {
-  const page = await signInAs(browser, 'e2e-editor', '/admin/directory');
+  const page = await signInAs(browser, 'e2e-dir-editor', '/admin/directory');
   const picker = page.getByLabel('เลือกธีมหน้าทีมงาน');
   const themes = ['minimal', 'control-room', 'broadcast-rack', 'daylight-bento', 'workbench'];
   for (const [i, theme] of themes.entries()) {
@@ -256,7 +259,7 @@ test('editors block and unblock worldwide radio stations in every theme', async 
     // The search goes through the API; this stack has no Radio Browser server, so it says the search is off.
     await page.getByRole('searchbox', { name: 'ค้นหาชื่อสถานีแบบที่ผู้ใช้เห็น' }).fill('jazz');
     await page.getByRole('searchbox', { name: 'ค้นหาชื่อสถานีแบบที่ผู้ใช้เห็น' }).press('Enter');
-    await expect(page).toHaveURL(`${stack.base}/admin/directory?q=jazz`);
+    await expect(page).toHaveURL(`${stack.base}/admin/directory?country=&q=jazz&status=all`);
     await expect(page.locator('.adm-alert')).toContainText('RADIO_BROWSER_BASE_URL');
 
     const host = `relay${i}.pirate.example.com`;

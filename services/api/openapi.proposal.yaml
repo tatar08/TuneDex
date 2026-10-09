@@ -743,6 +743,32 @@ paths:
           headers: { Retry-After: { schema: { type: integer } } }
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         '503': { description: 'DEPENDENCY_UNAVAILABLE with details {dependency: radio_directory, reason: not_configured | unreachable}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/directory/radio/map:
+    get:
+      summary: Community stations for the web map, many at once (no sign-in)
+      description: 'One answer for the explorer map instead of many search pages. With country: every station Radio Browser has in that country (up to 5000, most listened first), geo on those with coordinates. Without: the world''s 500 most listened stations with coordinates, plus every station with coordinates in Thailand, Japan, South Korea (up to 5000 each), the United States (up to 3000) and each European country (up to 1000 each), and the 20 most listened with coordinates of every other country, decided by Tar 2026-10-09. Same stream rules and blocks as the search. Lists are kept an hour and refreshed behind the answer, served up to a day old while Radio Browser is down. Same rate limit as the search (one request).'
+      security: []
+      parameters:
+        - { name: country, in: query, schema: { type: string, pattern: '^[A-Za-z]{2}$' }, description: ISO 3166 alpha-2, any case; absent for the world map }
+      responses:
+        '200':
+          description: Stations; truncated when a cap was reached or part of the world list could not be fetched
+          headers: { Cache-Control: { schema: { type: string, example: 'public, max-age=600' } } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stations, truncated, attribution]
+                properties:
+                  stations: { type: array, items: { $ref: '#/components/schemas/DirectoryStation' } }
+                  truncated: { type: boolean }
+                  attribution: { type: string }
+        '400': { description: 'VALIDATION_FAILED: country iso_3166_alpha2, unknown_field', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429':
+          description: API_RATE_LIMITED (60 a minute per client address), details.retryAfterSeconds
+          headers: { Retry-After: { schema: { type: integer } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '503': { description: 'DEPENDENCY_UNAVAILABLE with details {dependency: radio_directory, reason: not_configured | unreachable}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/directory/radio/countries:
     get:
       summary: Community station count per country (no sign-in)
@@ -773,6 +799,34 @@ paths:
           description: API_RATE_LIMITED (60 a minute per client address), details.retryAfterSeconds
           headers: { Retry-After: { schema: { type: integer } } }
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '503': { description: 'DEPENDENCY_UNAVAILABLE with details {dependency: radio_directory, reason: not_configured | unreachable}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/admin/directory/stations:
+    get:
+      summary: A country's community stations with on/off state (catalog_editor, admin)
+      description: 'Roles: catalog_editor or admin. Every station of one country (or a name search), blocked ones included, each with active false and the block that hides it (its own station block, or a host block). Switching a station off is POST /v1/admin/directory/blocks kind station; on again is POST .../blocks/{blockId}/remove. 100 a page. Cache-Control: no-store.'
+      parameters:
+        - { name: country, in: query, schema: { type: string, pattern: '^[A-Za-z]{2}$' }, description: 'ISO alpha-2; country or q is required (400 field country, required)' }
+        - { name: q, in: query, schema: { type: string, maxLength: 80 }, description: 'Part of the name; with country it filters that country''s list' }
+        - { name: status, in: query, schema: { type: string, enum: [all, active, inactive], default: all } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, maximum: 4999, default: 0 } }
+      responses:
+        '200':
+          description: One page
+          headers: { Cache-Control: { schema: { type: string, example: no-store } } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stations, total, nextOffset, truncated, attribution]
+                properties:
+                  stations: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/AdminDirectoryStation' } }
+                  total: { type: integer, description: Stations matching country, q and status }
+                  nextOffset: { type: integer, nullable: true }
+                  truncated: { type: boolean, description: The country has more stations than the 5000 we read }
+                  attribution: { type: string }
+        '400': { description: 'VALIDATION_FAILED: country iso_3166_alpha2 or required, q out_of_range, status value_not_allowed, offset out_of_range, unknown_field', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '503': { description: 'DEPENDENCY_UNAVAILABLE with details {dependency: radio_directory, reason: not_configured | unreachable}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/admin/directory/blocks:
     get:
@@ -1996,10 +2050,26 @@ components:
           type: object
           additionalProperties: false
           required: [lat, lon]
-          description: Only when the request had hasGeo=true; rounded to 0.01 degree
+          description: Only in answers for the web map (search with hasGeo=true, or /v1/directory/radio/map) and only when known; rounded to 0.01 degree
           properties:
             lat: { type: number, minimum: -90, maximum: 90 }
             lon: { type: number, minimum: -180, maximum: 180 }
+    AdminDirectoryStation:
+      description: A community station as staff see it, with its on/off state
+      allOf:
+        - { $ref: '#/components/schemas/DirectoryStation' }
+        - type: object
+          required: [active, block]
+          properties:
+            active: { type: boolean, description: false when a block hides it from users }
+            block:
+              type: object
+              nullable: true
+              required: [id, kind, value]
+              properties:
+                id: { type: string, pattern: '^[1-9][0-9]*$' }
+                kind: { type: string, enum: [station, host] }
+                value: { type: string }
     DirectoryBlock:
       type: object
       additionalProperties: false

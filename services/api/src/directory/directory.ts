@@ -61,6 +61,31 @@ const CACHE_MAX = 500;
 const COUNTRY_TTL_MS = 60 * 60_000;
 const UPSTREAM_TIMEOUT_MS = 5000;
 export const UPSTREAM_MAX_BYTES = 2 * 1024 * 1024;
+/**
+ * Map regions where the explorer lists every station Radio Browser has, not only the world's most popular (Tar
+ * 2026-10-09): Thailand, Japan, South Korea, the United States, and Europe (UN geoscheme, Russia included).
+ */
+export const FEATURED_COUNTRIES = ['TH', 'JP', 'KR', 'US'];
+export const EUROPE = ['AD', 'AL', 'AT', 'BA', 'BE', 'BG', 'BY', 'CH', 'CY', 'CZ', 'DE', 'DK', 'EE', 'ES', 'FI', 'FO', 'FR', 'GB', 'GG', 'GI', 'GR', 'HR', 'HU', 'IE', 'IM', 'IS', 'IT', 'JE', 'LI', 'LT', 'LU', 'LV', 'MC', 'MD', 'ME', 'MK', 'MT', 'NL', 'NO', 'PL', 'PT', 'RO', 'RS', 'RU', 'SE', 'SI', 'SK', 'SM', 'UA', 'VA'];
+/** Upstream page size for whole-country lists, and the most stations one country or the world map holds. */
+const BULK_PAGE = 500;
+const BULK_MAX_BYTES = 8 * 1024 * 1024;
+export const COUNTRY_MAX = 5000;
+/** On the world map: the world's most popular stations with coordinates, then each featured region's own, capped. */
+const WORLD_TOP = 500;
+const WORLD_CAP: Record<string, number> = { US: 3000 };
+const WORLD_CAP_FEATURED = COUNTRY_MAX;
+const WORLD_CAP_EUROPE = 1000;
+/** Every other country on the world map: its own most listened stations with coordinates (Tar 2026-10-09: top 10-20). */
+const WORLD_CAP_OTHER = 20;
+/** Whole lists are refreshed behind the answer once an hour, and served up to a day old while Radio Browser is down. */
+const BULK_TTL_MS = 60 * 60_000;
+const BULK_STALE_MS = 24 * 60 * 60_000;
+/** A list that came back incomplete (one country failed) is retried after this long instead of an hour. */
+const BULK_RETRY_MS = 5 * 60_000;
+const BULK_CACHE_MAX = 300;
+const BULK_CONCURRENCY = 4;
+const ADMIN_PAGE = 100;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HOST = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const UNSAFE = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g;
@@ -149,6 +174,40 @@ export function toDirectoryStation(raw: unknown, withGeo = false): DirectoryStat
   return geo ? { ...station, geo } : null;
 }
 
+/** A community station as staff see it: blocked ones too, with the block that hides it. */
+export interface AdminDirectoryStation extends DirectoryStation {
+  active: boolean;
+  block: { id: string; kind: 'station' | 'host'; value: string } | null;
+}
+
+type BulkList = { at: number; stations: DirectoryStation[]; truncated: boolean };
+type BlockIndex = { stations: Map<string, string>; hosts: { value: string; id: string }[] };
+
+/** The block that hides `s`, if any: its own station block first, else the first host block covering its stream. */
+function blockFor(s: DirectoryStation, blocks: BlockIndex): { id: string; kind: 'station' | 'host'; value: string } | null {
+  const own = blocks.stations.get(s.id);
+  if (own) return { id: own, kind: 'station', value: s.id };
+  const host = hostOf(s.streamUrl);
+  const b = blocks.hosts.find((b) => host === b.value || host.endsWith(`.${b.value}`));
+  return b ? { id: b.id, kind: 'host', value: b.value } : null;
+}
+
+/** `country` (ISO alpha-2) or `q` (part of the name), `status` all | active | inactive, `offset`. */
+export function parseAdminDirectoryQuery(q: Record<string, unknown>): { country: string | null; q: string | null; status: 'all' | 'active' | 'inactive'; offset: number } {
+  for (const k of Object.keys(q)) if (!['country', 'q', 'status', 'offset'].includes(k)) throw invalid(k, 'unknown_field');
+  const country = one(q, 'country');
+  if (country !== null && !/^[A-Za-z]{2}$/.test(country)) throw invalid('country', 'iso_3166_alpha2');
+  const name = one(q, 'q')?.normalize('NFC').replace(UNSAFE, '').trim() || null;
+  if (name !== null && name.length > 80) throw invalid('q', 'out_of_range', { max: 80 });
+  if (!country && !name) throw invalid('country', 'required');
+  const status = one(q, 'status') ?? 'all';
+  if (status !== 'all' && status !== 'active' && status !== 'inactive') throw invalid('status', 'value_not_allowed');
+  const offsetRaw = one(q, 'offset');
+  const offset = offsetRaw === null ? 0 : /^\d{1,4}$/.test(offsetRaw) ? Number(offsetRaw) : NaN;
+  if (!(offset >= 0 && offset < COUNTRY_MAX)) throw invalid('offset', 'out_of_range', { max: COUNTRY_MAX - 1 });
+  return { country: country?.toUpperCase() ?? null, q: name, status, offset };
+}
+
 /** Lower case, without a trailing dot, so `radio.example.com.` cannot slip past a block on `example.com`. */
 const hostOf = (url: string) => new URL(url).hostname.toLowerCase().replace(/\.+$/, '');
 
@@ -163,6 +222,8 @@ export class DirectoryService {
   /** One upstream call per search at a time: concurrent misses for the same search share it. */
   private readonly inFlight = new Map<string, Promise<{ stations: DirectoryStation[]; full: boolean }>>();
   private countryCache: { at: number; countries: { country: string; stations: number }[] } | null = null;
+  private readonly bulkCache = new Map<string, BulkList>();
+  private readonly bulkInFlight = new Map<string, Promise<BulkList>>();
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -175,13 +236,8 @@ export class DirectoryService {
     const dir = this.config.radioDirectory;
     if (!dir) throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'DEPENDENCY_UNAVAILABLE', { dependency: 'radio_directory', reason: 'not_configured' });
     const page = await this.upstream(dir.baseUrl, query);
-    const blocks = await this.blockSets();
-    const stations = page.stations.filter((s) => {
-      if (blocks.stations.has(s.id)) return false;
-      const host = hostOf(s.streamUrl);
-      for (const b of blocks.hosts) if (host === b || host.endsWith(`.${b}`)) return false;
-      return true;
-    });
+    const blocks = await this.blockIndex();
+    const stations = page.stations.filter((s) => !blockFor(s, blocks));
     return { stations, nextOffset: page.full && query.offset + query.limit <= OFFSET_MAX ? query.offset + query.limit : null, attribution: DIRECTORY_ATTRIBUTION };
   }
 
@@ -204,18 +260,8 @@ export class DirectoryService {
 
   private async fetchPage(baseUrl: string, key: string, limit: number, cached: { at: number; stations: DirectoryStation[]; full: boolean } | undefined, withGeo: boolean): Promise<{ stations: DirectoryStation[]; full: boolean }> {
     try {
-      const res = await this.http(`${baseUrl}/json/stations/search?${key}`, {
-        headers: { accept: 'application/json', 'user-agent': `TuneDeck-API/${this.config.build}` },
-        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-      });
-      if (res.status !== 200) throw new Error(`status ${res.status}`);
-      const body = await res.text();
-      if (body.length > UPSTREAM_MAX_BYTES) throw new Error('too large');
-      const raw: unknown = JSON.parse(body);
-      if (!Array.isArray(raw)) throw new Error('not a list');
-      const seen = new Set<string>();
-      const stations = raw.map((r) => toDirectoryStation(r, withGeo)).filter((s): s is DirectoryStation => !!s && !seen.has(s.id) && !!seen.add(s.id));
-      const entry = { at: Date.now(), stations, full: raw.length >= limit };
+      const page = await this.request(baseUrl, key, withGeo ? 'required' : 'none', UPSTREAM_MAX_BYTES);
+      const entry = { at: Date.now(), stations: page.stations, full: page.raw >= limit };
       this.cache.delete(key);
       this.cache.set(key, entry);
       if (this.cache.size > CACHE_MAX) this.cache.delete(this.cache.keys().next().value!);
@@ -225,6 +271,136 @@ export class DirectoryService {
       if (cached && Date.now() - cached.at < CACHE_STALE_MS) return cached;
       throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'DEPENDENCY_UNAVAILABLE', { dependency: 'radio_directory', reason: 'unreachable' });
     }
+  }
+
+  /** One upstream search; `raw` is how many records Radio Browser sent before our filters. Throws when it fails. */
+  private async request(baseUrl: string, key: string, geo: 'required' | 'known' | 'none', maxBytes: number): Promise<{ stations: DirectoryStation[]; raw: number }> {
+    const res = await this.http(`${baseUrl}/json/stations/search?${key}`, {
+      headers: { accept: 'application/json', 'user-agent': `TuneDeck-API/${this.config.build}` },
+      signal: AbortSignal.timeout(maxBytes > UPSTREAM_MAX_BYTES ? UPSTREAM_TIMEOUT_MS * 3 : UPSTREAM_TIMEOUT_MS),
+    });
+    if (res.status !== 200) throw new Error(`status ${res.status}`);
+    const body = await res.text();
+    if (body.length > maxBytes) throw new Error('too large');
+    const raw: unknown = JSON.parse(body);
+    if (!Array.isArray(raw)) throw new Error('not a list');
+    const seen = new Set<string>();
+    const stations = raw
+      .map((r) => {
+        const s = toDirectoryStation(r, geo === 'required');
+        const at = s && geo === 'known' ? geoOf(r as Record<string, unknown>) : null;
+        return at ? { ...s!, geo: at } : s;
+      })
+      .filter((s): s is DirectoryStation => !!s && !seen.has(s.id) && !!seen.add(s.id));
+    return { stations, raw: raw.length };
+  }
+
+  /**
+   * Stations for the web map, blocked ones left out. With a country: every station Radio Browser has there (up to
+   * COUNTRY_MAX), `geo` on those with coordinates. Without: the world's most popular stations with coordinates, every
+   * one in the featured regions (FEATURED_COUNTRIES, EUROPE), and each other country's 20 most listened. One request here stands for many upstream pages,
+   * so the console's single address is not rate limited page by page.
+   */
+  async map(country: string | null): Promise<{ stations: DirectoryStation[]; truncated: boolean; attribution: string }> {
+    const list = await this.bulk(country ? `country:${country}` : 'world', (base) => (country ? this.allPages(base, { countrycode: country }, COUNTRY_MAX, 'known') : this.world(base)));
+    const blocks = await this.blockIndex();
+    return { stations: list.stations.filter((s) => !blockFor(s, blocks)), truncated: list.truncated, attribution: DIRECTORY_ATTRIBUTION };
+  }
+
+  /**
+   * Staff list: one country's stations (or a name search) blocked ones included, each marked active or not with
+   * the block that hides it, `ADMIN_PAGE` at a time.
+   */
+  async adminList(query: ReturnType<typeof parseAdminDirectoryQuery>): Promise<{ stations: AdminDirectoryStation[]; total: number; nextOffset: number | null; truncated: boolean; attribution: string }> {
+    const list = query.country
+      ? await this.bulk(`country:${query.country}`, (base) => this.allPages(base, { countrycode: query.country! }, COUNTRY_MAX, 'known'))
+      : await this.bulk(`name:${query.q}`, (base) => this.allPages(base, { name: query.q! }, ADMIN_PAGE * 2, 'none'));
+    const blocks = await this.blockIndex();
+    const needle = query.country && query.q ? query.q.toLowerCase() : null;
+    const rows = list.stations
+      .filter((s) => !needle || s.name.toLowerCase().includes(needle))
+      .map((s) => {
+        const block = blockFor(s, blocks);
+        return { ...s, active: !block, block };
+      })
+      .filter((s) => query.status === 'all' || s.active === (query.status === 'active'));
+    const stations = rows.slice(query.offset, query.offset + ADMIN_PAGE);
+    return { stations, total: rows.length, nextOffset: query.offset + ADMIN_PAGE < rows.length ? query.offset + ADMIN_PAGE : null, truncated: list.truncated, attribution: DIRECTORY_ATTRIBUTION };
+  }
+
+  /** The world map list: most popular worldwide first, then each featured country, a few countries at a time. */
+  private async world(baseUrl: string): Promise<BulkList> {
+    const featured = new Set([...FEATURED_COUNTRIES, ...EUROPE]);
+    // Which other countries have stations at all; without that list the map still has the featured regions.
+    const others = (await this.countries().catch(() => ({ countries: [] as { country: string }[] }))).countries.map((c) => c.country).filter((c) => !featured.has(c));
+    const parts: { params: Record<string, string>; max: number }[] = [
+      { params: { has_geo_info: 'true' }, max: WORLD_TOP },
+      ...FEATURED_COUNTRIES.map((c) => ({ params: { countrycode: c, has_geo_info: 'true' }, max: WORLD_CAP[c] ?? WORLD_CAP_FEATURED })),
+      ...EUROPE.map((c) => ({ params: { countrycode: c, has_geo_info: 'true' }, max: WORLD_CAP[c] ?? WORLD_CAP_EUROPE })),
+      ...others.map((c) => ({ params: { countrycode: c, has_geo_info: 'true' }, max: WORLD_CAP_OTHER })),
+    ];
+    const got: (BulkList | null)[] = new Array(parts.length).fill(null);
+    let next = 0;
+    const worker = async () => {
+      while (next < parts.length) {
+        const i = next++;
+        got[i] = await this.allPages(baseUrl, parts[i].params, parts[i].max, 'required').catch(() => null);
+      }
+    };
+    await Promise.all(Array.from({ length: BULK_CONCURRENCY }, worker));
+    if (!got[0]) throw new Error('world list unavailable');
+    const seen = new Set<string>();
+    const stations = got.flatMap((g) => g?.stations ?? []).filter((s) => !seen.has(s.id) && !!seen.add(s.id));
+    const complete = got.every(Boolean);
+    return { at: complete ? Date.now() : Date.now() - BULK_TTL_MS + BULK_RETRY_MS, stations, truncated: got.some((g) => g?.truncated) || !complete };
+  }
+
+  /**
+   * Pages of BULK_PAGE in listener order until a short page or `max` stations. `geo`: 'required' asks only for
+   * stations with coordinates, 'known' asks for all and keeps coordinates where there are some, 'none' drops them.
+   */
+  private async allPages(baseUrl: string, params: Record<string, string>, max: number, geo: 'required' | 'known' | 'none'): Promise<BulkList> {
+    const stations: DirectoryStation[] = [];
+    const seen = new Set<string>();
+    for (let offset = 0; offset < max; offset += BULK_PAGE) {
+      const limit = Math.min(BULK_PAGE, max - offset);
+      const qs = new URLSearchParams({ hidebroken: 'true', is_https: 'true', order: 'clickcount', reverse: 'true', ...params, limit: String(limit), offset: String(offset) });
+      const page = await this.request(baseUrl, qs.toString(), geo, BULK_MAX_BYTES);
+      for (const s of page.stations) if (!seen.has(s.id) && seen.add(s.id)) stations.push(s);
+      if (page.raw < limit) return { at: Date.now(), stations, truncated: false };
+    }
+    return { at: Date.now(), stations, truncated: true };
+  }
+
+  /** A cached whole list: fresh within an hour; older (up to a day) it is answered at once and refreshed behind. */
+  private async bulk(key: string, load: (baseUrl: string) => Promise<BulkList>): Promise<BulkList> {
+    const dir = this.config.radioDirectory;
+    if (!dir) throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'DEPENDENCY_UNAVAILABLE', { dependency: 'radio_directory', reason: 'not_configured' });
+    const cached = this.bulkCache.get(key);
+    if (cached && Date.now() - cached.at < BULK_TTL_MS) return cached;
+    let running = this.bulkInFlight.get(key);
+    if (!running) {
+      running = load(dir.baseUrl)
+        .then((entry) => {
+          this.bulkCache.delete(key);
+          this.bulkCache.set(key, entry);
+          if (this.bulkCache.size > BULK_CACHE_MAX) this.bulkCache.delete(this.bulkCache.keys().next().value!);
+          return entry;
+        })
+        .catch((err: unknown) => {
+          this.logger.log('WARN', { eventCode: 'RADIO_DIRECTORY_UNAVAILABLE', errorName: err instanceof Error ? err.name : 'Error' });
+          const old = this.bulkCache.get(key);
+          if (old && Date.now() - old.at < BULK_STALE_MS) return old;
+          throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'DEPENDENCY_UNAVAILABLE', { dependency: 'radio_directory', reason: 'unreachable' });
+        })
+        .finally(() => this.bulkInFlight.delete(key));
+      this.bulkInFlight.set(key, running);
+    }
+    if (cached && Date.now() - cached.at < BULK_STALE_MS) {
+      running.catch(() => undefined);
+      return cached;
+    }
+    return running;
   }
 
   /**
@@ -262,9 +438,12 @@ export class DirectoryService {
     }
   }
 
-  private async blockSets(): Promise<{ stations: Set<string>; hosts: string[] }> {
-    const rows = await this.db.query<{ kind: string; value: string }>('SELECT kind, value FROM directory_blocks');
-    return { stations: new Set(rows.filter((r) => r.kind === 'station').map((r) => r.value)), hosts: rows.filter((r) => r.kind === 'host').map((r) => r.value) };
+  private async blockIndex(): Promise<BlockIndex> {
+    const rows = await this.db.query<{ id: string; kind: string; value: string }>('SELECT id::text, kind, value FROM directory_blocks ORDER BY id');
+    return {
+      stations: new Map(rows.filter((r) => r.kind === 'station').map((r) => [r.value, r.id])),
+      hosts: rows.filter((r) => r.kind === 'host').map((r) => ({ value: r.value, id: r.id })),
+    };
   }
 
   async blocks(): Promise<DirectoryBlock[]> {
@@ -343,12 +522,38 @@ export class DirectoryController {
     return result;
   }
 
+  /** The web map's stations: `country` for one country (all of them), none for the world map. */
+  @Get('map')
+  async map(@Query() q: Record<string, unknown>, @Res({ passthrough: true }) res: Response) {
+    for (const k of Object.keys(q)) if (k !== 'country') throw invalid(k, 'unknown_field');
+    const country = one(q, 'country');
+    if (country !== null && !/^[A-Za-z]{2}$/.test(country)) throw invalid('country', 'iso_3166_alpha2');
+    const result = await this.directory.map(country?.toUpperCase() ?? null);
+    res.setHeader('Cache-Control', 'public, max-age=600');
+    return result;
+  }
+
   @Get('countries')
   async countries(@Query() q: Record<string, unknown>, @Res({ passthrough: true }) res: Response) {
     for (const k of Object.keys(q)) throw invalid(k, 'unknown_field');
     const result = await this.directory.countries();
     res.setHeader('Cache-Control', 'public, max-age=3600');
     return result;
+  }
+}
+
+/** Staff see a country's community stations, blocked ones included, to switch each on or off (Tar 2026-10-09). */
+@Controller('v1/admin/directory/stations')
+@UseGuards(AuthGuard, StaffGuard)
+@RequireRoles('catalog_editor', 'admin')
+export class AdminDirectoryStationsController {
+  constructor(private readonly directory: DirectoryService) {}
+
+  @Get()
+  async list(@Query() q: Record<string, unknown>, @Res({ passthrough: true }) res: Response) {
+    const query = parseAdminDirectoryQuery(q);
+    res.setHeader('Cache-Control', 'no-store');
+    return this.directory.adminList(query);
   }
 }
 
