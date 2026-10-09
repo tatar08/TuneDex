@@ -1,4 +1,6 @@
 import request from 'supertest';
+import { Database } from '../src/db/database';
+import { runStaffCli } from '../src/staff/staff-cli';
 import { createIdentity, createTestApp, createTestDatabase, TestIdentity } from './harness';
 
 describe('rate limits', () => {
@@ -51,6 +53,18 @@ describe('rate limits', () => {
     }
     expect((await http().patch('/v1/me/settings').set(carol).set('If-Match', `"${rev}"`).send({ theme: 'system' })).status).toBe(429);
     await http().get('/v1/me/settings').set(carol).expect(200);
+  });
+
+  it('gives staff console writes their own budget, apart from the same person\'s app writes', async () => {
+    const sub = 'rl-editor';
+    const ed = { Authorization: `Bearer ${await id.token(sub)}` };
+    expect(await runStaffCli(['grant', sub, 'catalog_editor', '--by', 'tar', '--reason', 'rate limit test'], new Database(t.pool), () => undefined)).toBe(0);
+    let rev = (await http().get('/v1/me/settings').set(ed).expect(200)).body.revision;
+    for (let i = 0; i < 2; i++) rev = (await http().patch('/v1/me/settings').set(ed).set('If-Match', `"${rev}"`).send({ theme: i % 2 ? 'dark' : 'light' }).expect(200)).body.revision;
+    // App writes are used up, yet console writes still go through until their own limit.
+    for (let i = 0; i < 2; i++) await http().post('/v1/admin/directory/blocks').set(ed).send({ kind: 'host', value: `h${i}.example.com`, reason: 'rate limit test block' }).expect(201);
+    expect((await http().post('/v1/admin/directory/blocks').set(ed).send({ kind: 'host', value: 'h9.example.com', reason: 'rate limit test block' })).status).toBe(429);
+    expect((await http().patch('/v1/me/settings').set(ed).set('If-Match', `"${rev}"`).send({ theme: 'system' })).status).toBe(429);
   });
 
   it('caps store webhook calls per address before any signature is checked', async () => {

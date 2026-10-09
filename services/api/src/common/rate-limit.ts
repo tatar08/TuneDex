@@ -55,6 +55,9 @@ export class RateLimitInterceptor implements NestInterceptor {
   private ruleFor(req: Request): Rule | null {
     const limits = this.config.rateLimit;
     if (req.actor) {
+      // Staff console work has its own write budget, so moderating stations cannot use up the same person's app
+      // writes (and the other way round). Non-staff never get here on /v1/admin: the guards refuse them first.
+      if (req.path.startsWith('/v1/admin/') && !READ_METHODS.has(req.method)) return { bucket: `user:${req.actor.userId}:admin-write`, limit: limits.writesPerMinute };
       return READ_METHODS.has(req.method)
         ? { bucket: `user:${req.actor.userId}:read`, limit: limits.readsPerMinute }
         : { bucket: `user:${req.actor.userId}:write`, limit: limits.writesPerMinute };
