@@ -15,3 +15,16 @@ describe('proxy security headers', () => {
     expect(proxy(new NextRequest('http://localhost:3200/login')).headers.get('strict-transport-security')).toBeNull();
   });
 });
+
+describe('proxy media policy', () => {
+  it('allows https media and fetches on /app/radio only', () => {
+    const radio = proxy(new NextRequest('https://console.example.test/app/radio')).headers.get('content-security-policy')!;
+    expect(radio).toContain("media-src 'self' https: blob:");
+    expect(radio).toContain("connect-src 'self' https:");
+    expect(radio).not.toContain('http:');
+    const other = proxy(new NextRequest('https://console.example.test/app/settings')).headers.get('content-security-policy')!;
+    expect(other).toContain("connect-src 'self';");
+    expect(other).toContain("media-src 'self'");
+    expect(other).not.toContain('https:');
+  });
+});

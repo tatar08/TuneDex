@@ -82,6 +82,8 @@ export interface CatalogStation {
   genres: string[];
   codec: string;
   bitrateKbps: number | null;
+  /** https only (the catalog refuses anything else); the web page plays it. */
+  streamUrl: string;
 }
 
 export type ProState = 'verified' | 'pending' | 'revoked' | 'none';
@@ -1108,9 +1110,11 @@ export function createBff(deps: BffDeps) {
           redirect: 'error',
         });
         if (!res.ok) return { status: res.status };
-        const body = (await res.json()) as { stations: (CatalogStation & { streamUrl?: string })[]; nextCursor: string | null };
-        // The stream address is not needed on the web page, so it never reaches the browser.
-        for (const { id, name, country, language, genres, codec, bitrateKbps } of body.stations) stations.push({ id, name, country, language, genres, codec, bitrateKbps });
+        const body = (await res.json()) as { stations: CatalogStation[]; nextCursor: string | null };
+        // The catalog is public, so its stream addresses may reach the browser, which plays them on /app/radio.
+        for (const { id, name, country, language, genres, codec, bitrateKbps, streamUrl } of body.stations) {
+          if (typeof streamUrl === 'string' && streamUrl.startsWith('https://')) stations.push({ id, name, country, language, genres, codec, bitrateKbps, streamUrl });
+        }
         cursor = body.nextCursor;
         if (!cursor) return { status: 200, stations };
       }

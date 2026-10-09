@@ -195,3 +195,20 @@ describe('readBodyCapped', () => {
     expect(await readBodyCapped(new Request('http://x/', { method: 'GET' }), 16)).toBe('');
   });
 });
+
+describe('country and language names', () => {
+  it('names codes in the page language and never repeats the country for Thai', async () => {
+    const { countryName, languageName } = await import('../src/lib/names');
+    expect(countryName('TH', 'th')).toBe('ไทย');
+    expect(languageName('th', 'th')).toBe('ภาษาไทย');
+    expect(countryName('th', 'en')).toBe('Thailand');
+    expect(languageName('TH', 'en')).toBe('Thai');
+    expect(languageName('en', 'th')).toBe('ภาษาอังกฤษ');
+  });
+
+  it('falls back to the code when there is no name', async () => {
+    const { countryName, languageName } = await import('../src/lib/names');
+    expect(countryName('XX', 'en')).toBe('XX');
+    expect(languageName('zzz', 'th')).toBe('zzz');
+  });
+});
