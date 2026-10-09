@@ -9,6 +9,8 @@ export interface WebChannel {
 }
 
 export const MAX_CHANNELS = 2000;
+/** localStorage key of the viewer's own channels, shared by /app/radio and /app/explore. */
+export const CHANNELS_KEY = 'tunedeck.web.channels';
 const MAX_NAME = 120;
 
 /** Only https addresses play: an http stream is refused, as in the app. */
@@ -67,5 +69,17 @@ export function readChannels(raw: string | null): WebChannel[] {
       .map((c) => ({ id: c.id, name: c.name.slice(0, MAX_NAME), url: c.url, group: typeof c.group === 'string' ? c.group : undefined, hls: c.hls === true || looksHls(c.url) }));
   } catch {
     return [];
+  }
+}
+
+/** Adds one channel to this browser's own list; false when it was already there or storage is unavailable. */
+export function appendChannel(channel: WebChannel): boolean {
+  try {
+    const list = readChannels(localStorage.getItem(CHANNELS_KEY));
+    if (list.some((c) => c.url === channel.url) || list.length >= MAX_CHANNELS) return false;
+    localStorage.setItem(CHANNELS_KEY, JSON.stringify([...list, channel]));
+    return true;
+  } catch {
+    return false;
   }
 }

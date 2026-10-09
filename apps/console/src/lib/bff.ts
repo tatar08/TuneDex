@@ -86,6 +86,20 @@ export interface CatalogStation {
   streamUrl: string;
 }
 
+/** A community station with coordinates, for the world map on /app/explore. */
+export interface MapStation {
+  id: string;
+  name: string;
+  country: string | null;
+  language: string | null;
+  genres: string[];
+  codec: string;
+  bitrateKbps: number | null;
+  streamUrl: string;
+  lat: number;
+  lon: number;
+}
+
 export type ProState = 'verified' | 'pending' | 'revoked' | 'none';
 
 /** Per-change result of POST /v1/sync/push. */
@@ -487,6 +501,7 @@ const LOGIN_TX_SECONDS = 600;
 const REAUTH_SKEW_SECONDS = 30;
 const REFRESH_SKEW_MS = 30_000;
 const MAX_BODY_BYTES = 16 * 1024;
+const MAP_CACHE_MS = 10 * 60_000;
 
 /**
  * Reads a request body as text, stopping as soon as it passes `max` bytes (a declared Content-Length over the
@@ -749,6 +764,52 @@ export function createBff(deps: BffDeps) {
 
   const notFound = (requestId: string) =>
     json(404, { code: 'NOT_FOUND', messageKey: 'errors.request.notFound', requestId, details: {} }, requestId);
+
+  const mapCache = new Map<string, { at: number; stations: MapStation[] }>();
+  const mapInFlight = new Map<string, Promise<{ status: number; stations?: MapStation[] }>>();
+
+  /**
+   * Community stations with coordinates, the whole world or one country. Kept 10 minutes in this process and
+   * shared by every viewer, so the API's per-address limit (the console is one address) is not spent per page view.
+   */
+  function loadMapStations(country: string | null): Promise<{ status: number; stations?: MapStation[] }> {
+    const key = country ?? '*';
+    const hit = mapCache.get(key);
+    if (hit && Date.now() - hit.at < MAP_CACHE_MS) return Promise.resolve({ status: 200, stations: hit.stations });
+    const running = mapInFlight.get(key);
+    if (running) return running;
+    const call = (async () => {
+      const stations: MapStation[] = [];
+      const seen = new Set<string>();
+      let offset: number | null = 0;
+      for (let page = 0; page < (country ? 4 : 10) && offset !== null; page++) {
+        const qs = new URLSearchParams({ hasGeo: 'true', limit: '50', offset: String(offset) });
+        if (country) qs.set('country', country);
+        const res = await fetchImpl(`${config.apiBaseUrl}/v1/directory/radio?${qs}`, {
+          headers: { accept: 'application/json', 'x-request-id': `web_${randomUUID()}`, traceparent: traceparent() },
+          signal: AbortSignal.timeout(10_000),
+          redirect: 'error',
+        });
+        if (!res.ok) {
+          if (stations.length) break;
+          return { status: res.status };
+        }
+        const body = (await res.json()) as { stations: (Omit<MapStation, 'lat' | 'lon'> & { geo?: { lat: number; lon: number } })[]; nextOffset: number | null };
+        for (const { id, name, country: c, language, genres, codec, bitrateKbps, streamUrl, geo } of body.stations) {
+          if (!geo || seen.has(id) || typeof streamUrl !== 'string' || !streamUrl.startsWith('https://')) continue;
+          seen.add(id);
+          stations.push({ id, name, country: c, language, genres, codec, bitrateKbps, streamUrl, lat: geo.lat, lon: geo.lon });
+        }
+        offset = body.nextOffset;
+      }
+      mapCache.delete(key);
+      mapCache.set(key, { at: Date.now(), stations });
+      if (mapCache.size > 300) mapCache.delete(mapCache.keys().next().value!);
+      return { status: 200, stations };
+    })().finally(() => mapInFlight.delete(key));
+    mapInFlight.set(key, call);
+    return call;
+  }
 
   return {
     names,
@@ -1100,6 +1161,20 @@ export function createBff(deps: BffDeps) {
     },
 
     /** Server-side read of the public catalog, up to 500 stations. No session needed: the catalog is public. */
+    loadMapStations,
+
+    /** GET /bff/directory/map?country=XX: the map's stations for signed-in viewers. */
+    getMapStations: (req: Request) =>
+      timed(req, '/bff/directory/map', async (requestId) => {
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        const raw = new URL(req.url).searchParams.get('country');
+        if (raw !== null && !/^[A-Za-z]{2}$/.test(raw)) return json(400, { code: 'VALIDATION_FAILED', requestId, details: { field: 'country' } }, requestId);
+        const result = await loadMapStations(raw ? raw.toUpperCase() : null);
+        if (!result.stations) return error(503, 'UPSTREAM_UNAVAILABLE', requestId);
+        return json(200, { stations: result.stations, attribution: 'Radio Browser (www.radio-browser.info), community data' }, requestId, { 'cache-control': 'private, max-age=300' });
+      }),
+
     async loadCatalog(): Promise<{ status: number; stations?: CatalogStation[]; truncated?: boolean }> {
       const stations: CatalogStation[] = [];
       let cursor: string | null = null;

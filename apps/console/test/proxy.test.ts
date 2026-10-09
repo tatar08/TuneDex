@@ -28,3 +28,11 @@ describe('proxy media policy', () => {
     expect(other).not.toContain('https:');
   });
 });
+
+describe('proxy explore policy', () => {
+  it('allows https media on /app/explore and loads no map tiles from anywhere', () => {
+    const explore = proxy(new NextRequest('https://console.example.test/app/explore')).headers.get('content-security-policy')!;
+    expect(explore).toContain("img-src 'self' data: blob:;");
+    expect(explore).toContain("media-src 'self' https: blob:");
+  });
+});

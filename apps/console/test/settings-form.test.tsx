@@ -52,6 +52,7 @@ describe('SettingsForm', () => {
 
     await user.tab(); // overview link
     await user.tab(); // radio link
+    await user.tab(); // explore link
     await user.tab(); // settings link
     await user.tab(); // devices link
     await user.tab(); // privacy link

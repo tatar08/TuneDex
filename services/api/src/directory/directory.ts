@@ -27,6 +27,8 @@ export interface DirectoryStation {
   bitrateKbps: number | null;
   logoUrl: string | null;
   homepageUrl: string | null;
+  /** Only in answers to hasGeo=true (the web map), so the apps' station shape stays as it was. */
+  geo?: { lat: number; lon: number };
 }
 
 export interface DirectoryQuery {
@@ -36,6 +38,8 @@ export interface DirectoryQuery {
   tag: string | null;
   limit: number;
   offset: number;
+  /** Only stations Radio Browser has coordinates for, each with its geo. */
+  hasGeo: boolean;
 }
 
 export interface DirectoryBlock {
@@ -54,6 +58,7 @@ const CACHE_TTL_MS = 10 * 60_000;
 /** When Radio Browser is down, a cached answer up to this old is served rather than an error. */
 const CACHE_STALE_MS = 60 * 60_000;
 const CACHE_MAX = 500;
+const COUNTRY_TTL_MS = 60 * 60_000;
 const UPSTREAM_TIMEOUT_MS = 5000;
 export const UPSTREAM_MAX_BYTES = 2 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -70,9 +75,11 @@ function one(q: Record<string, unknown>, key: string): string | null {
   return v;
 }
 
-/** `q` (name), `country`, `language`, `tag`, `limit`, `offset`; anything else is 400. */
+/** `q` (name), `country`, `language`, `tag`, `limit`, `offset`, `hasGeo`; anything else is 400. */
 export function parseDirectoryQuery(q: Record<string, unknown>): DirectoryQuery {
-  for (const k of Object.keys(q)) if (!['q', 'country', 'language', 'tag', 'limit', 'offset'].includes(k)) throw invalid(k, 'unknown_field');
+  for (const k of Object.keys(q)) if (!['q', 'country', 'language', 'tag', 'limit', 'offset', 'hasGeo'].includes(k)) throw invalid(k, 'unknown_field');
+  const hasGeoRaw = one(q, 'hasGeo');
+  if (hasGeoRaw !== null && hasGeoRaw !== 'true' && hasGeoRaw !== 'false') throw invalid('hasGeo', 'must_be_boolean');
   const name = one(q, 'q')?.normalize('NFC').replace(UNSAFE, '').trim() ?? null;
   if (name !== null && (name.length === 0 || name.length > 80)) throw invalid('q', 'out_of_range', { max: 80 });
   const country = one(q, 'country');
@@ -87,7 +94,16 @@ export function parseDirectoryQuery(q: Record<string, unknown>): DirectoryQuery 
   const offsetRaw = one(q, 'offset');
   const offset = offsetRaw === null ? 0 : /^\d{1,4}$/.test(offsetRaw) ? Number(offsetRaw) : NaN;
   if (!(offset >= 0 && offset <= OFFSET_MAX)) throw invalid('offset', 'out_of_range', { max: OFFSET_MAX });
-  return { q: name, country: country?.toUpperCase() ?? null, language: language?.toLowerCase() ?? null, tag: tag?.toLowerCase() ?? null, limit, offset };
+  return { q: name, country: country?.toUpperCase() ?? null, language: language?.toLowerCase() ?? null, tag: tag?.toLowerCase() ?? null, limit, offset, hasGeo: hasGeoRaw === 'true' };
+}
+
+/** Radio Browser coordinates, rounded to about a kilometre; out-of-range or 0,0 (a common placeholder) is none. */
+export function geoOf(r: Record<string, unknown>): { lat: number; lon: number } | null {
+  const lat = r.geo_lat;
+  const lon = r.geo_long;
+  if (typeof lat !== 'number' || typeof lon !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180 || (lat === 0 && lon === 0)) return null;
+  return { lat: Math.round(lat * 100) / 100, lon: Math.round(lon * 100) / 100 };
 }
 
 function httpsUrl(v: unknown): string | null {
@@ -104,7 +120,7 @@ function httpsUrl(v: unknown): string | null {
  * Turns one Radio Browser record into a station the apps can play, or null. Only plain public HTTPS streams
  * (the same rules as our own catalog) in a codec the players support, with a name, get through.
  */
-export function toDirectoryStation(raw: unknown): DirectoryStation | null {
+export function toDirectoryStation(raw: unknown, withGeo = false): DirectoryStation | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const r = raw as Record<string, unknown>;
   const id = typeof r.stationuuid === 'string' ? r.stationuuid.toLowerCase() : '';
@@ -127,7 +143,10 @@ export function toDirectoryStation(raw: unknown): DirectoryStation | null {
       ? [...new Set(r.tags.split(',').map((t) => t.trim().toLowerCase()).filter((t) => /^[\p{L}\p{N}][\p{L}\p{N} &+-]{0,29}$/u.test(t)))].slice(0, 5)
       : [];
   const bitrate = typeof r.bitrate === 'number' && Number.isInteger(r.bitrate) && r.bitrate > 0 && r.bitrate <= 1000 ? r.bitrate : null;
-  return { id, name, country, language, genres, streamUrl, codec, bitrateKbps: bitrate, logoUrl: httpsUrl(r.favicon), homepageUrl: httpsUrl(r.homepage) };
+  const station: DirectoryStation = { id, name, country, language, genres, streamUrl, codec, bitrateKbps: bitrate, logoUrl: httpsUrl(r.favicon), homepageUrl: httpsUrl(r.homepage) };
+  if (!withGeo) return station;
+  const geo = geoOf(r);
+  return geo ? { ...station, geo } : null;
 }
 
 /** Lower case, without a trailing dot, so `radio.example.com.` cannot slip past a block on `example.com`. */
@@ -143,6 +162,7 @@ export class DirectoryService {
   private readonly cache = new Map<string, { at: number; stations: DirectoryStation[]; full: boolean }>();
   /** One upstream call per search at a time: concurrent misses for the same search share it. */
   private readonly inFlight = new Map<string, Promise<{ stations: DirectoryStation[]; full: boolean }>>();
+  private countryCache: { at: number; countries: { country: string; stations: number }[] } | null = null;
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -171,17 +191,18 @@ export class DirectoryService {
     if (q.country) params.set('countrycode', q.country);
     if (q.language) params.set('language', q.language);
     if (q.tag) params.set('tag', q.tag);
+    if (q.hasGeo) params.set('has_geo_info', 'true');
     const key = params.toString();
     const cached = this.cache.get(key);
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached;
     const running = this.inFlight.get(key);
     if (running) return running;
-    const call = this.fetchPage(baseUrl, key, q.limit, cached).finally(() => this.inFlight.delete(key));
+    const call = this.fetchPage(baseUrl, key, q.limit, cached, q.hasGeo).finally(() => this.inFlight.delete(key));
     this.inFlight.set(key, call);
     return call;
   }
 
-  private async fetchPage(baseUrl: string, key: string, limit: number, cached: { at: number; stations: DirectoryStation[]; full: boolean } | undefined): Promise<{ stations: DirectoryStation[]; full: boolean }> {
+  private async fetchPage(baseUrl: string, key: string, limit: number, cached: { at: number; stations: DirectoryStation[]; full: boolean } | undefined, withGeo: boolean): Promise<{ stations: DirectoryStation[]; full: boolean }> {
     try {
       const res = await this.http(`${baseUrl}/json/stations/search?${key}`, {
         headers: { accept: 'application/json', 'user-agent': `TuneDeck-API/${this.config.build}` },
@@ -193,7 +214,7 @@ export class DirectoryService {
       const raw: unknown = JSON.parse(body);
       if (!Array.isArray(raw)) throw new Error('not a list');
       const seen = new Set<string>();
-      const stations = raw.map(toDirectoryStation).filter((s): s is DirectoryStation => !!s && !seen.has(s.id) && !!seen.add(s.id));
+      const stations = raw.map((r) => toDirectoryStation(r, withGeo)).filter((s): s is DirectoryStation => !!s && !seen.has(s.id) && !!seen.add(s.id));
       const entry = { at: Date.now(), stations, full: raw.length >= limit };
       this.cache.delete(key);
       this.cache.set(key, entry);
@@ -202,6 +223,41 @@ export class DirectoryService {
     } catch (err) {
       this.logger.log('WARN', { eventCode: 'RADIO_DIRECTORY_UNAVAILABLE', errorName: err instanceof Error ? err.name : 'Error' });
       if (cached && Date.now() - cached.at < CACHE_STALE_MS) return cached;
+      throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'DEPENDENCY_UNAVAILABLE', { dependency: 'radio_directory', reason: 'unreachable' });
+    }
+  }
+
+  /**
+   * Station count per country from Radio Browser, for country pins on the map. Counts are Radio Browser's own
+   * (all its working stations), so a country's search can return fewer after our https and codec filters.
+   */
+  async countries(): Promise<{ countries: { country: string; stations: number }[]; attribution: string }> {
+    const dir = this.config.radioDirectory;
+    if (!dir) throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'DEPENDENCY_UNAVAILABLE', { dependency: 'radio_directory', reason: 'not_configured' });
+    const cached = this.countryCache;
+    if (cached && Date.now() - cached.at < COUNTRY_TTL_MS) return { countries: cached.countries, attribution: DIRECTORY_ATTRIBUTION };
+    try {
+      const res = await this.http(`${dir.baseUrl}/json/countries?hidebroken=true`, {
+        headers: { accept: 'application/json', 'user-agent': `TuneDeck-API/${this.config.build}` },
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      });
+      if (res.status !== 200) throw new Error(`status ${res.status}`);
+      const body = await res.text();
+      if (body.length > UPSTREAM_MAX_BYTES) throw new Error('too large');
+      const raw: unknown = JSON.parse(body);
+      if (!Array.isArray(raw)) throw new Error('not a list');
+      const counts = new Map<string, number>();
+      for (const r of raw as Record<string, unknown>[]) {
+        const code = typeof r?.iso_3166_1 === 'string' ? r.iso_3166_1.toUpperCase() : '';
+        const n = typeof r?.stationcount === 'number' && Number.isInteger(r.stationcount) ? r.stationcount : 0;
+        if (/^[A-Z]{2}$/.test(code) && n > 0) counts.set(code, (counts.get(code) ?? 0) + n);
+      }
+      const countries = [...counts].map(([country, stations]) => ({ country, stations })).sort((a, b) => b.stations - a.stations || a.country.localeCompare(b.country));
+      this.countryCache = { at: Date.now(), countries };
+      return { countries, attribution: DIRECTORY_ATTRIBUTION };
+    } catch (err) {
+      this.logger.log('WARN', { eventCode: 'RADIO_DIRECTORY_UNAVAILABLE', errorName: err instanceof Error ? err.name : 'Error' });
+      if (cached && Date.now() - cached.at < 24 * COUNTRY_TTL_MS) return { countries: cached.countries, attribution: DIRECTORY_ATTRIBUTION };
       throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'DEPENDENCY_UNAVAILABLE', { dependency: 'radio_directory', reason: 'unreachable' });
     }
   }
@@ -284,6 +340,14 @@ export class DirectoryController {
   async search(@Query() q: Record<string, unknown>, @Res({ passthrough: true }) res: Response) {
     const result = await this.directory.search(parseDirectoryQuery(q));
     res.setHeader('Cache-Control', 'public, max-age=300');
+    return result;
+  }
+
+  @Get('countries')
+  async countries(@Query() q: Record<string, unknown>, @Res({ passthrough: true }) res: Response) {
+    for (const k of Object.keys(q)) throw invalid(k, 'unknown_field');
+    const result = await this.directory.countries();
+    res.setHeader('Cache-Control', 'public, max-age=3600');
     return result;
   }
 }

@@ -4,6 +4,7 @@ import { strings } from '@/lib/i18n';
 const LINKS = [
   { href: '/app/overview', key: 'navOverview' },
   { href: '/app/radio', key: 'navRadio' },
+  { href: '/app/explore', key: 'navExplore' },
   { href: '/app/settings', key: 'navSettings' },
   { href: '/app/devices', key: 'navDevices' },
   { href: '/app/privacy', key: 'navPrivacy' },
