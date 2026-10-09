@@ -1346,6 +1346,11 @@ export function createBff(deps: BffDeps) {
         if (!csrfOk(req, ctx, form?.get('csrf') ?? undefined)) return error(403, 'CSRF_REJECTED', requestId);
         const upstream = await callApi(ctx, `/v1/me/exports/${id}/link`, { method: 'POST' }, requestId);
         if (!upstream) return error(401, 'SESSION_EXPIRED', requestId, { 'set-cookie': clearCookie(names.session, secure) });
+        // The link needs a sign-in from the last 5 minutes. This is a plain form post, so instead of a JSON error the
+        // browser goes to sign in again and comes back to a fresh export, which is ready in seconds.
+        if (upstream.status === 401 && ((await upstream.clone().json().catch(() => null)) as { code?: unknown } | null)?.code === 'REAUTH_REQUIRED') {
+          return redirect(`/auth/login?reauth=1&returnTo=${encodeURIComponent('/app/privacy?export=1')}`, 303);
+        }
         if (!upstream.ok) return passthrough(upstream, requestId);
         const path = ((await upstream.json()) as { path?: unknown }).path;
         if (typeof path !== 'string' || !EXPORT_LINK.test(path)) return notFound(requestId);

@@ -7,8 +7,35 @@ import { loadCountryShapes } from '@/lib/world';
 
 const escape = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-/** 3D globe (globe.gl on WebGL) drawing the same bundled country outlines; onFail when the browser has no WebGL. */
-export function WorldGlobe({ stations, selected, onSelect, onFail, fit }: { stations: MapStation[]; selected: string | null; onSelect: (s: MapStation) => void; onFail: () => void; fit: boolean }) {
+/** Globe colours for the page's light or dark look (WebGL cannot read CSS variables). */
+export interface GlobePalette {
+  ocean: string;
+  land: string;
+  border: string;
+  dot: string;
+  dotOn: string;
+  glow: string;
+}
+
+/**
+ * 3D globe (globe.gl on WebGL) drawing the same bundled country outlines; onFail when the browser has no WebGL.
+ * It never spins by itself: it moves only when the viewer drags or picks a station.
+ */
+export function WorldGlobe({
+  stations,
+  selected,
+  onSelect,
+  onFail,
+  fit,
+  palette,
+}: {
+  stations: MapStation[];
+  selected: string | null;
+  onSelect: (s: MapStation) => void;
+  onFail: () => void;
+  fit: boolean;
+  palette: GlobePalette;
+}) {
   const el = useRef<HTMLDivElement>(null);
   const globe = useRef<GlobeInstance | null>(null);
   const [ready, setReady] = useState(false);
@@ -29,18 +56,15 @@ export function WorldGlobe({ stations, selected, onSelect, onFail, fit }: { stat
             .width(node.clientWidth)
             .height(node.clientHeight)
             .backgroundColor('rgba(0,0,0,0)')
-            .showGraticules(true)
+            .showGraticules(false)
             .polygonsData(countries)
-            .polygonCapColor(() => '#1e3a2f')
             .polygonSideColor(() => 'rgba(0,0,0,0)')
-            .polygonStrokeColor(() => '#334155')
             .polygonAltitude(0.004)
             .pointLat('lat')
             .pointLng('lon')
             .pointAltitude(0.006)
             .pointLabel((d: object) => escape((d as MapStation).name))
             .onPointClick((d: object) => pick.current(d as MapStation));
-          (g.globeMaterial() as unknown as { color: { set(c: string): void } }).color.set('#0b2540');
           globe.current = g;
           resize = new ResizeObserver(() => g.width(node.clientWidth).height(node.clientHeight));
           resize.observe(node);
@@ -60,11 +84,20 @@ export function WorldGlobe({ stations, selected, onSelect, onFail, fit }: { stat
   }, []);
 
   useEffect(() => {
+    const g = globe.current;
+    if (!g) return;
+    (g.globeMaterial() as unknown as { color: { set(c: string): void } }).color.set(palette.ocean);
+    g.polygonCapColor(() => palette.land)
+      .polygonStrokeColor(() => palette.border)
+      .atmosphereColor(palette.glow);
+  }, [ready, palette]);
+
+  useEffect(() => {
     globe.current
       ?.pointsData(stations)
-      .pointColor((d: object) => ((d as MapStation).id === selected ? '#facc15' : '#10b981'))
-      .pointRadius((d: object) => ((d as MapStation).id === selected ? 1.3 : 0.8));
-  }, [ready, stations, selected]);
+      .pointColor((d: object) => ((d as MapStation).id === selected ? palette.dotOn : palette.dot))
+      .pointRadius((d: object) => ((d as MapStation).id === selected ? 1.1 : 0.45));
+  }, [ready, stations, selected, palette]);
 
   useEffect(() => {
     if (!fit || !stations.length) return;

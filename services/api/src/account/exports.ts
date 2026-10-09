@@ -254,10 +254,12 @@ export class MyExportsController {
     return this.exports.get(req.actor!.userId, id);
   }
 
-  /** Mints the download link (a POST, since it replaces the previous link; GET never changes anything). */
+  /** Mints the download link (a POST, since it replaces the previous link; GET never changes anything). Needs a sign-in from the last 5 minutes. */
   @Post(':id/link')
   @HttpCode(HttpStatus.CREATED)
   async link(@Req() req: Request, @Param('id') id: string, @Res({ passthrough: true }) res: Response) {
+    // The link hands out the whole account's data, so it needs the same recent sign-in as asking for the export.
+    requireRecentSignIn(req);
     res.setHeader('Cache-Control', 'no-store');
     return this.exports.link(req.actor!.userId, id);
   }

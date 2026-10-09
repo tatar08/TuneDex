@@ -15,6 +15,7 @@
 5. เริ่มงานจาก [roadmap/backlog](12-Roadmap-and-Backlog.md); ตรวจรับด้วย [QA](13-QA-and-Benchmarks.md) และ [release/operations](14-Release-and-Operations.md)
 6. บันทึกหลักฐานใน [decision/risk register](15-Decisions-Risks-and-Questions.md) และ [source register](16-Sources.md)
 7. แบ่งงานและส่งต่อให้ Claude ตาม [Claude + Codex collaboration](19-Claude-Codex-Collaboration.md) ซึ่งมี ownership, ลำดับงาน และ prompt พร้อมใช้
+8. ดู [Backend และ web console ตามที่สร้างจริง](20-Backend-As-Built.md) เพื่อรู้ว่าโค้ดวันนี้ทำอะไรและต่างจาก Doc 17 ตรงไหน
 
 ## สถานะและลำดับความสำคัญ
 

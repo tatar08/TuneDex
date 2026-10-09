@@ -346,7 +346,7 @@ paths:
       - { name: id, in: path, required: true, description: Export id; anything not a UUID is 404, schema: { type: string, format: uuid } }
     post:
       summary: Mint a download link for a ready export
-      description: Valid for 15 minutes (never past the export's own expiry); each call replaces the previous link. No request body.
+      description: Valid for 15 minutes (never past the export's own expiry); each call replaces the previous link. Needs a sign-in from the last 5 minutes (401 REAUTH_REQUIRED otherwise), like requesting the export. No request body.
       parameters:
         - { name: Idempotency-Key, in: header, required: false, description: 'Ignored here: the answer carries a secret (a code, a link, a looked-up account), so it is never stored or replayed; each call does the work again', schema: { type: string } }
       responses:
