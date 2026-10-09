@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useState } from 'react';
-import type { MapStation } from '@/lib/bff';
+import type { MapListStation, MapStation } from '@/lib/bff';
 import { Lang, strings } from '@/lib/i18n';
 import { countryName, languageName } from '@/lib/names';
 import { appendChannel } from '@/lib/playlist';
@@ -21,8 +21,9 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
   const [view, setView] = useState<View>('map');
   const [country, setCountry] = useState('');
   const [stations, setStations] = useState<MapStation[] | null>(null);
+  const [unmapped, setUnmapped] = useState<MapListStation[]>([]);
   const [failed, setFailed] = useState(false);
-  const [selected, setSelected] = useState<MapStation | null>(null);
+  const [selected, setSelected] = useState<MapListStation | null>(null);
   const [now, setNow] = useState<NowPlaying | null>(null);
   const [filter, setFilter] = useState('');
   const [note, setNote] = useState('');
@@ -40,14 +41,17 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
   useEffect(() => {
     let live = true;
     setStations(null);
+    setUnmapped([]);
     setFailed(false);
     setSelected(null);
     fetch(`/bff/directory/map${country ? `?country=${country}` : ''}`, { headers: { accept: 'application/json' } })
       .then(async (res) => {
         if (res.status === 401) return window.location.assign('/login?returnTo=/app/explore');
         if (!res.ok) throw new Error(String(res.status));
-        const body = (await res.json()) as { stations: MapStation[] };
-        if (live) setStations(body.stations);
+        const body = (await res.json()) as { stations: MapStation[]; unmapped?: MapListStation[] };
+        if (!live) return;
+        setStations(body.stations);
+        setUnmapped(body.unmapped ?? []);
       })
       .catch(() => live && setFailed(true));
     return () => {
@@ -67,17 +71,39 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
 
   const countries = useMemo(() => COUNTRY_CODES.map((c) => ({ code: c, name: countryName(c, lang) })).sort((a, b) => a.name.localeCompare(b.name, lang)), [lang]);
   const q = filter.trim().toLowerCase();
-  const list = (stations ?? []).filter((s) => !q || s.name.toLowerCase().includes(q));
-  const line = (s: MapStation) =>
+  const match = (s: MapListStation) => !q || s.name.toLowerCase().includes(q);
+  const list = (stations ?? []).filter(match);
+  const others = unmapped.filter(match);
+  const line = (s: MapListStation) =>
     [s.country && countryName(s.country, lang), s.language && (/^[a-z]{2,3}$/.test(s.language) ? languageName(s.language, lang) : s.language.replace(/^./, (c) => c.toUpperCase())), s.genres.slice(0, 2).join(', '), s.codec.toUpperCase()].filter(Boolean).join(' · ');
-  const play = (s: MapStation) => setNow({ name: s.name, url: s.streamUrl, hls: s.codec === 'hls' });
-  const add = (s: MapStation) =>
+  const play = (s: MapListStation) => setNow({ name: s.name, url: s.streamUrl, hls: s.codec === 'hls' });
+  const add = (s: MapListStation) =>
     setNote(appendChannel({ id: crypto.randomUUID(), name: s.name, url: s.streamUrl, group: s.country ? countryName(s.country, lang) : undefined, hls: s.codec === 'hls' }) ? t.exploreAdded(s.name) : t.exploreAlready);
-  const select = (s: MapStation) => {
+  const select = (s: MapListStation) => {
     setSelected(s);
     setNote('');
   };
   const globe = view === 'globe' && !noGlobe;
+  const row = (s: MapListStation, testId: string) => (
+    <li key={s.id} data-testid={testId}>
+      <span className="device-name">{s.name}</span>
+      <span className="radio-actions">
+        <button
+          type="button"
+          className="btn secondary small"
+          aria-pressed={now?.url === s.streamUrl}
+          aria-label={t.playerPlay(s.name)}
+          onClick={() => {
+            select(s);
+            play(s);
+          }}
+        >
+          ▶
+        </button>
+      </span>
+      <span className="status">{line(s)}</span>
+    </li>
+  );
 
   return (
     <main className="shell wide">
@@ -155,26 +181,19 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
 
       <section className="device" aria-labelledby="explore-list">
         <h2 id="explore-list">{stations ? t.exploreCount(stations.length) : t.exploreStations}</h2>
-        {stations && stations.length === 0 && <p className="status">{t.exploreNone}</p>}
+        {stations && stations.length === 0 && others.length === 0 && <p className="status">{t.exploreNone}</p>}
         {stations && stations.length > 0 && (
           <>
             <input className="explore-search" type="search" aria-label={t.exploreSearch} placeholder={t.exploreSearch} value={filter} onChange={(e) => setFilter(e.target.value)} />
             <ul className="devices radio-list">
-              {list.slice(0, 100).map((s) => (
-                <li key={s.id} data-testid="explore-station">
-                  <span className="device-name">{s.name}</span>
-                  <span className="radio-actions">
-                    <button type="button" className="btn secondary small" aria-pressed={now?.url === s.streamUrl} aria-label={t.playerPlay(s.name)} onClick={() => {
-                      select(s);
-                      play(s);
-                    }}>
-                      ▶
-                    </button>
-                  </span>
-                  <span className="status">{line(s)}</span>
-                </li>
-              ))}
+              {list.slice(0, 100).map((s) => row(s, 'explore-station'))}
             </ul>
+          </>
+        )}
+        {others.length > 0 && (
+          <>
+            <h3 className="explore-sub">{t.exploreUnmapped(others.length)}</h3>
+            <ul className="devices radio-list">{others.slice(0, 200).map((s) => row(s, 'explore-unmapped'))}</ul>
           </>
         )}
         <p className="status">{t.exploreSource}</p>

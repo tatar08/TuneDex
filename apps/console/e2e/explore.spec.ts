@@ -36,6 +36,7 @@ test('explore shows community stations on a map or a globe, plays one and adds i
     route.fulfill({
       json: {
         stations: [station(1, 'Bangkok <b>FM</b>', 13.75, 100.5, 'TH'), station(2, 'Chiang Mai Radio', 18.79, 98.98, 'TH'), station(3, 'Tokyo Wave', 35.68, 139.69, 'JP')],
+        unmapped: [{ ...station(4, 'Hat Yai Online', 0, 0, 'TH'), lat: undefined, lon: undefined }],
         attribution: 'Radio Browser',
       },
     }),
@@ -43,6 +44,9 @@ test('explore shows community stations on a map or a globe, plays one and adds i
   await page.getByLabel('ประเทศ').selectOption('TH');
   await expect(page.getByTestId('explore-station')).toHaveCount(3);
   await expect(page.getByRole('heading', { name: 'สถานีบนแผนที่ 3 สถานี' })).toBeVisible();
+  // Stations without coordinates are still listed and playable, with no dot on the map.
+  await expect(page.getByRole('heading', { name: 'สถานีที่ไม่มีตำแหน่งบนแผนที่ 1 สถานี' })).toBeVisible();
+  await expect(page.getByTestId('explore-unmapped')).toContainText('Hat Yai Online');
   // Names are text, never markup.
   await expect(page.getByTestId('explore-station').first()).toContainText('Bangkok <b>FM</b>');
   await expect(page.getByTestId('world-map').locator('.leaflet-interactive')).toHaveCount(3);

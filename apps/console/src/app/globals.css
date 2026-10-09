@@ -143,3 +143,4 @@ a.btn { display: inline-block; text-decoration: none; }
 .explore-overlay { position: absolute; inset: auto 0 12px 0; text-align: center; color: #e2e8f0; pointer-events: none; }
 .explore-pick { position: static; }
 .explore-canvas.leaflet-container { background: #0b2540; }
+.explore-sub { font-size: 14px; margin: 18px 0 6px; color: var(--muted); }
