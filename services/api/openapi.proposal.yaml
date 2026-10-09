@@ -746,7 +746,7 @@ paths:
   /v1/directory/radio/map:
     get:
       summary: Community stations for the web map, many at once (no sign-in)
-      description: 'One answer for the explorer map instead of many search pages. With country: every station Radio Browser has in that country (up to 5000, most listened first), geo on those with coordinates. Without: the world''s 500 most listened stations with coordinates, plus every station with coordinates in Thailand, Japan, South Korea (up to 5000 each), the United States (up to 3000) and each European country (up to 1000 each), decided by Tar 2026-10-09. Same stream rules and blocks as the search. Lists are kept an hour and refreshed behind the answer, served up to a day old while Radio Browser is down. Same rate limit as the search (one request).'
+      description: 'One answer for the explorer map instead of many search pages. With country: every station Radio Browser has in that country (up to 5000, most listened first), geo on those with coordinates. Without: the world''s 500 most listened stations with coordinates, plus every station with coordinates in Thailand, Japan, South Korea (up to 5000 each), the United States (up to 3000) and each European country (up to 1000 each), and the 20 most listened with coordinates of every other country, decided by Tar 2026-10-09. Same stream rules and blocks as the search. Lists are kept an hour and refreshed behind the answer, served up to a day old while Radio Browser is down. Same rate limit as the search (one request).'
       security: []
       parameters:
         - { name: country, in: query, schema: { type: string, pattern: '^[A-Za-z]{2}$' }, description: ISO 3166 alpha-2, any case; absent for the world map }

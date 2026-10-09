@@ -292,8 +292,18 @@ describe('community radio directory (Radio Browser)', () => {
     expect(res.body.stations[1].geo).toEqual({ lat: 13.75, lon: 100.5 });
   });
 
-  it('serves the world map without one country that failed, and asks again soon', async () => {
-    reply = { status: 200, body: (u: URL) => (u.searchParams.get('countrycode') === 'FR' ? 'oops' : u.searchParams.get('countrycode') ? [] : [rb(3100, { geo_lat: 1, geo_long: 1 })]) };
+  it('adds the top 20 of every other country, and serves the world map without one country that failed', async () => {
+    reply = {
+      status: 200,
+      body: (u: URL) => {
+        if (u.pathname === '/json/countries') return [{ iso_3166_1: 'VN', stationcount: 40 }, { iso_3166_1: 'TH', stationcount: 300 }];
+        const cc = u.searchParams.get('countrycode');
+        if (cc === 'FR') return 'oops';
+        if (cc === 'VN') return [rb(3101, { countrycode: 'VN', geo_lat: 21, geo_long: 105.8 })];
+        return cc ? [] : [rb(3100, { geo_lat: 1, geo_long: 1 })];
+      },
+    };
+    calls.length = 0;
     // A fresh service: the earlier test's world list is cached.
     const fresh = await createTestApp(db.url, id.keyResolver, { config: { radioDirectory: { baseUrl: BASE } }, directoryFetch: async (url) => {
       calls.push({ url, ua: '' });
@@ -302,7 +312,11 @@ describe('community radio directory (Radio Browser)', () => {
     } });
     try {
       const res = await request(fresh.app.getHttpServer()).get('/v1/directory/radio/map').expect(200);
-      expect(res.body).toMatchObject({ truncated: true, stations: [{ id: uuid(3100) }] });
+      expect(res.body).toMatchObject({ truncated: true, stations: [{ id: uuid(3100) }, { id: uuid(3101) }] });
+      const asked = calls.map((c) => new URL(c.url).searchParams);
+      expect(asked.find((p) => p.get('countrycode') === 'VN')!.get('limit')).toBe('20');
+      // Thailand is in full already, so it is not asked a second time for a top 20.
+      expect(asked.filter((p) => p.get('countrycode') === 'TH')).toHaveLength(1);
     } finally {
       await fresh.close();
     }

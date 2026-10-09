@@ -76,6 +76,8 @@ const WORLD_TOP = 500;
 const WORLD_CAP: Record<string, number> = { US: 3000 };
 const WORLD_CAP_FEATURED = COUNTRY_MAX;
 const WORLD_CAP_EUROPE = 1000;
+/** Every other country on the world map: its own most listened stations with coordinates (Tar 2026-10-09: top 10-20). */
+const WORLD_CAP_OTHER = 20;
 /** Whole lists are refreshed behind the answer once an hour, and served up to a day old while Radio Browser is down. */
 const BULK_TTL_MS = 60 * 60_000;
 const BULK_STALE_MS = 24 * 60 * 60_000;
@@ -295,8 +297,8 @@ export class DirectoryService {
 
   /**
    * Stations for the web map, blocked ones left out. With a country: every station Radio Browser has there (up to
-   * COUNTRY_MAX), `geo` on those with coordinates. Without: the world's most popular stations with coordinates plus
-   * every one in the featured regions (FEATURED_COUNTRIES, EUROPE). One request here stands for many upstream pages,
+   * COUNTRY_MAX), `geo` on those with coordinates. Without: the world's most popular stations with coordinates, every
+   * one in the featured regions (FEATURED_COUNTRIES, EUROPE), and each other country's 20 most listened. One request here stands for many upstream pages,
    * so the console's single address is not rate limited page by page.
    */
   async map(country: string | null): Promise<{ stations: DirectoryStation[]; truncated: boolean; attribution: string }> {
@@ -328,10 +330,14 @@ export class DirectoryService {
 
   /** The world map list: most popular worldwide first, then each featured country, a few countries at a time. */
   private async world(baseUrl: string): Promise<BulkList> {
+    const featured = new Set([...FEATURED_COUNTRIES, ...EUROPE]);
+    // Which other countries have stations at all; without that list the map still has the featured regions.
+    const others = (await this.countries().catch(() => ({ countries: [] as { country: string }[] }))).countries.map((c) => c.country).filter((c) => !featured.has(c));
     const parts: { params: Record<string, string>; max: number }[] = [
       { params: { has_geo_info: 'true' }, max: WORLD_TOP },
       ...FEATURED_COUNTRIES.map((c) => ({ params: { countrycode: c, has_geo_info: 'true' }, max: WORLD_CAP[c] ?? WORLD_CAP_FEATURED })),
       ...EUROPE.map((c) => ({ params: { countrycode: c, has_geo_info: 'true' }, max: WORLD_CAP[c] ?? WORLD_CAP_EUROPE })),
+      ...others.map((c) => ({ params: { countrycode: c, has_geo_info: 'true' }, max: WORLD_CAP_OTHER })),
     ];
     const got: (BulkList | null)[] = new Array(parts.length).fill(null);
     let next = 0;
