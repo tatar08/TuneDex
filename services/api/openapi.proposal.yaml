@@ -2142,16 +2142,21 @@ components:
               httpStatus: { type: [integer, 'null'] }
               latencyMs: { type: [integer, 'null'] }
               consecutiveFailures: { type: integer, minimum: 0, maximum: 3 }
+        failingVariants:
+          type: array
+          items: { type: integer, minimum: 1, maximum: 3 }
+          description: Present only when the latest check of a published variant failed in some region (1-based, as in history). Variants never change state.
     AdminProbeReason:
       type: string
       enum: [ok, invalid_url, dns_failed, blocked_address, timeout, connect_failed, http_status, too_many_redirects, not_audio]
     AdminStationCheck:
       type: object
-      required: [region, checkedAt, target, ok, reason, httpStatus, latencyMs]
+      required: [region, checkedAt, target, variant, ok, reason, httpStatus, latencyMs]
       properties:
         region: { type: string }
         checkedAt: { type: string, format: date-time }
         target: { type: string, enum: [published, draft] }
+        variant: { type: integer, minimum: 0, maximum: 3, description: '0 = the main stream; n = variants[n-1] of the published snapshot' }
         ok: { type: boolean }
         reason: { $ref: '#/components/schemas/AdminProbeReason' }
         httpStatus: { type: [integer, 'null'] }

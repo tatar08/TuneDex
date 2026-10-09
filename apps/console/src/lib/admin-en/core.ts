@@ -89,6 +89,8 @@ export const EN_CORE: Record<string, string> = {
   'รูปแบบเสียง': 'Audio format',
   'บิตเรต (kbps)': 'Bitrate (kbps)',
   'ลิงก์สำรองบิตเรตอื่น': 'Other bitrates',
+  'ลิงก์บิตเรตอื่นที่ {0} เล่นไม่ได้ในการตรวจล่าสุด แอปจะกลับไปใช้ลิงก์หลัก ให้แก้หรือลบลิงก์นี้แล้วเผยแพร่ใหม่': 'Other-bitrate link {0} failed its latest check. The app falls back to the main link; fix or remove it and publish again.',
+  ' · ลิงก์บิตเรตอื่นที่ {0}': ' · other bitrate {0}',
   'หนึ่งบรรทัดต่อหนึ่งลิงก์: ลิงก์ รูปแบบ บิตเรต เช่น https://stream.example.com/low.aac aac 48 แอปใช้เมื่อผู้ใช้เปิดประหยัดข้อมูล': 'One per line: link, format, bitrate, e.g. https://stream.example.com/low.aac aac 48. The app uses them when the listener turns on data saver.',
   'ไม่เกิน 3 ลิงก์': 'At most 3 links',
   'รูปแบบไม่ถูกต้อง': 'Not in the expected form',

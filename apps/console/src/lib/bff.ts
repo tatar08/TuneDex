@@ -226,12 +226,16 @@ export interface RegionHealth {
 export interface StationHealth {
   state: HealthState;
   regions: RegionHealth[];
+  /** 1-based published variants whose latest check failed; they never change `state`. */
+  failingVariants?: number[];
 }
 
 export interface HealthCheck {
   region: string;
   checkedAt: string;
   target: 'published' | 'draft';
+  /** 0 for the main stream, n for variants[n - 1]; absent from older API builds. */
+  variant?: number;
   ok: boolean;
   reason: string;
   httpStatus: number | null;

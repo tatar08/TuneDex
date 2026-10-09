@@ -40,12 +40,16 @@ export interface RegionHealth {
 export interface StationHealth {
   state: HealthState;
   regions: RegionHealth[];
+  /** Published variants (1-based, as in history) whose latest check in any region failed. */
+  failingVariants?: number[];
 }
 
 export interface HealthCheck {
   region: string;
   checkedAt: string;
   target: 'published' | 'draft';
+  /** 0 for the main stream, n for the published snapshot's variants[n - 1]. */
+  variant: number;
   ok: boolean;
   reason: string;
   httpStatus: number | null;
@@ -138,17 +142,22 @@ export class StationHealthService implements OnApplicationBootstrap, OnApplicati
       const [{ locked }] = (await client.query<{ locked: boolean }>('SELECT pg_try_advisory_lock($1) AS locked', [LOCK_KEY])).rows;
       if (!locked) return 0;
       try {
-        const stations = await this.db.query<{ id: string; url: string }>(
-          `SELECT id, published->>'streamUrl' AS url FROM radio_stations
+        const stations = await this.db.query<{ id: string; url: string; variants: { streamUrl: string }[] | null }>(
+          `SELECT id, published->>'streamUrl' AS url, published->'variants' AS variants FROM radio_stations
             WHERE published IS NOT NULL AND disabled_at IS NULL
               AND (rights_expires_at IS NULL OR rights_expires_at > now())
             ORDER BY id`,
         );
+        // Each endpoint is one job: the main stream, then any variants the publisher also serves.
+        const jobs = stations.flatMap((s) => [
+          { id: s.id, url: s.url, variant: 0 },
+          ...(Array.isArray(s.variants) ? s.variants : []).slice(0, 3).map((v, i) => ({ id: s.id, url: v.streamUrl, variant: i + 1 })),
+        ]);
         let next = 0;
         const worker = async () => {
-          while (!this.stopped && next < stations.length) {
-            const s = stations[next++];
-            await this.record(s.id, 'published', await probeStream(s.url, this.probe));
+          while (!this.stopped && next < jobs.length) {
+            const j = jobs[next++];
+            await this.record(j.id, 'published', await probeStream(j.url, this.probe), undefined, j.variant);
           }
         };
         await Promise.all(Array.from({ length: CONCURRENCY }, worker));
@@ -166,11 +175,11 @@ export class StationHealthService implements OnApplicationBootstrap, OnApplicati
     }
   }
 
-  private async record(stationId: string, target: 'published' | 'draft', r: ProbeResult, query: Database['query'] = this.db.query.bind(this.db)) {
+  private async record(stationId: string, target: 'published' | 'draft', r: ProbeResult, query: Database['query'] = this.db.query.bind(this.db), variant = 0) {
     await query(
-      `INSERT INTO station_health (station_id, check_region, status, reason, http_status, latency_ms, content_type, target)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [stationId, this.config.stationCheck.region, r.ok ? 'ok' : 'fail', r.reason, r.httpStatus, r.latencyMs, r.contentType, target],
+      `INSERT INTO station_health (station_id, check_region, status, reason, http_status, latency_ms, content_type, target, variant)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [stationId, this.config.stationCheck.region, r.ok ? 'ok' : 'fail', r.reason, r.httpStatus, r.latencyMs, r.contentType, target, variant],
     );
   }
 
@@ -268,6 +277,7 @@ export class StationHealthService implements OnApplicationBootstrap, OnApplicati
       region: this.config.stationCheck.region,
       checkedAt: new Date().toISOString(),
       target,
+      variant: 0,
       ok: result.ok,
       reason: result.reason,
       httpStatus: result.httpStatus,
@@ -283,7 +293,7 @@ export class StationHealthService implements OnApplicationBootstrap, OnApplicati
       `SELECT station_id, check_region, checked_at, status, reason, http_status, latency_ms FROM (
          SELECT h.*, row_number() OVER (PARTITION BY h.station_id, h.check_region ORDER BY h.checked_at DESC, h.id DESC) AS rn
            FROM station_health h JOIN radio_stations s ON s.id = h.station_id
-          WHERE h.station_id = ANY($1::uuid[]) AND h.target = 'published'
+          WHERE h.station_id = ANY($1::uuid[]) AND h.target = 'published' AND h.variant = 0
             AND s.published_at IS NOT NULL AND h.checked_at >= s.published_at
        ) t WHERE rn <= $2 ORDER BY station_id, check_region, checked_at DESC, id DESC`,
       [ids, SUSPECT_AFTER],
@@ -312,6 +322,20 @@ export class StationHealthService implements OnApplicationBootstrap, OnApplicati
       const state = regions.reduce<HealthState>((worst, r) => (RANK[r.state] > RANK[worst] ? r.state : worst), 'unknown');
       out.set(stationId, { state, regions });
     }
+    // Variants never change the station's state; the latest failing ones are listed so staff can fix or remove them.
+    const latest = await this.db.query<{ station_id: string; variant: number; status: 'ok' | 'fail' }>(
+      `SELECT DISTINCT ON (h.station_id, h.variant, h.check_region) h.station_id, h.variant, h.status
+         FROM station_health h JOIN radio_stations s ON s.id = h.station_id
+        WHERE h.station_id = ANY($1::uuid[]) AND h.target = 'published' AND h.variant > 0
+          AND s.published_at IS NOT NULL AND h.checked_at >= s.published_at
+        ORDER BY h.station_id, h.variant, h.check_region, h.checked_at DESC, h.id DESC`,
+      [ids],
+    );
+    for (const r of latest.filter((x) => x.status === 'fail')) {
+      const h = out.get(r.station_id) ?? { ...UNKNOWN, regions: [] };
+      const failing = new Set([...(h.failingVariants ?? []), Number(r.variant)]);
+      out.set(r.station_id, { ...h, failingVariants: [...failing].sort((a, b) => a - b) });
+    }
     return out;
   }
 
@@ -321,8 +345,8 @@ export class StationHealthService implements OnApplicationBootstrap, OnApplicati
 
   async history(id: string): Promise<HealthCheck[]> {
     if (!(await this.db.query('SELECT 1 FROM radio_stations WHERE id = $1', [id])).length) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
-    const rows = await this.db.query<RecentRow & { target: 'published' | 'draft' }>(
-      `SELECT check_region, checked_at, status, reason, http_status, latency_ms, target
+    const rows = await this.db.query<RecentRow & { target: 'published' | 'draft'; variant: number }>(
+      `SELECT check_region, checked_at, status, reason, http_status, latency_ms, target, variant
          FROM station_health WHERE station_id = $1 ORDER BY checked_at DESC, id DESC LIMIT $2`,
       [id, HISTORY],
     );
@@ -330,6 +354,7 @@ export class StationHealthService implements OnApplicationBootstrap, OnApplicati
       region: r.check_region,
       checkedAt: r.checked_at.toISOString(),
       target: r.target,
+      variant: Number(r.variant),
       ok: r.status === 'ok',
       reason: r.reason,
       httpStatus: r.http_status,
