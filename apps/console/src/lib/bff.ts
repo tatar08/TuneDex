@@ -143,6 +143,14 @@ export interface StationDraft {
   streamUrl: string;
   codec: 'mp3' | 'aac' | 'hls';
   bitrateKbps: number | null;
+  /** Other endpoints the station serves, such as a lower bitrate; absent on snapshots saved before variants existed. */
+  variants?: StreamVariant[];
+}
+
+export interface StreamVariant {
+  streamUrl: string;
+  codec: 'mp3' | 'aac' | 'hls';
+  bitrateKbps: number;
 }
 
 export type RightsState = 'current' | 'missing' | 'territory' | 'not_yet_valid' | 'expired';

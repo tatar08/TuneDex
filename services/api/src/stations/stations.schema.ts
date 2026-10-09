@@ -10,6 +10,18 @@ import { ApiError } from '../common/api-error';
  */
 export const CODECS = ['mp3', 'aac', 'hls'] as const;
 
+/**
+ * Another endpoint for the same station, such as a lower bitrate the publisher also serves (Doc 18: data saver picks a
+ * lower bitrate only when the station really offers one). The primary `streamUrl` stays the default.
+ */
+export interface StreamVariant {
+  streamUrl: string;
+  codec: (typeof CODECS)[number];
+  bitrateKbps: number;
+}
+
+export const MAX_VARIANTS = 3;
+
 export interface StationDraft {
   name: string;
   country: string;
@@ -18,10 +30,11 @@ export interface StationDraft {
   streamUrl: string;
   codec: (typeof CODECS)[number];
   bitrateKbps: number | null;
+  variants: StreamVariant[];
 }
 
 const REQUIRED: (keyof StationDraft)[] = ['name', 'country', 'language', 'streamUrl', 'codec'];
-const FIELDS: (keyof StationDraft)[] = [...REQUIRED, 'genres', 'bitrateKbps'];
+const FIELDS: (keyof StationDraft)[] = [...REQUIRED, 'genres', 'bitrateKbps', 'variants'];
 
 export const invalid = (field: string, reason: string) => new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', { field, reason });
 
@@ -44,24 +57,51 @@ export function text(field: string, v: unknown, max: number): string {
  * Stream endpoints must be plain public HTTPS URLs. The API only ever touches them through the
  * bounded health check in stream-probe.ts, which re-checks every resolved address and redirect.
  */
-export function parseStreamUrl(v: unknown): string {
-  if (typeof v !== 'string' || v.length > 2048) throw invalid('streamUrl', 'must_be_url');
+export function parseStreamUrl(v: unknown, field = 'streamUrl'): string {
+  if (typeof v !== 'string' || v.length > 2048) throw invalid(field, 'must_be_url');
   let url: URL;
   try {
     url = new URL(v);
   } catch {
-    throw invalid('streamUrl', 'must_be_url');
+    throw invalid(field, 'must_be_url');
   }
-  if (url.protocol !== 'https:') throw invalid('streamUrl', 'https_required');
-  if (url.username || url.password) throw invalid('streamUrl', 'credentials_not_allowed');
-  if (url.hash) throw invalid('streamUrl', 'fragment_not_allowed');
+  if (url.protocol !== 'https:') throw invalid(field, 'https_required');
+  if (url.username || url.password) throw invalid(field, 'credentials_not_allowed');
+  if (url.hash) throw invalid(field, 'fragment_not_allowed');
   const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  if (isIP(host)) throw invalid('streamUrl', 'ip_literal_not_allowed');
+  if (isIP(host)) throw invalid(field, 'ip_literal_not_allowed');
   if (!host.includes('.') || /(^|\.)(localhost|local|internal|localdomain|home\.arpa)$/.test(host)) {
-    throw invalid('streamUrl', 'private_host');
+    throw invalid(field, 'private_host');
   }
-  if (url.port && url.port !== '443') throw invalid('streamUrl', 'nonstandard_port');
+  if (url.port && url.port !== '443') throw invalid(field, 'nonstandard_port');
   return url.toString();
+}
+
+const parseCodec = (field: string, v: unknown) => {
+  if (typeof v !== 'string' || !(CODECS as readonly string[]).includes(v)) throw invalid(field, 'value_not_allowed');
+  return v as StreamVariant['codec'];
+};
+
+const parseBitrate = (field: string, v: unknown) => {
+  if (!Number.isInteger(v) || (v as number) < 8 || (v as number) > 512) throw invalid(field, 'out_of_range');
+  return v as number;
+};
+
+/** Up to MAX_VARIANTS alternates, each with a known bitrate so the app can pick a lower one; URLs are distinct. */
+function parseVariants(v: unknown): StreamVariant[] {
+  if (!Array.isArray(v) || v.length > MAX_VARIANTS) throw invalid('variants', `max_${MAX_VARIANTS}`);
+  const seen = new Set<string>();
+  return v.map((item, i) => {
+    const at = `variants[${i}]`;
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) throw invalid(at, 'must_be_object');
+    const o = item as Record<string, unknown>;
+    for (const key of Object.keys(o)) if (!['streamUrl', 'codec', 'bitrateKbps'].includes(key)) throw invalid(`${at}.${key}`, 'unknown_field');
+    for (const key of ['streamUrl', 'codec', 'bitrateKbps']) if (!(key in o)) throw invalid(`${at}.${key}`, 'required');
+    const streamUrl = parseStreamUrl(o.streamUrl, `${at}.streamUrl`);
+    if (seen.has(streamUrl)) throw invalid(`${at}.streamUrl`, 'duplicate');
+    seen.add(streamUrl);
+    return { streamUrl, codec: parseCodec(`${at}.codec`, o.codec), bitrateKbps: parseBitrate(`${at}.bitrateKbps`, o.bitrateKbps) };
+  });
 }
 
 function parseField(field: keyof StationDraft, v: unknown): unknown {
@@ -81,12 +121,11 @@ function parseField(field: keyof StationDraft, v: unknown): unknown {
     case 'streamUrl':
       return parseStreamUrl(v);
     case 'codec':
-      if (typeof v !== 'string' || !(CODECS as readonly string[]).includes(v)) throw invalid(field, 'value_not_allowed');
-      return v;
+      return parseCodec(field, v);
     case 'bitrateKbps':
-      if (v === null) return null;
-      if (!Number.isInteger(v) || (v as number) < 8 || (v as number) > 512) throw invalid(field, 'out_of_range');
-      return v;
+      return v === null ? null : parseBitrate(field, v);
+    case 'variants':
+      return parseVariants(v);
   }
 }
 
@@ -102,8 +141,9 @@ function asObject(body: unknown): Record<string, unknown> {
 export function parseNewStation(body: unknown): StationDraft {
   const b = asObject(body);
   for (const f of REQUIRED) if (!(f in b)) throw invalid(f, 'required');
-  const out: Record<string, unknown> = { genres: [], bitrateKbps: null };
+  const out: Record<string, unknown> = { genres: [], bitrateKbps: null, variants: [] };
   for (const [k, v] of Object.entries(b)) out[k] = parseField(k as keyof StationDraft, v);
+  if ((out.variants as StreamVariant[]).some((x) => x.streamUrl === out.streamUrl)) throw invalid('variants', 'duplicates_stream_url');
   return out as unknown as StationDraft;
 }
 

@@ -21,6 +21,7 @@ const EMPTY: Form = {
   streamUrl: 'https://',
   codec: 'mp3',
   bitrateKbps: '',
+  variants: '',
 };
 
 const toForm = (d: StationDraft): Form => ({
@@ -31,7 +32,20 @@ const toForm = (d: StationDraft): Form => ({
   streamUrl: d.streamUrl,
   codec: d.codec,
   bitrateKbps: d.bitrateKbps === null ? '' : String(d.bitrateKbps),
+  variants: (d.variants ?? []).map((v) => `${v.streamUrl} ${v.codec} ${v.bitrateKbps}`).join('\n'),
 });
+
+/** One variant per line, "link format kbps"; anything malformed goes to the API as is so its error names the line. */
+function toVariants(text: string): NonNullable<StationDraft['variants']> {
+  return text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const [streamUrl, codec, kbps] = l.split(/\s+/);
+      return { streamUrl, codec, bitrateKbps: kbps !== undefined && /^\d+$/.test(kbps) ? Number(kbps) : kbps } as unknown as NonNullable<StationDraft['variants']>[number];
+    });
+}
 
 /** Turns form strings into the API's types; empty optional fields become null. */
 function toDraft(f: Form): StationDraft {
@@ -44,10 +58,18 @@ function toDraft(f: Form): StationDraft {
     streamUrl: f.streamUrl.trim(),
     codec: f.codec as StationDraft['codec'],
     bitrateKbps: n === '' ? null : /^\d+$/.test(n) ? Number(n) : (n as unknown as number),
+    variants: toVariants(f.variants),
   };
 }
 
-const display = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : Array.isArray(v) ? v.join(', ') : String(v));
+const display = (v: unknown) =>
+  v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0)
+    ? '—'
+    : Array.isArray(v)
+      ? v.map((x) => (typeof x === 'object' && x ? `${x.streamUrl} ${x.codec} ${x.bitrateKbps}` : String(x))).join(', ')
+      : String(v);
+/** Snapshots saved before variants existed have none. */
+const valueOf = (d: StationDraft, k: keyof StationDraft) => (k === 'variants' ? (d.variants ?? []) : d[k]);
 
 type Problem = { kind: 'field'; field: string; reason: string } | { kind: 'conflict'; revision: number } | { kind: 'message'; text: string } | { kind: 'mfa' };
 
@@ -77,7 +99,7 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
   const saved = station ? toForm(station.draft) : EMPTY;
   const changed = FIELDS.filter((k) => form[k] !== saved[k]);
   const dirty = changed.length > 0;
-  const set = (k: keyof StationDraft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const set = (k: keyof StationDraft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   async function call(url: string, method: string, body: unknown, ifMatch?: number): Promise<{ res: Response; body: Record<string, any> } | null> {
     setBusy(true);
@@ -170,7 +192,7 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
   }
 
   const fieldError = (k: string) =>
-    problem?.kind === 'field' && problem.field === k ? (REASON_LABELS[problem.reason] ? t(REASON_LABELS[problem.reason]) : problem.reason) : null;
+    problem?.kind === 'field' && (problem.field === k || problem.field.startsWith(`${k}[`)) ? (REASON_LABELS[problem.reason] ? t(REASON_LABELS[problem.reason]) : problem.reason) : null;
   const input = (k: keyof StationDraft, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => {
     const err = fieldError(k);
     return (
@@ -183,7 +205,7 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
   };
 
   const diff = station?.published
-    ? FIELDS.filter((k) => JSON.stringify(station.published![k]) !== JSON.stringify(station.draft[k]))
+    ? FIELDS.filter((k) => JSON.stringify(valueOf(station.published!, k)) !== JSON.stringify(valueOf(station.draft, k)))
     : [];
   const blockers = station ? station.publishBlockers.filter((b) => b !== 'admin_role_required' || !isAdmin) : [];
 
@@ -248,6 +270,20 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
             </label>
             {input('bitrateKbps', { inputMode: 'numeric' })}
           </div>
+          <label className={`fld${fieldError('variants') ? ' bad' : ''}`}>
+            <span>{t(FIELD_LABELS.variants)}</span>
+            <textarea
+              value={form.variants}
+              onChange={set('variants')}
+              disabled={!canEdit}
+              rows={3}
+              spellCheck={false}
+              placeholder="https://stream.example.com/low.aac aac 48"
+              aria-invalid={!!fieldError('variants')}
+              aria-describedby={fieldError('variants') ? 'err-variants' : 'hint-variants'}
+            />
+            {fieldError('variants') ? <em id="err-variants">{fieldError('variants')}</em> : <small id="hint-variants" className="dim">{t('หนึ่งบรรทัดต่อหนึ่งลิงก์: ลิงก์ รูปแบบ บิตเรต เช่น https://stream.example.com/low.aac aac 48 แอปใช้เมื่อผู้ใช้เปิดประหยัดข้อมูล')}</small>}
+          </label>
           {!station && <p className="dim">{t('สร้างร่างก่อน แล้วเพิ่มหลักฐานสิทธิ์ในหน้าสถานี')}</p>}
           {canEdit && (
             <div className="ed-actions">
@@ -271,7 +307,7 @@ export function StationEditor({ station: initial, history = [] }: { station?: Ad
                     <div key={k}>
                       <dt>{t(FIELD_LABELS[k])}</dt>
                       <dd>
-                        <del>{display(station.published![k])}</del> <ins>{display(station.draft[k])}</ins>
+                        <del>{display(valueOf(station.published!, k))}</del> <ins>{display(valueOf(station.draft, k))}</ins>
                       </dd>
                     </div>
                   ))}

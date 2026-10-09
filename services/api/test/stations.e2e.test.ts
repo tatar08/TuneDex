@@ -141,7 +141,23 @@ describe('station catalog', () => {
         streamUrl: 'https://stream.example.com/jazz.mp3',
         codec: 'mp3',
         bitrateKbps: 128,
+        variants: [],
       });
+    });
+
+    it('serves the lower-bitrate variants a station offers only once they are published (Doc 18 data saver)', async () => {
+      const sid = (await create('editor', { ...station, name: 'Variant FM' })).body.id;
+      const low = { streamUrl: 'https://stream.example.com/jazz-48.aac', codec: 'aac', bitrateKbps: 48 };
+      await patch('editor', sid, 1, { variants: [low] }).expect(200);
+      expect((await catalog()).body.stations.some((s: { id: string }) => s.id === sid)).toBe(false);
+      await publish('admin', sid, 2).expect(200);
+      const pub = () => catalog().then((r) => r.body.stations.find((s: { id: string }) => s.id === sid));
+      expect((await pub()).variants).toEqual([low]);
+      // A patch replaces the whole list, and [] removes every variant.
+      await patch('editor', sid, 2, { variants: [] }).expect(200);
+      expect((await pub()).variants).toEqual([low]);
+      await publish('admin', sid, 3).expect(200);
+      expect((await pub()).variants).toEqual([]);
     });
 
     it('never lets someone publish a change they made themselves', async () => {
@@ -484,6 +500,19 @@ describe('station catalog', () => {
       ['genres', { genres: ['a b'] }, 'genres', 'slug'],
       ['bitrate', { bitrateKbps: 1000 }, 'bitrateKbps', 'out_of_range'],
       ['unknown field', { createdBy: 'someone' }, 'createdBy', 'unknown_field'],
+      ['too many variants', { variants: [1, 2, 3, 4].map((n) => ({ streamUrl: `https://s.example.com/${n}.mp3`, codec: 'mp3', bitrateKbps: 64 })) }, 'variants', 'max_3'],
+      ['http variant', { variants: [{ streamUrl: 'http://s.example.com/a.mp3', codec: 'mp3', bitrateKbps: 64 }] }, 'variants[0].streamUrl', 'https_required'],
+      ['variant without bitrate', { variants: [{ streamUrl: 'https://s.example.com/a.mp3', codec: 'mp3' }] }, 'variants[0].bitrateKbps', 'required'],
+      ['variant null bitrate', { variants: [{ streamUrl: 'https://s.example.com/a.mp3', codec: 'mp3', bitrateKbps: null }] }, 'variants[0].bitrateKbps', 'out_of_range'],
+      ['variant extra field', { variants: [{ streamUrl: 'https://s.example.com/a.mp3', codec: 'mp3', bitrateKbps: 64, headers: {} }] }, 'variants[0].headers', 'unknown_field'],
+      ['variant codec', { variants: [{ streamUrl: 'https://s.example.com/a.mp3', codec: 'flac', bitrateKbps: 64 }] }, 'variants[0].codec', 'value_not_allowed'],
+      [
+        'duplicate variants',
+        { variants: [0, 1].map(() => ({ streamUrl: 'https://s.example.com/a.mp3', codec: 'mp3', bitrateKbps: 64 })) },
+        'variants[1].streamUrl',
+        'duplicate',
+      ],
+      ['variant equal to the stream', { variants: [{ streamUrl: 'https://stream.example.com/jazz.mp3', codec: 'mp3', bitrateKbps: 64 }] }, 'variants', 'duplicates_stream_url'],
     ])('rejects %s', async (_label, override, field, reason) => {
       const res = await create('editor', { ...station, ...override });
       expect(res.status).toBe(400);
