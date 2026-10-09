@@ -112,6 +112,20 @@ describe('community radio directory (Radio Browser)', () => {
     expect(calls[0].ua).toBe('TuneDeck-API/test');
   });
 
+  it('returns coordinates only for hasGeo=true, dropping stations without usable ones', async () => {
+    calls.length = 0;
+    reply = { status: 200, body: [rb(31, { geo_lat: 13.756331, geo_long: 100.501762 }), rb(32, { geo_lat: 0, geo_long: 0 }), rb(33, { geo_lat: 95, geo_long: 10 }), rb(34)] };
+    const res = await http().get('/v1/directory/radio?hasGeo=true&country=TH').expect(200);
+    expect(res.body.stations).toHaveLength(1);
+    expect(res.body.stations[0]).toMatchObject({ id: uuid(31), geo: { lat: 13.76, lon: 100.5 } });
+    expect(new URL(calls[0].url).searchParams.get('has_geo_info')).toBe('true');
+    // Without it the shape the apps already parse is unchanged.
+    reply = { status: 200, body: [rb(35, { geo_lat: 13.7, geo_long: 100.5 })] };
+    const plain = await http().get('/v1/directory/radio?country=TH&tag=geo-off').expect(200);
+    expect(plain.body.stations[0].geo).toBeUndefined();
+    await http().get('/v1/directory/radio?hasGeo=yes').expect(400);
+  });
+
   it('drops streams the players cannot use or that break our stream rules', () => {
     expect(toDirectoryStation(rb(1, { url_resolved: 'http://stream.example.com/a.mp3' }))).toBeNull();
     expect(toDirectoryStation(rb(1, { url_resolved: 'https://10.1.2.3/a.mp3' }))).toBeNull();

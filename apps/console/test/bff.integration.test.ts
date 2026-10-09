@@ -841,3 +841,50 @@ describe('account export and deletion', () => {
     expect((await bff.deletionStatus(new Request(`${BASE}/bff/account-deletions/x`), 'x')).status).toBe(404);
   });
 });
+
+describe('world map stations', () => {
+  it('pages the community directory with hasGeo, shares one cached answer and needs a session', async () => {
+    const asked: string[] = [];
+    const station = (n: number, geo: boolean) => ({
+      id: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
+      name: `Map ${n}`,
+      country: 'TH',
+      language: 'thai',
+      genres: ['jazz'],
+      codec: 'mp3',
+      bitrateKbps: 128,
+      streamUrl: `https://s${n}.example.test/live.mp3`,
+      logoUrl: null,
+      homepageUrl: null,
+      ...(geo ? { geo: { lat: 13.75, lon: 100.5 } } : {}),
+    });
+    const mapped = createBff({
+      config: config(),
+      oidc: new OidcClient(config()),
+      store: new MemorySessionStore(12 * 3600_000, 7 * 24 * 3600_000, () => clock),
+      logWriter: () => undefined,
+      fetchImpl: async (input, init) => {
+        const url = new URL(String(input));
+        if (url.pathname !== '/v1/directory/radio') return fetch(input, init);
+        asked.push(url.search);
+        const offset = Number(url.searchParams.get('offset'));
+        const body = offset === 0 ? { stations: [station(1, true), station(2, false)], nextOffset: 50 } : { stations: [station(3, true)], nextOffset: null };
+        return new Response(JSON.stringify({ ...body, attribution: 'Radio Browser' }), { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+    });
+    const req = (q: string, cookie?: string) => new Request(`${BASE}/bff/directory/map${q}`, { headers: cookie ? { cookie } : {} });
+    expect((await mapped.getMapStations(req(''))).status).toBe(401);
+    const cookie = await signIn('map-user', mapped);
+    const res = await mapped.getMapStations(req('?country=th', cookie));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { stations: { name: string; lat: number; lon: number }[] };
+    expect(body.stations.map((s) => [s.name, s.lat, s.lon])).toEqual([
+      ['Map 1', 13.75, 100.5],
+      ['Map 3', 13.75, 100.5],
+    ]);
+    expect(asked).toEqual(['?hasGeo=true&limit=50&offset=0&country=TH', '?hasGeo=true&limit=50&offset=50&country=TH']);
+    expect((await mapped.getMapStations(req('?country=TH', cookie))).status).toBe(200);
+    expect(asked).toHaveLength(2);
+    expect((await mapped.getMapStations(req('?country=Thailand', cookie))).status).toBe(400);
+  });
+});

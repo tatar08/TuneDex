@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { Lang, strings } from '@/lib/i18n';
-import { httpsUrl, isHlsPlaylist, looksHls, MAX_CHANNELS, parseM3u, readChannels, WebChannel } from '@/lib/playlist';
+import { CHANNELS_KEY as KEY, httpsUrl, isHlsPlaylist, looksHls, MAX_CHANNELS, parseM3u, readChannels, WebChannel } from '@/lib/playlist';
 import type { NowPlaying } from './MediaPlayer';
 
-const KEY = 'tunedeck.web.channels';
 const MAX_BYTES = 5_000_000;
 
 /** The start of what the address serves when it looks like text, so an endless audio stream is never downloaded. */

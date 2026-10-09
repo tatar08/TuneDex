@@ -723,6 +723,7 @@ paths:
         - { name: tag, in: query, schema: { type: string, minLength: 1, maxLength: 30 }, description: 'Genre tag, e.g. jazz' }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 30 } }
         - { name: offset, in: query, schema: { type: integer, minimum: 0, maximum: 1000, default: 0 }, description: From nextOffset }
+        - { name: hasGeo, in: query, schema: { type: boolean, default: false }, description: 'Only stations Radio Browser has coordinates for, each with geo (for the web map). Without it, geo is never present.' }
       responses:
         '200':
           description: 'Stations (a page may hold fewer than limit after filtering; keep paging while nextOffset is set)'
@@ -736,7 +737,7 @@ paths:
                   stations: { type: array, maxItems: 50, items: { $ref: '#/components/schemas/DirectoryStation' } }
                   nextOffset: { type: integer, nullable: true }
                   attribution: { type: string, description: Show this wherever the results are shown }
-        '400': { description: 'VALIDATION_FAILED: details.field q, country, language, tag, limit or offset; unknown_field for any other parameter', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '400': { description: 'VALIDATION_FAILED: details.field q, country, language, tag, limit, offset or hasGeo; unknown_field for any other parameter', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429':
           description: API_RATE_LIMITED (60 a minute per client address), details.retryAfterSeconds
           headers: { Retry-After: { schema: { type: integer } } }
@@ -1960,6 +1961,14 @@ components:
         bitrateKbps: { type: integer, minimum: 1, maximum: 1000, nullable: true }
         logoUrl: { type: string, format: uri, nullable: true, description: 'https only; the station''s own logo, rights not checked by us' }
         homepageUrl: { type: string, format: uri, nullable: true }
+        geo:
+          type: object
+          additionalProperties: false
+          required: [lat, lon]
+          description: Only when the request had hasGeo=true; rounded to 0.01 degree
+          properties:
+            lat: { type: number, minimum: -90, maximum: 90 }
+            lon: { type: number, minimum: -180, maximum: 180 }
     DirectoryBlock:
       type: object
       additionalProperties: false

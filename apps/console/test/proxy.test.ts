@@ -28,3 +28,13 @@ describe('proxy media policy', () => {
     expect(other).not.toContain('https:');
   });
 });
+
+describe('proxy explore policy', () => {
+  it('adds OpenStreetMap tiles and https media on /app/explore only', () => {
+    const explore = proxy(new NextRequest('https://console.example.test/app/explore')).headers.get('content-security-policy')!;
+    expect(explore).toContain("img-src 'self' data: blob: https://tile.openstreetmap.org");
+    expect(explore).toContain("media-src 'self' https: blob:");
+    const radio = proxy(new NextRequest('https://console.example.test/app/radio')).headers.get('content-security-policy')!;
+    expect(radio).not.toContain('openstreetmap');
+  });
+});

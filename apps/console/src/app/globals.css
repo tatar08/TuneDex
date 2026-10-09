@@ -130,3 +130,15 @@ a.btn { display: inline-block; text-decoration: none; }
 .shell.auth > .btn { display: block; width: 100%; text-align: center; padding: 13px 22px; }
 /* On a phone the short sign-in card sits in the middle of the screen, not at the top */
 @media (max-width: 640px) { .shell.auth { margin-top: 0; padding-top: 24px; display: flex; flex-direction: column; justify-content: center; } .shell.auth .nav { margin-bottom: auto; } .shell.auth > :last-child { margin-bottom: auto; } }
+
+.shell.wide { max-width: 1100px; }
+.explore-tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 16px 0 10px; }
+.explore-tools select, .explore-search { padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: inherit; font: inherit; max-width: 100%; }
+.explore-search { width: 100%; margin: 6px 0 4px; }
+.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.segmented button { border: 0; background: var(--panel); color: inherit; font: inherit; padding: 8px 16px; cursor: pointer; }
+.segmented button.on { background: var(--fg); color: var(--panel); }
+.explore-stage { position: relative; border-radius: 22px; overflow: hidden; background: #0b1324; }
+.explore-canvas { height: min(62vh, 560px); min-height: 320px; width: 100%; }
+.explore-overlay { position: absolute; inset: auto 0 12px 0; text-align: center; color: #e2e8f0; pointer-events: none; }
+.explore-pick { position: static; }

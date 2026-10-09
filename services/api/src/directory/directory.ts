@@ -27,6 +27,8 @@ export interface DirectoryStation {
   bitrateKbps: number | null;
   logoUrl: string | null;
   homepageUrl: string | null;
+  /** Only in answers to hasGeo=true (the web map), so the apps' station shape stays as it was. */
+  geo?: { lat: number; lon: number };
 }
 
 export interface DirectoryQuery {
@@ -36,6 +38,8 @@ export interface DirectoryQuery {
   tag: string | null;
   limit: number;
   offset: number;
+  /** Only stations Radio Browser has coordinates for, each with its geo. */
+  hasGeo: boolean;
 }
 
 export interface DirectoryBlock {
@@ -70,9 +74,11 @@ function one(q: Record<string, unknown>, key: string): string | null {
   return v;
 }
 
-/** `q` (name), `country`, `language`, `tag`, `limit`, `offset`; anything else is 400. */
+/** `q` (name), `country`, `language`, `tag`, `limit`, `offset`, `hasGeo`; anything else is 400. */
 export function parseDirectoryQuery(q: Record<string, unknown>): DirectoryQuery {
-  for (const k of Object.keys(q)) if (!['q', 'country', 'language', 'tag', 'limit', 'offset'].includes(k)) throw invalid(k, 'unknown_field');
+  for (const k of Object.keys(q)) if (!['q', 'country', 'language', 'tag', 'limit', 'offset', 'hasGeo'].includes(k)) throw invalid(k, 'unknown_field');
+  const hasGeoRaw = one(q, 'hasGeo');
+  if (hasGeoRaw !== null && hasGeoRaw !== 'true' && hasGeoRaw !== 'false') throw invalid('hasGeo', 'must_be_boolean');
   const name = one(q, 'q')?.normalize('NFC').replace(UNSAFE, '').trim() ?? null;
   if (name !== null && (name.length === 0 || name.length > 80)) throw invalid('q', 'out_of_range', { max: 80 });
   const country = one(q, 'country');
@@ -87,7 +93,16 @@ export function parseDirectoryQuery(q: Record<string, unknown>): DirectoryQuery 
   const offsetRaw = one(q, 'offset');
   const offset = offsetRaw === null ? 0 : /^\d{1,4}$/.test(offsetRaw) ? Number(offsetRaw) : NaN;
   if (!(offset >= 0 && offset <= OFFSET_MAX)) throw invalid('offset', 'out_of_range', { max: OFFSET_MAX });
-  return { q: name, country: country?.toUpperCase() ?? null, language: language?.toLowerCase() ?? null, tag: tag?.toLowerCase() ?? null, limit, offset };
+  return { q: name, country: country?.toUpperCase() ?? null, language: language?.toLowerCase() ?? null, tag: tag?.toLowerCase() ?? null, limit, offset, hasGeo: hasGeoRaw === 'true' };
+}
+
+/** Radio Browser coordinates, rounded to about a kilometre; out-of-range or 0,0 (a common placeholder) is none. */
+export function geoOf(r: Record<string, unknown>): { lat: number; lon: number } | null {
+  const lat = r.geo_lat;
+  const lon = r.geo_long;
+  if (typeof lat !== 'number' || typeof lon !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180 || (lat === 0 && lon === 0)) return null;
+  return { lat: Math.round(lat * 100) / 100, lon: Math.round(lon * 100) / 100 };
 }
 
 function httpsUrl(v: unknown): string | null {
@@ -104,7 +119,7 @@ function httpsUrl(v: unknown): string | null {
  * Turns one Radio Browser record into a station the apps can play, or null. Only plain public HTTPS streams
  * (the same rules as our own catalog) in a codec the players support, with a name, get through.
  */
-export function toDirectoryStation(raw: unknown): DirectoryStation | null {
+export function toDirectoryStation(raw: unknown, withGeo = false): DirectoryStation | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const r = raw as Record<string, unknown>;
   const id = typeof r.stationuuid === 'string' ? r.stationuuid.toLowerCase() : '';
@@ -127,7 +142,10 @@ export function toDirectoryStation(raw: unknown): DirectoryStation | null {
       ? [...new Set(r.tags.split(',').map((t) => t.trim().toLowerCase()).filter((t) => /^[\p{L}\p{N}][\p{L}\p{N} &+-]{0,29}$/u.test(t)))].slice(0, 5)
       : [];
   const bitrate = typeof r.bitrate === 'number' && Number.isInteger(r.bitrate) && r.bitrate > 0 && r.bitrate <= 1000 ? r.bitrate : null;
-  return { id, name, country, language, genres, streamUrl, codec, bitrateKbps: bitrate, logoUrl: httpsUrl(r.favicon), homepageUrl: httpsUrl(r.homepage) };
+  const station: DirectoryStation = { id, name, country, language, genres, streamUrl, codec, bitrateKbps: bitrate, logoUrl: httpsUrl(r.favicon), homepageUrl: httpsUrl(r.homepage) };
+  if (!withGeo) return station;
+  const geo = geoOf(r);
+  return geo ? { ...station, geo } : null;
 }
 
 /** Lower case, without a trailing dot, so `radio.example.com.` cannot slip past a block on `example.com`. */
@@ -171,17 +189,18 @@ export class DirectoryService {
     if (q.country) params.set('countrycode', q.country);
     if (q.language) params.set('language', q.language);
     if (q.tag) params.set('tag', q.tag);
+    if (q.hasGeo) params.set('has_geo_info', 'true');
     const key = params.toString();
     const cached = this.cache.get(key);
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached;
     const running = this.inFlight.get(key);
     if (running) return running;
-    const call = this.fetchPage(baseUrl, key, q.limit, cached).finally(() => this.inFlight.delete(key));
+    const call = this.fetchPage(baseUrl, key, q.limit, cached, q.hasGeo).finally(() => this.inFlight.delete(key));
     this.inFlight.set(key, call);
     return call;
   }
 
-  private async fetchPage(baseUrl: string, key: string, limit: number, cached: { at: number; stations: DirectoryStation[]; full: boolean } | undefined): Promise<{ stations: DirectoryStation[]; full: boolean }> {
+  private async fetchPage(baseUrl: string, key: string, limit: number, cached: { at: number; stations: DirectoryStation[]; full: boolean } | undefined, withGeo: boolean): Promise<{ stations: DirectoryStation[]; full: boolean }> {
     try {
       const res = await this.http(`${baseUrl}/json/stations/search?${key}`, {
         headers: { accept: 'application/json', 'user-agent': `TuneDeck-API/${this.config.build}` },
@@ -193,7 +212,7 @@ export class DirectoryService {
       const raw: unknown = JSON.parse(body);
       if (!Array.isArray(raw)) throw new Error('not a list');
       const seen = new Set<string>();
-      const stations = raw.map(toDirectoryStation).filter((s): s is DirectoryStation => !!s && !seen.has(s.id) && !!seen.add(s.id));
+      const stations = raw.map((r) => toDirectoryStation(r, withGeo)).filter((s): s is DirectoryStation => !!s && !seen.has(s.id) && !!seen.add(s.id));
       const entry = { at: Date.now(), stations, full: raw.length >= limit };
       this.cache.delete(key);
       this.cache.set(key, entry);
