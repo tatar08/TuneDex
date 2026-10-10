@@ -283,6 +283,50 @@ test('editors block and unblock worldwide radio stations in every theme', async 
   await expect(ops.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์');
 });
 
+test('editors change our own logo on the settings page and go back to the built-in one', async ({ browser }) => {
+  const page = await signInAs(browser, 'e2e-dir-editor', '/admin/directory');
+  await page.getByRole('link', { name: 'ตั้งค่าระบบ' }).first().click();
+  await expect(page).toHaveURL(`${stack.base}/admin/settings`);
+  const logo = page.getByTestId('default-logo');
+  await expect(logo).toHaveAttribute('src', /^data:image\/svg\+xml/);
+  await expect(page.getByText('โลโก้ที่มากับระบบ', { exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'เปลี่ยนโลโก้' }).click();
+  const form = page.getByRole('form', { name: 'เปลี่ยนโลโก้' });
+  await expect(form.getByRole('button', { name: 'บันทึกโลโก้' })).toBeDisabled();
+  // Not a picture: refused in the browser, nothing sent.
+  await form.locator('input[type=file]').setInputFiles({ name: 'logo.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>') });
+  await expect(form.getByRole('alert')).toContainText('PNG, JPEG หรือ WebP');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  await form.locator('input[type=file]').setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: png });
+  await expect(form.getByRole('img', { name: 'ตัวอย่างโลโก้' })).toBeVisible();
+  await form.getByRole('button', { name: 'บันทึกโลโก้' }).click();
+  await expect(logo).toHaveAttribute('src', /^\/bff\/directory\/logos\/default\?v=[0-9a-f]{16}$/);
+  await expect(page.getByText('อัปโหลดโดย e2e-dir-editor')).toBeVisible();
+  // The uploaded picture really is served back to the page.
+  await expect.poll(() => logo.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(1);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/settings-minimal.png`, fullPage: true });
+
+  // Every theme draws the page.
+  for (const theme of ['control-room', 'broadcast-rack', 'daylight-bento', 'workbench']) {
+    await page.getByLabel('เลือกธีมหน้าทีมงาน').selectOption(theme);
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'โลโก้ของเรา' })).toBeVisible();
+    await expect(logo).toBeVisible();
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/settings-${theme}.png`, fullPage: true });
+  }
+
+  await page.getByRole('button', { name: 'เปลี่ยนโลโก้' }).click();
+  await page.getByRole('button', { name: 'กลับไปใช้โลโก้ที่มากับระบบ' }).click();
+  await expect(logo).toHaveAttribute('src', /^data:image\/svg\+xml/);
+
+  // Operators have no catalog role: no menu entry, and the page refuses.
+  const ops = await signInAs(browser, 'e2e-ops', '/admin/overview');
+  await expect(ops.getByRole('link', { name: 'ตั้งค่าระบบ' })).toHaveCount(0);
+  await ops.goto(`${stack.base}/admin/settings`);
+  await expect(ops.locator('.adm-alert')).toContainText('ไม่มีสิทธิ์');
+});
+
 test('auditors read who changed what; reading is recorded', async ({ browser }) => {
   const aud = await signInAs(browser, 'e2e-auditor', '/admin/audit');
   await aud.goto(`${stack.base}/admin`);

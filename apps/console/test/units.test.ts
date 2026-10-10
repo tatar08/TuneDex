@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { countByHealth, healthLine, logApiParams, logHref, logSearchFrom, rightsDaysLeft, rightsLine, rightsSoon, visibleInApps } from '@/lib/admin';
 import type { AdminStation } from '@/lib/bff';
 import { loadConfig } from '@/lib/config';
+import { BUILT_IN_LOGO, logoPath, nextLogo } from '@/lib/logo';
 import { openTransaction, safeReturnTo, sealTransaction } from '@/lib/cookies';
 import { createLogger, traceIdFrom } from '@/lib/log';
 import { MemorySessionStore } from '@/lib/session';
@@ -210,5 +211,17 @@ describe('country and language names', () => {
     const { countryName, languageName } = await import('../src/lib/names');
     expect(countryName('XX', 'en')).toBe('XX');
     expect(languageName('zzz', 'th')).toBe('zzz');
+  });
+});
+
+describe('station logos', () => {
+  it('falls back from a broken logo to the uploaded default, then the built-in mark, then stops', () => {
+    const fallback = logoPath('default', '0123456789abcdef');
+    expect(fallback).toBe('/bff/directory/logos/default?v=0123456789abcdef');
+    expect(nextLogo('https://cdn.example.test/x.png', fallback)).toBe(fallback);
+    expect(nextLogo(fallback, fallback)).toBe(BUILT_IN_LOGO);
+    expect(nextLogo('https://cdn.example.test/x.png', null)).toBe(BUILT_IN_LOGO);
+    expect(nextLogo(BUILT_IN_LOGO, fallback)).toBeNull();
+    expect(BUILT_IN_LOGO.startsWith('data:image/svg+xml,')).toBe(true);
   });
 });

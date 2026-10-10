@@ -14,6 +14,7 @@ import {
 } from './cookies';
 import { createLogger, LogWriter, traceIdFrom } from './log';
 import { OidcClient, OidcError, randomToken, TokenSet } from './oidc';
+import { logoPath } from './logo';
 import type { Session, SessionStore } from './session';
 
 export interface BffDeps {
@@ -96,6 +97,11 @@ export interface MapListStation {
   codec: string;
   bitrateKbps: number | null;
   streamUrl: string;
+  /**
+   * The logo to show: one staff uploaded (a path on this site) or else the station's own (https, on its own
+   * server). Null when it has neither, and the page shows our own logo.
+   */
+  logo: string | null;
 }
 
 /** A community station with coordinates, for the world map on /app/explore. */
@@ -420,6 +426,8 @@ export interface DirectoryStation {
   codec: 'mp3' | 'aac' | 'hls';
   bitrateKbps: number | null;
   logoUrl: string | null;
+  /** Set when staff uploaded a logo for this station. */
+  customLogoVersion?: string | null;
   homepageUrl: string | null;
 }
 export interface DirectorySearch {
@@ -537,6 +545,19 @@ const REAUTH_SKEW_SECONDS = 30;
 const REFRESH_SKEW_MS = 30_000;
 const MAX_BODY_BYTES = 16 * 1024;
 const MAP_CACHE_MS = 10 * 60_000;
+/** A logo upload: the image as base64 in JSON (the API takes 256 KiB of image at most). */
+const LOGO_BODY_BYTES = 360 * 1024;
+const LOGO_KEY = /^(default|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+/** Uploaded logos kept in this process, so a map full of them costs the API one read each. */
+const LOGO_CACHE_MS = 10 * 60_000;
+const LOGO_CACHE_MAX = 200;
+
+/** Our own logo as staff set it (GET /v1/admin/directory/logos). */
+export interface DirectoryLogoSummary {
+  default: { key: string; version: string; contentType: string; bytes: number; updatedBy: string | null; updatedAt: string } | null;
+  stations: number;
+}
 
 /**
  * Reads a request body as text, stopping as soon as it passes `max` bytes (a declared Content-Length over the
@@ -744,7 +765,7 @@ export function createBff(deps: BffDeps) {
   }
 
   /** Forwards one staff call to the API. The API enforces roles; the BFF adds session, CSRF and size checks. */
-  async function adminProxy(req: Request, requestId: string, apiPath: string, mutation: boolean): Promise<Response> {
+  async function adminProxy(req: Request, requestId: string, apiPath: string, mutation: boolean, maxBody = MAX_BODY_BYTES): Promise<Response> {
     const ctx = await sessionFromCookie(req.headers.get('cookie'));
     if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
     const headers: Record<string, string> = {};
@@ -752,7 +773,7 @@ export function createBff(deps: BffDeps) {
     if (mutation) {
       if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
       if (!req.headers.get('content-type')?.startsWith('application/json')) return error(415, 'UNSUPPORTED_MEDIA_TYPE', requestId);
-      const text = await readBodyCapped(req);
+      const text = await readBodyCapped(req, maxBody);
       if (text === null) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
       body = text;
       headers['content-type'] = 'application/json';
@@ -800,24 +821,26 @@ export function createBff(deps: BffDeps) {
   const notFound = (requestId: string) =>
     json(404, { code: 'NOT_FOUND', messageKey: 'errors.request.notFound', requestId, details: {} }, requestId);
 
-  const mapCache = new Map<string, { at: number; stations: MapStation[]; unmapped: MapListStation[] }>();
-  const mapInFlight = new Map<string, Promise<{ status: number; stations?: MapStation[]; unmapped?: MapListStation[] }>>();
+  type MapAnswer = { status: number; stations?: MapStation[]; unmapped?: MapListStation[]; defaultLogo?: string | null };
+  const mapCache = new Map<string, { at: number; stations: MapStation[]; unmapped: MapListStation[]; defaultLogo: string | null }>();
+  const mapInFlight = new Map<string, Promise<MapAnswer>>();
+  const logoCache = new Map<string, { at: number; type: string; bytes: ArrayBuffer; version: string }>();
 
   /**
    * Community stations for /app/explore, the whole world or one country, from the API's map list (one call; the API
    * reads Radio Browser page by page and keeps the lists an hour). Kept 10 minutes in this process too and shared by
    * every viewer; cleared when staff switch a station on or off here.
    */
-  type DirectoryEntry = Omit<MapStation, 'lat' | 'lon'> & { geo?: { lat: number; lon: number } };
+  type DirectoryEntry = Omit<MapStation, 'lat' | 'lon' | 'logo'> & { geo?: { lat: number; lon: number }; logoUrl?: string | null; customLogoVersion?: string | null };
 
-  async function directoryCall(path: string, timeoutMs: number): Promise<DirectoryEntry[] | null> {
+  async function directoryCall(path: string, timeoutMs: number): Promise<{ stations: DirectoryEntry[]; defaultLogoVersion?: string | null } | null> {
     const res = await fetchImpl(`${config.apiBaseUrl}${path}`, {
       headers: { accept: 'application/json', 'x-request-id': `web_${randomUUID()}`, traceparent: traceparent() },
       signal: AbortSignal.timeout(timeoutMs),
       redirect: 'error',
     }).catch(() => null);
     if (!res?.ok) return null;
-    return ((await res.json()) as { stations: DirectoryEntry[] }).stations;
+    return (await res.json()) as { stations: DirectoryEntry[]; defaultLogoVersion?: string | null };
   }
 
   /** Countries the API's world map list already holds in full, so a viewer from there needs nothing extra. */
@@ -827,11 +850,11 @@ export function createBff(deps: BffDeps) {
    * `home` (world view only): the viewer's own country. The world list holds the most listened stations worldwide
    * plus the featured regions in full; any other home country adds its own 100 most listened with coordinates.
    */
-  function loadMapStations(country: string | null, home: string | null = null): Promise<{ status: number; stations?: MapStation[]; unmapped?: MapListStation[] }> {
+  function loadMapStations(country: string | null, home: string | null = null): Promise<MapAnswer> {
     if (country || (home && IN_WORLD_MAP.has(home))) home = null;
     const key = country ?? (home ? `*+${home}` : '*');
     const hit = mapCache.get(key);
-    if (hit && Date.now() - hit.at < MAP_CACHE_MS) return Promise.resolve({ status: 200, stations: hit.stations, unmapped: hit.unmapped });
+    if (hit && Date.now() - hit.at < MAP_CACHE_MS) return Promise.resolve({ status: 200, stations: hit.stations, unmapped: hit.unmapped, defaultLogo: hit.defaultLogo });
     const running = mapInFlight.get(key);
     if (running) return running;
     const call = (async () => {
@@ -839,7 +862,7 @@ export function createBff(deps: BffDeps) {
       const [list, near] = await Promise.all([
         directoryCall(`/v1/directory/radio/map${country ? `?country=${country}` : ''}`, 60_000),
         home
-          ? Promise.all(['0', '50'].map((offset) => directoryCall(`/v1/directory/radio?${new URLSearchParams({ limit: '50', hasGeo: 'true', country: home!, offset })}`, 10_000))).then((p) => p.flatMap((x) => x ?? []))
+          ? Promise.all(['0', '50'].map((offset) => directoryCall(`/v1/directory/radio?${new URLSearchParams({ limit: '50', hasGeo: 'true', country: home!, offset })}`, 10_000))).then((p) => p.flatMap((x) => x?.stations ?? []))
           : Promise.resolve([] as DirectoryEntry[]),
       ]);
       if (!list) return { status: 503 };
@@ -847,28 +870,64 @@ export function createBff(deps: BffDeps) {
       const stations: MapStation[] = [];
       const unmapped: MapListStation[] = [];
       // A country also lists its stations without coordinates, so none of them is out of reach on this page.
-      for (const { geo, ...e } of [...near, ...list]) {
+      for (const { geo, ...e } of [...near, ...list.stations]) {
         if (typeof e.streamUrl !== 'string' || !e.streamUrl.startsWith('https://') || seen.has(e.id)) continue;
         seen.add(e.id);
         if (geo) stations.push({ ...pick(e), lat: geo.lat, lon: geo.lon });
         else if (country) unmapped.push(pick(e));
       }
+      const defaultLogo = versionOk(list.defaultLogoVersion) ? logoPath('default', list.defaultLogoVersion) : null;
       mapCache.delete(key);
-      mapCache.set(key, { at: Date.now(), stations, unmapped });
+      mapCache.set(key, { at: Date.now(), stations, unmapped, defaultLogo });
       if (mapCache.size > 300) mapCache.delete(mapCache.keys().next().value!);
-      return { status: 200, stations, unmapped };
+      return { status: 200, stations, unmapped, defaultLogo };
     })().finally(() => mapInFlight.delete(key));
     mapInFlight.set(key, call);
     return call;
   }
 
-  /** A staff block change shows on the map at once rather than after the cache runs out. */
+  /** A staff block or logo change shows on the map at once rather than after the cache runs out. */
   const forgetMap = async (res: Response) => {
-    if (res.ok) mapCache.clear();
+    if (res.ok) {
+      mapCache.clear();
+      logoCache.clear();
+    }
     return res;
   };
 
-  const pick = ({ id, name, country, language, genres, codec, bitrateKbps, streamUrl }: Omit<DirectoryEntry, 'geo'>): MapListStation => ({ id, name, country, language, genres, codec, bitrateKbps, streamUrl });
+  const versionOk = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{16}$/.test(v);
+  /** An uploaded logo goes first; the station's own must be a plain https address, as the page's CSP expects. */
+  const logoOf = (e: Pick<DirectoryEntry, 'id' | 'logoUrl' | 'customLogoVersion'>): string | null =>
+    versionOk(e.customLogoVersion) && LOGO_KEY.test(e.id) ? logoPath(e.id, e.customLogoVersion) : typeof e.logoUrl === 'string' && e.logoUrl.startsWith('https://') ? e.logoUrl : null;
+  const pick = (e: Omit<DirectoryEntry, 'geo'>): MapListStation => {
+    const { id, name, country, language, genres, codec, bitrateKbps, streamUrl } = e;
+    return { id, name, country, language, genres, codec, bitrateKbps, streamUrl, logo: logoOf(e) };
+  };
+
+  /**
+   * An uploaded logo from the API, as an image on this site. Only `default` or a station id is ever asked for, and
+   * only our own API is asked; what comes back must be one of the three image kinds, and is never run or guessed.
+   */
+  async function logoImage(key: string): Promise<{ type: string; bytes: ArrayBuffer; version: string } | null | 'down'> {
+    const hit = logoCache.get(key);
+    if (hit && Date.now() - hit.at < LOGO_CACHE_MS) return hit;
+    const res = await fetchImpl(`${config.apiBaseUrl}/v1/directory/radio/logos/${key}`, {
+      headers: { 'x-request-id': `web_${randomUUID()}`, traceparent: traceparent() },
+      signal: AbortSignal.timeout(10_000),
+      redirect: 'error',
+    }).catch(() => null);
+    if (res?.status === 404) return null;
+    const type = res?.headers.get('content-type')?.split(';')[0].trim() ?? '';
+    const version = res?.headers.get('etag')?.replace(/"/g, '') ?? '';
+    if (!res?.ok || !LOGO_TYPES.includes(type) || !versionOk(version)) return 'down';
+    const bytes = await res.arrayBuffer();
+    if (bytes.byteLength > 256 * 1024) return 'down';
+    const entry = { at: Date.now(), type, bytes, version };
+    logoCache.delete(key);
+    logoCache.set(key, entry);
+    if (logoCache.size > LOGO_CACHE_MAX) logoCache.delete(logoCache.keys().next().value!);
+    return entry;
+  }
 
   return {
     names,
@@ -987,6 +1046,22 @@ export function createBff(deps: BffDeps) {
     directoryUnblock: (req: Request, id: string) =>
       timed(req, '/bff/admin/directory/blocks/:id/remove', async (requestId) =>
         /^[1-9]\d{0,17}$/.test(id) ? forgetMap(await adminProxy(req, requestId, `/v1/admin/directory/blocks/${id}/remove`, true)) : notFound(requestId),
+      ),
+
+    /** Server-side read for /admin/settings: our own logo. Null means sign in again. */
+    async loadDirectoryLogos(ctx: SessionContext): Promise<{ status: number; logos?: DirectoryLogoSummary } | null> {
+      const res = await callApi(ctx, '/v1/admin/directory/logos', { method: 'GET' }, `web_${randomUUID()}`);
+      if (!res) return null;
+      return res.ok ? { status: 200, logos: (await res.json()) as DirectoryLogoSummary } : { status: res.status };
+    },
+    /** POST /bff/admin/directory/logos/{key} (`{ image }` as base64) and …/{key}/remove; the API checks roles, the image and audits. */
+    directoryLogoSet: (req: Request, key: string) =>
+      timed(req, '/bff/admin/directory/logos/:key', async (requestId) =>
+        LOGO_KEY.test(key) ? forgetMap(await adminProxy(req, requestId, `/v1/admin/directory/logos/${key}`, true, LOGO_BODY_BYTES)) : notFound(requestId),
+      ),
+    directoryLogoRemove: (req: Request, key: string) =>
+      timed(req, '/bff/admin/directory/logos/:key/remove', async (requestId) =>
+        LOGO_KEY.test(key) ? forgetMap(await adminProxy(req, requestId, `/v1/admin/directory/logos/${key}/remove`, true)) : notFound(requestId),
       ),
 
     /** Server-side read for /admin/config. Null means the user must sign in again. */
@@ -1241,7 +1316,32 @@ export function createBff(deps: BffDeps) {
           if (v !== null && !/^[A-Za-z]{2}$/.test(v)) return json(400, { code: 'VALIDATION_FAILED', requestId, details: { field } }, requestId);
         const result = await loadMapStations(raw ? raw.toUpperCase() : null, home ? home.toUpperCase() : null);
         if (!result.stations) return error(503, 'UPSTREAM_UNAVAILABLE', requestId);
-        return json(200, { stations: result.stations, unmapped: result.unmapped ?? [], attribution: 'Radio Browser (www.radio-browser.info), community data' }, requestId, { 'cache-control': 'private, max-age=300' });
+        return json(200, { stations: result.stations, unmapped: result.unmapped ?? [], defaultLogo: result.defaultLogo ?? null, attribution: 'Radio Browser (www.radio-browser.info), community data' }, requestId, { 'cache-control': 'private, max-age=300' });
+      }),
+
+    /**
+     * GET /bff/directory/logos/{key}?v=: a logo staff uploaded, for signed-in viewers. With the current version in
+     * the address the browser may keep it for good; a new upload has a new version.
+     */
+    getLogo: (req: Request, rawKey: string) =>
+      timed(req, '/bff/directory/logos/:key', async (requestId) => {
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        const key = rawKey.toLowerCase();
+        if (!LOGO_KEY.test(key)) return notFound(requestId);
+        const logo = await logoImage(key);
+        if (logo === 'down') return error(503, 'UPSTREAM_UNAVAILABLE', requestId);
+        if (!logo) return notFound(requestId);
+        const etag = `"${logo.version}"`;
+        const headers = {
+          etag,
+          'cache-control': new URL(req.url).searchParams.get('v') === logo.version ? 'private, max-age=31536000, immutable' : 'private, max-age=300',
+          'x-content-type-options': 'nosniff',
+          'content-security-policy': "default-src 'none'; sandbox",
+          'x-request-id': requestId,
+        };
+        if (req.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers });
+        return new Response(logo.bytes, { status: 200, headers: { ...headers, 'content-type': logo.type } });
       }),
 
     async loadCatalog(): Promise<{ status: number; stations?: CatalogStation[]; truncated?: boolean }> {

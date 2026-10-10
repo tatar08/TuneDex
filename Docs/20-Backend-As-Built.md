@@ -50,7 +50,7 @@
 | `billing` | ตรวจการซื้อ Apple/Google, webhook, สิทธิ์ Pro | `GET /v1/me/entitlements`, `POST /v1/billing/verify`, `POST /v1/webhooks/apple`, `POST /v1/webhooks/google` | เจ้าของบัญชี; webhook ตรวจลายเซ็นของ store ไม่ใช้ JWT ผู้ใช้ |
 | `devices` | ทะเบียนอุปกรณ์, check-in, override รายเครื่อง, sign-out อุปกรณ์ และปิด session ที่ Keycloak | `GET /v1/me/devices`, `PUT /v1/me/devices/:deviceId`, `DELETE /v1/me/devices/:deviceId/session`, `GET/PUT /v1/me/devices/:deviceId/preferences` | เจ้าของบัญชี |
 | `diagnostics` | รับ diagnostic batch แบบ opt-in, รายงานของตัวเอง, support access ด้วยรหัสครั้งเดียว | `POST /v1/diagnostics/batches`, `GET/DELETE /v1/me/diagnostics[/:id]`, `GET /v1/me/support-access`, `POST /v1/me/support-access/codes`, `DELETE /v1/me/support-access/:id`, `POST /v1/admin/users/:userId/diagnostics/access`, `GET /v1/admin/users/:userId/diagnostics` | ผู้ใช้; ฝั่ง admin: `support`, `admin` |
-| `directory` | ค้น Radio Browser ผ่าน server ของเรา, รายการบล็อก | `GET /v1/directory/radio`, `GET /v1/directory/radio/map`, `GET /v1/directory/radio/countries` (public), `GET /v1/admin/directory/stations` (เปิด/ปิดรายสถานี), `GET/POST /v1/admin/directory/blocks`, `POST /v1/admin/directory/blocks/:id/remove` | public; บล็อก: `catalog_editor`, `admin` |
+| `directory` | ค้น Radio Browser ผ่าน server ของเรา, รายการบล็อก | `GET /v1/directory/radio`, `GET /v1/directory/radio/map`, `GET /v1/directory/radio/countries` (public), `GET /v1/admin/directory/stations` (เปิด/ปิดรายสถานี), `GET/POST /v1/admin/directory/blocks`, `POST /v1/admin/directory/blocks/:id/remove`, โลโก้: `GET /v1/directory/radio/logos/:key` (public), `GET /v1/admin/directory/logos`, `POST /v1/admin/directory/logos/:key`, `POST /v1/admin/directory/logos/:key/remove` | public; บล็อกและโลโก้: `catalog_editor`, `admin` |
 | `health` | probe ของ infrastructure | `GET /health/live`, `GET /health/ready` | ไม่ต้อง sign-in |
 | `jobs` | รวมคิว `account_deletion`, `account_export`, `idp_session_end`; retry policy กลาง (`retry-policy.ts`) | `GET /v1/admin/jobs`, `POST /v1/admin/jobs/:id/retry` | `operator`, `admin` |
 | `logs` | เก็บ log ลง `operational_logs` (`log-store.ts`), ค้นหา, export CSV | `GET /v1/admin/logs`, `POST /v1/admin/logs/export` | `operator`, `admin` |
@@ -133,6 +133,7 @@ Migrations อยู่ที่ `services/api/src/db/migrations` (forward-only,
 | `032_rights_sweep_index.sql` | index สำหรับ rights sweep |
 | `033_staff_mfa_pins.sql` | `staff_mfa_pins` |
 | `034_station_health_variant.sql` | `station_health.variant` (0 = stream หลัก, 1-3 = variant) |
+| `035_directory_logos.sql` | `directory_logos` (โลโก้ที่ทีมงานอัปโหลดให้สถานี และโลโก้ของเรา `default`) |
 
 ระยะเก็บข้อมูลตามโค้ด:
 
@@ -189,7 +190,7 @@ Migrations อยู่ที่ `services/api/src/db/migrations` (forward-only,
 - session ผู้ใช้ idle 12 ชั่วโมง / absolute 7 วัน; staff idle 30 นาที / absolute 12 ชั่วโมง; เปลี่ยนบทบาทแล้ว session จบ (`rolesVersion`)
 - login: authorization code + PKCE S256 + `state` + `nonce` ใน cookie `td_login` อายุ 10 นาที; redirect หลัง login ไปได้เฉพาะ `/app/...` และ `/admin...`
 - CSRF: ทุก mutation ของ BFF ต้องมี `Origin` เท่ากับ `CONSOLE_BASE_URL` และ `X-CSRF-Token` (หรือ field `csrf`) ตรงกับ session มิฉะนั้น 403 `CSRF_REJECTED`
-- CSP ต่อ request: `script-src 'self' 'nonce-…' 'strict-dynamic'`, `object-src 'none'`, `frame-ancestors 'none'`, `base-uri 'self'`; `connect-src`/`media-src https:` เปิดเฉพาะ `/app/radio` และ `/app/explore`. HSTS เมื่อ `CONSOLE_BASE_URL` เป็น https
+- CSP ต่อ request: `script-src 'self' 'nonce-…' 'strict-dynamic'`, `object-src 'none'`, `frame-ancestors 'none'`, `base-uri 'self'`; `connect-src`/`media-src https:` เปิดเฉพาะ `/app/radio` และ `/app/explore`. `img-src https:` เปิดเฉพาะ `/app/explore` (โลโก้ของสถานีโหลดจาก server ของสถานีเอง, `referrerpolicy=no-referrer`; หน้า staff ไม่โหลด). HSTS เมื่อ `CONSOLE_BASE_URL` เป็น https
 
 ## 6. ตัวแปรสภาพแวดล้อม
 

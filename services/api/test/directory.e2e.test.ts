@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { Database } from '../src/db/database';
 import { toDirectoryStation } from '../src/directory/directory';
+import { imageSize, sniffImage } from '../src/directory/logos';
 import { runStaffCli } from '../src/staff/staff-cli';
 import { createIdentity, createTestApp, createTestDatabase, TestIdentity } from './harness';
 
@@ -92,6 +93,7 @@ describe('community radio directory (Radio Browser)', () => {
         codec: 'mp3',
         bitrateKbps: 128,
         logoUrl: 'https://station1.example.com/logo.png',
+        customLogoVersion: null,
         homepageUrl: 'https://station1.example.com/',
       },
       expect.objectContaining({ id: uuid(2), codec: 'aac', bitrateKbps: null, logoUrl: null, country: null }),
@@ -348,5 +350,114 @@ describe('community radio directory (Radio Browser)', () => {
     }
     for (const who of ['ops', 'user'] as const) expect((await http().get('/v1/admin/directory/stations?country=KR').set(as(who))).status).toBe(403);
     expect((await http().get('/v1/admin/directory/stations?country=KR')).status).toBe(401);
+  });
+
+  // The smallest real files of each kind: 1 by 1 pixel.
+  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  const WEBP = 'UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==';
+  const JPEG = Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]),
+    Buffer.from('JFIF\0\x01\x01\0\0\x01\0\x01\0\0', 'latin1'),
+    Buffer.from([0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x02, 0x00, 0x03, 0x01, 0x01, 0x11, 0x00, 0xff, 0xd9]),
+  ]).toString('base64');
+
+  it('reads the kind and size of an image from its own bytes', () => {
+    const png = Buffer.from(PNG, 'base64');
+    expect([sniffImage(png), imageSize(png, 'image/png')]).toEqual(['image/png', { width: 1, height: 1 }]);
+    const webp = Buffer.from(WEBP, 'base64');
+    expect([sniffImage(webp), imageSize(webp, 'image/webp')]).toEqual(['image/webp', { width: 1, height: 1 }]);
+    const jpeg = Buffer.from(JPEG, 'base64');
+    expect([sniffImage(jpeg), imageSize(jpeg, 'image/jpeg')]).toEqual(['image/jpeg', { width: 3, height: 2 }]);
+    expect(sniffImage(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'))).toBeNull();
+    expect(imageSize(png.subarray(0, 20), 'image/png')).toBeNull();
+  });
+
+  it('keeps a station logo only when it is on a public https host', () => {
+    const logo = (favicon: unknown) => toDirectoryStation(rb(1, { favicon }))!.logoUrl;
+    expect(logo(' https://cdn.example.com/a.png ')).toBe('https://cdn.example.com/a.png');
+    for (const bad of ['http://cdn.example.com/a.png', 'https://192.168.1.1/a.png', 'https://localhost/a.png', 'https://printer.local/a.png', 'https://cdn.example.com:8443/a.png', 'https://u:p@cdn.example.com/a.png', '', null]) expect(logo(bad)).toBeNull();
+  });
+
+  it('lets staff upload a logo for a station and our own, serves them without sign-in, and takes them away again', async () => {
+    reply = { status: 200, body: () => [rb(5000, { countrycode: 'TH' }), rb(5001, { countrycode: 'TH', favicon: '' })] };
+    const map = async () => (await http().get('/v1/directory/radio/map?country=TH').expect(200)).body;
+    expect(await map()).toMatchObject({ defaultLogoVersion: null, stations: [{ id: uuid(5000), customLogoVersion: null }, { id: uuid(5001), logoUrl: null, customLogoVersion: null }] });
+    expect((await http().get(`/v1/directory/radio/logos/${uuid(5001)}`)).status).toBe(404);
+    expect((await http().get('/v1/directory/radio/logos/default')).status).toBe(404);
+
+    const set = await http().post(`/v1/admin/directory/logos/${uuid(5001).toUpperCase()}`).set(as('editor')).send({ image: PNG }).expect(200);
+    expect(set.body).toMatchObject({ key: uuid(5001), contentType: 'image/png', bytes: Buffer.from(PNG, 'base64').length, updatedBy: 'dir-editor' });
+    expect(set.body.version).toMatch(/^[0-9a-f]{16}$/);
+    const own = await http().post('/v1/admin/directory/logos/default').set(as('admin')).send({ image: WEBP }).expect(200);
+    // The answers are overlaid after the hour-long station cache, so a new logo shows at once.
+    const after = await map();
+    expect(after.defaultLogoVersion).toBe(own.body.version);
+    expect(after.stations.map((s: { customLogoVersion: string | null }) => s.customLogoVersion)).toEqual([null, set.body.version]);
+    expect((await http().get('/v1/directory/radio?q=logos').expect(200)).body).toMatchObject({ defaultLogoVersion: own.body.version, stations: [{}, { customLogoVersion: set.body.version }] });
+    expect((await http().get('/v1/admin/directory/stations?country=TH').set(as('editor')).expect(200)).body.stations[1].customLogoVersion).toBe(set.body.version);
+
+    const img = await http().get(`/v1/directory/radio/logos/${uuid(5001)}?v=${set.body.version}`).expect(200);
+    expect(img.headers['content-type']).toBe('image/png');
+    expect(Buffer.compare(img.body, Buffer.from(PNG, 'base64'))).toBe(0);
+    expect(img.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+    expect(img.headers['x-content-type-options']).toBe('nosniff');
+    expect(img.headers['content-security-policy']).toBe("default-src 'none'; sandbox");
+    const plain = await http().get('/v1/directory/radio/logos/default').expect(200);
+    expect([plain.headers['content-type'], plain.headers['cache-control']]).toEqual(['image/webp', 'public, max-age=300']);
+    await http().get('/v1/directory/radio/logos/default').set('If-None-Match', plain.headers.etag).expect(304);
+    // An old version in the address is never kept for good.
+    expect((await http().get('/v1/directory/radio/logos/default?v=0000000000000000').expect(200)).headers['cache-control']).toBe('public, max-age=300');
+
+    const replaced = await http().post(`/v1/admin/directory/logos/${uuid(5001)}`).set(as('admin')).send({ image: JPEG }).expect(200);
+    expect(replaced.body).toMatchObject({ contentType: 'image/jpeg', updatedBy: 'dir-admin' });
+    expect(replaced.body.version).not.toBe(set.body.version);
+    expect((await http().get('/v1/admin/directory/logos').set(as('editor')).expect(200)).body).toMatchObject({ default: { key: 'default', version: own.body.version, contentType: 'image/webp', updatedBy: 'dir-admin' }, stations: 1 });
+
+    await http().post(`/v1/admin/directory/logos/${uuid(5001)}/remove`).set(as('editor')).send({}).expect(204);
+    await http().post('/v1/admin/directory/logos/default/remove').set(as('editor')).send({}).expect(204);
+    expect((await http().post('/v1/admin/directory/logos/default/remove').set(as('editor')).send({})).status).toBe(404);
+    expect(await map()).toMatchObject({ defaultLogoVersion: null, stations: [{}, { customLogoVersion: null }] });
+    expect((await http().get('/v1/admin/directory/logos').set(as('editor')).expect(200)).body).toEqual({ default: null, stations: 0 });
+
+    const audit = await t.pool.query<{ action: string; target_id: string }>(`SELECT action, target_id FROM audit_events WHERE action LIKE 'directory.logo.%' ORDER BY id`);
+    expect(audit.rows).toEqual([
+      { action: 'directory.logo.set', target_id: uuid(5001) },
+      { action: 'directory.logo.set', target_id: 'default' },
+      { action: 'directory.logo.set', target_id: uuid(5001) },
+      { action: 'directory.logo.remove', target_id: uuid(5001) },
+      { action: 'directory.logo.remove', target_id: 'default' },
+    ]);
+  });
+
+  it('refuses uploads that are not a small PNG, JPEG or WebP, and everyone without a catalog role', async () => {
+    const post = (key: string, body: object, who: keyof typeof tokens = 'editor') => http().post(`/v1/admin/directory/logos/${key}`).set(as(who)).send(body);
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>').toString('base64');
+    const wide = Buffer.from(PNG, 'base64');
+    wide.writeUInt32BE(4000, 16);
+    const cases: [string, object, string, string][] = [
+      ['default', { image: svg }, 'image', 'must_be_png_jpeg_or_webp'],
+      ['default', { image: 'not base64!' }, 'image', 'must_be_base64'],
+      ['default', {}, 'image', 'must_be_base64'],
+      ['default', { image: PNG, contentType: 'image/png' }, 'contentType', 'unknown_field'],
+      ['default', { image: wide.toString('base64') }, 'image', 'dimensions_too_large'],
+      ['default', { image: Buffer.from(PNG, 'base64').subarray(0, 12).toString('base64') }, 'image', 'must_be_png_jpeg_or_webp'],
+      ['default', { image: Buffer.concat([Buffer.from(PNG, 'base64'), Buffer.alloc(256 * 1024)]).toString('base64') }, 'image', 'too_large'],
+      ['not-a-station', { image: PNG }, 'key', 'must_be_uuid_or_default'],
+    ];
+    for (const [key, body, field, reason] of cases) {
+      const res = await post(key, body);
+      expect([res.status, res.body.details?.field, res.body.details?.reason]).toEqual([400, field, reason]);
+    }
+    // Past the route's own body limit the upload is refused before it is read as JSON.
+    expect((await post('default', { image: 'A'.repeat(400 * 1024) })).status).toBe(413);
+    expect((await http().get('/v1/directory/radio/logos/nope')).status).toBe(400);
+    expect((await http().get('/v1/directory/radio/logos/default?size=2')).status).toBe(400);
+    for (const who of ['ops', 'user'] as const) {
+      expect((await post('default', { image: PNG }, who)).status).toBe(403);
+      expect((await http().post('/v1/admin/directory/logos/default/remove').set(as(who)).send({})).status).toBe(403);
+      expect((await http().get('/v1/admin/directory/logos').set(as(who))).status).toBe(403);
+    }
+    expect((await http().post('/v1/admin/directory/logos/default').send({ image: PNG })).status).toBe(401);
+    expect((await http().get('/v1/directory/radio/logos/default')).status).toBe(404);
   });
 });

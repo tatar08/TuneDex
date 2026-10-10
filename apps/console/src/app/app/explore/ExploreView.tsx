@@ -12,6 +12,7 @@ import { appendChannel } from '@/lib/playlist';
 import { AppNav } from '../AppNav';
 import { MediaPlayer, NowPlaying } from '../radio/MediaPlayer';
 import { COUNTRY_CODES } from './countries';
+import { StationLogo } from './StationLogo';
 import type { GlobePalette } from './WorldGlobe';
 
 const WorldMap = dynamic(() => import('./WorldMap').then((m) => m.WorldMap), {
@@ -74,6 +75,7 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
   const [home, setHome] = useState<string | null>(null);
   const [stations, setStations] = useState<MapStation[] | null>(null);
   const [unmapped, setUnmapped] = useState<MapListStation[]>([]);
+  const [defaultLogo, setDefaultLogo] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [selected, setSelected] = useState<MapListStation | null>(null);
   const [group, setGroup] = useState<Set<string> | null>(null);
@@ -116,10 +118,12 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
         const body = (await res.json()) as {
           stations: MapStation[];
           unmapped?: MapListStation[];
+          defaultLogo?: string | null;
         };
         if (!live) return;
         setStations(body.stations);
         setUnmapped(body.unmapped ?? []);
+        setDefaultLogo(body.defaultLogo ?? null);
       })
       .catch(() => live && setFailed(true));
     return () => {
@@ -206,8 +210,11 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
     return (
       <li key={s.id} data-testid={testId} className={selected?.id === s.id ? 'on' : undefined}>
         <button type="button" className="explore-row" aria-current={selected?.id === s.id ? 'true' : undefined} onClick={() => select(s)}>
-          <span className="explore-name">{s.name}</span>
-          <span className="explore-meta">{line(s)}</span>
+          <StationLogo logo={s.logo} fallback={defaultLogo} size={36} />
+          <span className="explore-row-text">
+            <span className="explore-name">{s.name}</span>
+            <span className="explore-meta">{line(s)}</span>
+          </span>
         </button>
         <button
           type="button"
@@ -339,6 +346,7 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
                   zoomOut: t.exploreZoomOut,
                   group: t.exploreGroup,
                 }}
+                fallbackLogo={defaultLogo}
               />
             )}
             {stations === null && !failed && <p className="explore-overlay">{t.exploreLoading}</p>}
@@ -352,8 +360,13 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
           <aside className="explore-panel" aria-labelledby="explore-list">
             {selected && (
               <section className="explore-pick" aria-label={selected.name} data-testid="explore-pick">
-                <span className="explore-name">{selected.name}</span>
-                <span className="explore-meta">{line(selected)}</span>
+                <span className="explore-pick-head">
+                  <StationLogo logo={selected.logo} fallback={defaultLogo} size={56} />
+                  <span className="explore-row-text">
+                    <span className="explore-name">{selected.name}</span>
+                    <span className="explore-meta">{line(selected)}</span>
+                  </span>
+                </span>
                 <span className="explore-pick-actions">
                   <button type="button" className="explore-btn primary" onClick={() => play(selected)}>
                     {t.explorePlay}

@@ -20,9 +20,11 @@ const station = (n: number, name: string, lat: number, lon: number, country: str
   codec: 'mp3',
   bitrateKbps: 128,
   streamUrl: `https://s${n}.example.test/live.mp3`,
+  logo: null as string | null,
   lat,
   lon,
 });
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 
 test('explore shows community stations on a map or a globe, plays one and adds it to my links', async ({ browser }) => {
   stack.idp.setUser('e2e-explorer');
@@ -35,12 +37,24 @@ test('explore shows community stations on a map or a globe, plays one and adds i
   await page.route('**/bff/directory/map**', (route) =>
     route.fulfill({
       json: {
-        stations: [station(1, 'Bangkok <b>FM</b>', 13.75, 100.5, 'TH'), station(2, 'Chiang Mai Radio', 18.79, 98.98, 'TH'), station(3, 'Tokyo Wave', 35.68, 139.69, 'JP')],
+        stations: [
+          station(1, 'Bangkok <b>FM</b>', 13.75, 100.5, 'TH'),
+          { ...station(2, 'Chiang Mai Radio', 18.79, 98.98, 'TH'), logo: '/bff/directory/logos/00000000-0000-4000-8000-000000000002?v=aaaaaaaaaaaaaaaa' },
+          { ...station(3, 'Tokyo Wave', 35.68, 139.69, 'JP'), logo: 'https://logo.example.test/tokyo.png' },
+        ],
         unmapped: [{ ...station(4, 'Hat Yai Online', 0, 0, 'TH'), lat: undefined, lon: undefined }],
+        defaultLogo: '/bff/directory/logos/default?v=bbbbbbbbbbbbbbbb',
         attribution: 'Radio Browser',
       },
     }),
   );
+  await page.route('**/bff/directory/logos/**', (route) => route.fulfill({ contentType: 'image/png', body: PNG }));
+  // The station's own logo lives on the station's server; here that server is down.
+  const asked: { url: string; referer: string | undefined }[] = [];
+  await page.route('https://logo.example.test/**', (route) => {
+    asked.push({ url: route.request().url(), referer: route.request().headers().referer });
+    return route.abort();
+  });
   // The country is typed (Thai name, English name or code) with suggestions.
   await page.getByLabel('ประเทศ').fill('ประเทศไทย');
   await expect(page.getByTestId('explore-station')).toHaveCount(3);
@@ -51,9 +65,19 @@ test('explore shows community stations on a map or a globe, plays one and adds i
   // Names are text, never markup.
   await expect(page.getByTestId('explore-station').first()).toContainText('Bangkok <b>FM</b>');
   await expect(page.getByTestId('world-map').locator('.leaflet-interactive')).toHaveCount(3);
+  // Each station on its own shows a logo (Tar 2026-10-10): the uploaded one, the station's own, or our default.
+  const dot = (name: string) => page.getByTestId('world-map').getByRole('button', { name }).locator('img');
+  await expect(dot('Chiang Mai Radio')).toHaveAttribute('src', /\/bff\/directory\/logos\/00000000-0000-4000-8000-000000000002\?v=a{16}$/);
+  await expect(dot('Bangkok <b>FM</b>')).toHaveAttribute('src', /\/bff\/directory\/logos\/default\?v=b{16}$/);
+  // A logo that does not load gives way to our default, and the station's server is not told which page asked.
+  await expect(dot('Tokyo Wave')).toHaveAttribute('src', /\/bff\/directory\/logos\/default\?v=b{16}$/);
+  expect(asked.length).toBeGreaterThan(0);
+  expect(asked.every((a) => a.url === 'https://logo.example.test/tokyo.png' && !a.referer)).toBe(true);
+  await expect(page.getByTestId('explore-station').nth(1).locator('img')).toHaveJSProperty('complete', true);
   // Picking a dot shows the station without playing it.
   await page.getByTestId('world-map').getByRole('button', { name: 'Chiang Mai Radio' }).click();
   await expect(page.getByTestId('explore-pick')).toContainText('Chiang Mai Radio');
+  await expect(page.getByTestId('explore-pick').locator('img')).toHaveAttribute('src', /logos\/00000000-0000-4000-8000-000000000002/);
   await expect(page.getByTestId('player')).toHaveCount(0);
   // Genre chips come from the loaded stations; the light and dark looks are the viewer's choice and are remembered.
   await expect(page.getByRole('group', { name: 'ประเภท' }).getByRole('button', { name: 'Pop' })).toBeVisible();

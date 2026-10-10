@@ -732,8 +732,9 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [stations, nextOffset, attribution]
+                required: [stations, nextOffset, defaultLogoVersion, attribution]
                 properties:
+                  defaultLogoVersion: { type: string, pattern: '^[0-9a-f]{16}$', nullable: true, description: 'Set when staff uploaded our own logo: show /v1/directory/radio/logos/default?v={defaultLogoVersion} for stations without a logo' }
                   stations: { type: array, maxItems: 50, items: { $ref: '#/components/schemas/DirectoryStation' } }
                   nextOffset: { type: integer, nullable: true }
                   attribution: { type: string, description: Show this wherever the results are shown }
@@ -758,8 +759,9 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [stations, truncated, attribution]
+                required: [stations, truncated, defaultLogoVersion, attribution]
                 properties:
+                  defaultLogoVersion: { type: string, pattern: '^[0-9a-f]{16}$', nullable: true, description: 'As in the search answer' }
                   stations: { type: array, items: { $ref: '#/components/schemas/DirectoryStation' } }
                   truncated: { type: boolean }
                   attribution: { type: string }
@@ -769,6 +771,34 @@ paths:
           headers: { Retry-After: { schema: { type: integer } } }
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         '503': { description: 'DEPENDENCY_UNAVAILABLE with details {dependency: radio_directory, reason: not_configured | unreachable}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/directory/radio/logos/{key}:
+    parameters:
+      - { name: key, in: path, required: true, schema: { type: string, pattern: '^(default|[0-9a-fA-F-]{36})$' }, description: 'A station id (Radio Browser stationuuid), or default for our own logo. Anything else: 400 (field key, must_be_uuid_or_default)' }
+    get:
+      summary: A logo staff uploaded, as an image (no sign-in)
+      description: 'The image for a station whose customLogoVersion is set, or our own logo (key default) for stations that have neither customLogoVersion nor logoUrl, decided by Tar 2026-10-10. Show order: customLogoVersion, then logoUrl, then the default logo, then the logo built into the app. With v equal to the current version the answer may be kept for good (a new upload has a new version); without it, five minutes. Same rate limit as the search.'
+      security: []
+      parameters:
+        - { name: v, in: query, schema: { type: string, pattern: '^[0-9a-f]{16}$' }, description: 'customLogoVersion or defaultLogoVersion from a station answer' }
+        - { name: If-None-Match, in: header, schema: { type: string } }
+      responses:
+        '200':
+          description: The image
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, example: 'public, max-age=31536000, immutable' } }
+            X-Content-Type-Options: { schema: { type: string, example: nosniff } }
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        '304': { description: Not changed since the ETag sent in If-None-Match }
+        '400': { description: 'VALIDATION_FAILED: key must_be_uuid_or_default, unknown_field', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: 'NOT_FOUND: no logo uploaded for this key', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429':
+          description: API_RATE_LIMITED (60 a minute per client address), details.retryAfterSeconds
+          headers: { Retry-After: { schema: { type: integer } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
   /v1/directory/radio/countries:
     get:
       summary: Community station count per country (no sign-in)
@@ -883,6 +913,65 @@ paths:
         '404': { $ref: '#/components/responses/Error' }
         '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '413': { $ref: '#/components/responses/Error' }
+  /v1/admin/directory/logos:
+    get:
+      summary: Our own logo and how many stations have an uploaded one (catalog_editor, admin)
+      description: 'Roles: catalog_editor or admin. For the settings page. Cache-Control: no-store.'
+      responses:
+        '200':
+          description: The default logo, or null when none was uploaded
+          headers: { Cache-Control: { schema: { type: string, example: no-store } } }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [default, stations]
+                properties:
+                  default: { allOf: [{ $ref: '#/components/schemas/DirectoryLogo' }], nullable: true }
+                  stations: { type: integer, minimum: 0, description: Stations with an uploaded logo }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/admin/directory/logos/{key}:
+    parameters:
+      - { name: key, in: path, required: true, schema: { type: string, pattern: '^(default|[0-9a-fA-F-]{36})$' }, description: 'A station id, or default for our own logo' }
+    post:
+      summary: Upload a logo for a station, or our own (catalog_editor, admin)
+      description: 'Roles: catalog_editor or admin. Replaces the one already there. PNG, JPEG or WebP, told by the file''s first bytes (SVG is refused), at most 256 KiB and 1024 by 1024 pixels; the body may be up to 360 KiB for this route. Audited as directory.logo.set. Shows in station answers at once (customLogoVersion / defaultLogoVersion).'
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, description: 'Optional; see POST /v1/admin/stations', schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,128}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [image]
+              properties:
+                image: { type: string, format: byte, description: The image file as base64 }
+      responses:
+        '200': { description: Saved, content: { application/json: { schema: { $ref: '#/components/schemas/DirectoryLogo' } } } }
+        '400': { description: 'VALIDATION_FAILED: key must_be_uuid_or_default; image must_be_base64, too_large (maxBytes), must_be_png_jpeg_or_webp or dimensions_too_large (maxPixels)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { $ref: '#/components/responses/Error' }
+  /v1/admin/directory/logos/{key}/remove:
+    parameters:
+      - { name: key, in: path, required: true, schema: { type: string, pattern: '^(default|[0-9a-fA-F-]{36})$' } }
+    post:
+      summary: Take an uploaded logo away again (catalog_editor, admin)
+      description: 'Roles: catalog_editor or admin. The station goes back to its own logo (logoUrl) or the default; removing default goes back to the logo built into the apps. Audited as directory.logo.remove.'
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, description: 'Optional; see POST /v1/admin/stations', schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,128}$' } }
+      responses:
+        '204': { description: Removed }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/admin/stations:
     get:
       summary: List stations, one cursor page by name then id (catalog_editor, admin)
@@ -2044,7 +2133,8 @@ components:
         streamUrl: { type: string, format: uri, description: Plain public https URL }
         codec: { type: string, enum: [mp3, aac, hls] }
         bitrateKbps: { type: integer, minimum: 1, maximum: 1000, nullable: true }
-        logoUrl: { type: string, format: uri, nullable: true, description: 'https only; the station''s own logo, rights not checked by us' }
+        logoUrl: { type: string, format: uri, nullable: true, description: 'The station''s own logo on its own server, rights not checked by us. Public https host on port 443 only (no IP address or local name), since the viewer''s device fetches it' }
+        customLogoVersion: { type: string, pattern: '^[0-9a-f]{16}$', nullable: true, description: 'Set when staff uploaded a logo for this station; the image is /v1/directory/radio/logos/{id}?v={customLogoVersion} and goes before logoUrl' }
         homepageUrl: { type: string, format: uri, nullable: true }
         geo:
           type: object
@@ -2070,6 +2160,17 @@ components:
                 id: { type: string, pattern: '^[1-9][0-9]*$' }
                 kind: { type: string, enum: [station, host] }
                 value: { type: string }
+    DirectoryLogo:
+      type: object
+      additionalProperties: false
+      required: [key, version, contentType, bytes, updatedBy, updatedAt]
+      properties:
+        key: { type: string, description: A station id or default }
+        version: { type: string, pattern: '^[0-9a-f]{16}$', description: Changes with the image }
+        contentType: { type: string, enum: [image/png, image/jpeg, image/webp] }
+        bytes: { type: integer, minimum: 1, maximum: 262144 }
+        updatedBy: { type: string, nullable: true, description: OIDC subject of the staff member }
+        updatedAt: { type: string, format: date-time }
     DirectoryBlock:
       type: object
       additionalProperties: false

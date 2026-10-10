@@ -879,12 +879,13 @@ describe('world map stations', () => {
         const stations =
           url.pathname === '/v1/directory/radio/map'
             ? url.searchParams.get('country')
-              ? [station(1, true), station(2, false), station(3, true)]
+              ? [{ ...station(1, true), logoUrl: 'https://cdn.example.test/one.png' }, station(2, false), { ...station(3, true), logoUrl: 'https://cdn.example.test/three.png', customLogoVersion: 'abcdef0123456789' }]
               : [station(1, true), station(4, true, 'BR')]
             : url.searchParams.get('offset') === '0'
               ? [station(5, true, 'VN'), station(1, true)]
               : [];
-        return new Response(JSON.stringify({ stations, attribution: 'Radio Browser' }), { status: 200, headers: { 'content-type': 'application/json' } });
+        const defaultLogoVersion = url.searchParams.get('country') ? '0123456789abcdef' : null;
+        return new Response(JSON.stringify({ stations, defaultLogoVersion, attribution: 'Radio Browser' }), { status: 200, headers: { 'content-type': 'application/json' } });
       },
     });
     const req = (q: string, cookie?: string) => new Request(`${BASE}/bff/directory/map${q}`, { headers: cookie ? { cookie } : {} });
@@ -892,28 +893,75 @@ describe('world map stations', () => {
     const cookie = await signIn('map-user', mapped);
     const res = await mapped.getMapStations(req('?country=th', cookie));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { stations: { name: string; lat: number; lon: number }[]; unmapped: { name: string; lat?: number }[] };
+    const body = (await res.json()) as { stations: { name: string; lat: number; lon: number; logo: string | null }[]; unmapped: { name: string; lat?: number; logo: string | null }[]; defaultLogo: string | null };
     expect(body.stations.map((s) => [s.name, s.lat, s.lon])).toEqual([
       ['Map 1', 13.75, 100.5],
       ['Map 3', 13.75, 100.5],
     ]);
     // The country's stations without coordinates are listed once, without a place.
     expect(body.unmapped.map((s) => [s.name, s.lat])).toEqual([['Map 2', undefined]]);
+    // Each station's logo: the one staff uploaded (from this site) before the station's own; none means our default.
+    expect([...body.stations, ...body.unmapped].map((s) => s.logo)).toEqual(['https://cdn.example.test/one.png', '/bff/directory/logos/00000000-0000-4000-8000-000000000003?v=abcdef0123456789', null]);
+    expect(body.defaultLogo).toBe('/bff/directory/logos/default?v=0123456789abcdef');
     expect(asked).toEqual(['/v1/directory/radio/map?country=TH']);
     expect((await mapped.getMapStations(req('?country=TH', cookie))).status).toBe(200);
     expect(asked).toHaveLength(1);
     expect((await mapped.getMapStations(req('?country=Thailand', cookie))).status).toBe(400);
     // Thailand is already in full in the world list, so a Thai viewer's world view is the plain world list.
     asked.length = 0;
-    const world = (await (await mapped.getMapStations(req('?home=th', cookie))).json()) as { stations: { name: string }[]; unmapped: unknown[] };
+    const world = (await (await mapped.getMapStations(req('?home=th', cookie))).json()) as { stations: { name: string }[]; unmapped: unknown[]; defaultLogo: string | null };
     expect(asked).toEqual(['/v1/directory/radio/map']);
     expect(world.stations.map((s) => s.name)).toEqual(['Map 1', 'Map 4']);
     expect(world.unmapped).toEqual([]);
+    expect(world.defaultLogo).toBeNull();
     // A viewer from elsewhere also gets two pages of their own country's mapped stations, first.
     asked.length = 0;
     const vn = (await (await mapped.getMapStations(req('?home=VN', cookie))).json()) as { stations: { name: string }[] };
     expect([...asked].sort()).toEqual(['/v1/directory/radio/map', ...[0, 50].map((o) => `/v1/directory/radio?limit=50&hasGeo=true&country=VN&offset=${o}`)].sort());
     expect(vn.stations.map((s) => s.name)).toEqual(['Map 5', 'Map 1', 'Map 4']);
     expect((await mapped.getMapStations(req('?home=xyz', cookie))).status).toBe(400);
+  });
+
+  it('lets staff upload our own logo and a station logo, serves them to signed-in viewers, and removes them', async () => {
+    api.staff('grant', 'logo-editor', 'catalog_editor', '--by', 'test', '--reason', 'test');
+    const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const id = '00000000-0000-4000-8000-000000000042';
+    const editor = await signIn('logo-editor');
+    const user = await signIn('logo-viewer');
+    const send = (cookie: string, path: string, body: unknown, csrf?: string) => {
+      const req = new Request(`${BASE}${path}`, { method: 'POST', headers: { cookie, origin: BASE, 'content-type': 'application/json', ...(csrf ? { 'x-csrf-token': csrf } : {}) }, body: JSON.stringify(body) });
+      const [, , , , , key, action] = path.split('/');
+      return action ? bff.directoryLogoRemove(req, key) : bff.directoryLogoSet(req, key);
+    };
+    const image = (key: string, cookie = user, headers: Record<string, string> = {}) => bff.getLogo(new Request(`${BASE}/bff/directory/logos/${key}`, { headers: { cookie, ...headers } }), key.split('?')[0]);
+
+    expect((await image('default')).status).toBe(404);
+    expect((await send(editor, '/bff/admin/directory/logos/default', { image: PNG })).status).toBe(403);
+    expect((await send(user, '/bff/admin/directory/logos/default', { image: PNG }, await csrfFor(user))).status).toBe(403);
+    const saved = await send(editor, '/bff/admin/directory/logos/default', { image: PNG }, await csrfFor(editor));
+    expect(saved.status).toBe(200);
+    const { version } = (await saved.json()) as { version: string };
+    expect((await send(editor, `/bff/admin/directory/logos/${id}`, { image: PNG }, await csrfFor(editor))).status).toBe(200);
+    // A picture far past the limit is refused here, before it reaches the API.
+    expect((await send(editor, '/bff/admin/directory/logos/default', { image: 'A'.repeat(400 * 1024) }, await csrfFor(editor))).status).toBe(413);
+    expect((await send(editor, '/bff/admin/directory/logos/..%2Fblocks', { image: PNG }, await csrfFor(editor))).status).toBe(404);
+
+    const got = await image(`default?v=${version}`);
+    expect([got.status, got.headers.get('content-type'), got.headers.get('cache-control'), got.headers.get('x-content-type-options')]).toEqual([200, 'image/png', 'private, max-age=31536000, immutable', 'nosniff']);
+    expect(Buffer.from(await got.arrayBuffer()).toString('base64')).toBe(PNG);
+    expect((await image('default')).headers.get('cache-control')).toBe('private, max-age=300');
+    expect((await image('default', user, { 'if-none-match': `"${version}"` })).status).toBe(304);
+    expect((await image(id)).status).toBe(200);
+    expect((await bff.getLogo(new Request(`${BASE}/bff/directory/logos/default`), 'default')).status).toBe(401);
+    expect((await image('not-a-key')).status).toBe(404);
+    const ctx = (await bff.sessionFromCookie(editor))!;
+    expect((await bff.loadDirectoryLogos(ctx))!.logos).toMatchObject({ default: { version, updatedBy: 'logo-editor' }, stations: 1 });
+    expect((await bff.loadDirectoryLogos((await bff.sessionFromCookie(user))!))!.status).toBe(403);
+
+    // Removing one shows at once, not after this process's copy runs out.
+    expect((await send(editor, `/bff/admin/directory/logos/${id}/remove`, {}, await csrfFor(editor))).status).toBe(204);
+    expect((await send(editor, '/bff/admin/directory/logos/default/remove', {}, await csrfFor(editor))).status).toBe(204);
+    expect((await image('default')).status).toBe(404);
+    expect((await image(id)).status).toBe(404);
   });
 });

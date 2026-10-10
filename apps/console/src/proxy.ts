@@ -17,7 +17,8 @@ export function proxy(request: NextRequest) {
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval'" : ''}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    // The map shows each community station's own logo from the station's server (Tar 2026-10-10); only there.
+    path === '/app/explore' ? "img-src 'self' data: blob: https:" : "img-src 'self' data: blob:",
     "font-src 'self'",
     player ? "connect-src 'self' https:" : "connect-src 'self'",
     player ? "media-src 'self' https: blob:" : "media-src 'self'",

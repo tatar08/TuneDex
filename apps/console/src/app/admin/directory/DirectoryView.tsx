@@ -5,14 +5,18 @@ import { useEffect, useRef, useState } from 'react';
 import { formatLogTime, RATE_LIMITED } from '@/lib/admin';
 import { COUNTRY_CODES } from '@/app/app/explore/countries';
 import type { AdminDirectoryList, AdminDirectoryStation, DirectoryBlock, DirectoryFilter } from '@/lib/bff';
+import { logoPath } from '@/lib/logo';
 import { countryName } from '@/lib/names';
 import { useAdmin, useT } from '../AdminShell';
+import { LogoUpload } from '../LogoUpload';
 
 /**
  * Worldwide radio (Radio Browser community directory, Tar 2026-10-05): staff see what users would find for a
  * search and take a station, or a whole stream host, out of the results, e.g. on a rights holder's complaint
  * (Doc 10). Stations users already added stay in their lists. Data is shared; each theme lays it out its own way.
  * Staff can also list a whole country and switch each station on or off (Tar 2026-10-09); off is a station block.
+ * Each station's logo can be replaced by an uploaded one (Tar 2026-10-10). The station's own logo sits on its own
+ * server, so this page links to it rather than loading it.
  */
 const FEATURED = ['TH', 'JP', 'KR', 'US'];
 const EUROPE = 'AD AL AT BA BE BG BY CH CY CZ DE DK EE ES FI FO FR GB GG GI GR HR HU IE IM IS IT JE LI LT LU LV MC MD ME MK MT NL NO PL PT RO RS RU SE SI SK SM UA VA'.split(' ');
@@ -229,11 +233,32 @@ function SearchForm({ filter, className }: { filter: DirectoryFilter; className?
 
 const describe = (s: AdminDirectoryStation) => [s.country, s.language, s.codec.toUpperCase(), s.bitrateKbps ? `${s.bitrateKbps} kbps` : null, ...s.genres.slice(0, 3)].filter(Boolean).join(' · ');
 
+/** The logo users see for this station, and the upload that replaces it. */
+function StationLogoControl({ s }: { s: AdminDirectoryStation }) {
+  const t = useT();
+  const custom = s.customLogoVersion ?? null;
+  return (
+    <span className="dr-logo">
+      {custom ? (
+        <img className="dr-logo-img" src={logoPath(s.id, custom)} alt={t('โลโก้ที่อัปโหลดของ {0}', s.name)} width={32} height={32} />
+      ) : s.logoUrl ? (
+        <a href={s.logoUrl} target="_blank" rel="noreferrer noopener">
+          {t('โลโก้ของสถานี ↗')}
+        </a>
+      ) : (
+        <small className="dim">{t('ไม่มีโลโก้ ใช้โลโก้ของเรา')}</small>
+      )}
+      <LogoUpload logoKey={s.id} uploaded={!!custom} label={t('เปลี่ยนโลโก้')} removeLabel={t('กลับไปใช้โลโก้เดิม')} />
+    </span>
+  );
+}
+
 /** On or off, and the switch. A station hidden by a host block is switched back on from the block list. */
 function StationActions({ s }: { s: AdminDirectoryStation }) {
   const t = useT();
   return (
     <span className="dr-actions">
+      <StationLogoControl s={s} />
       <span className={s.active ? 'dr-state on' : 'dr-state off'}>{s.active ? t('เปิดอยู่') : t('ปิดอยู่')}</span>
       {s.active ? (
         <>

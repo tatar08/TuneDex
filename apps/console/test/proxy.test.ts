@@ -30,9 +30,12 @@ describe('proxy media policy', () => {
 });
 
 describe('proxy explore policy', () => {
-  it('allows https media on /app/explore and loads no map tiles from anywhere', () => {
+  it('allows https media and station logos on /app/explore, and https pictures nowhere else', () => {
     const explore = proxy(new NextRequest('https://console.example.test/app/explore')).headers.get('content-security-policy')!;
-    expect(explore).toContain("img-src 'self' data: blob:;");
+    expect(explore).toContain("img-src 'self' data: blob: https:;");
     expect(explore).toContain("media-src 'self' https: blob:");
+    for (const path of ['/app/radio', '/admin/directory', '/admin/settings', '/app/explore/x']) {
+      expect(proxy(new NextRequest(`https://console.example.test${path}`)).headers.get('content-security-policy')).toContain("img-src 'self' data: blob:;");
+    }
   });
 });

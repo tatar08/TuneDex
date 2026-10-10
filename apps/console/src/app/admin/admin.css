@@ -916,6 +916,17 @@
 .adm .dr-state { display: inline-block; padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--l); }
 .adm .dr-state.on { color: #166534; background: #dcfce7; border-color: #86efac; }
 .adm .dr-state.off { color: #991b1b; background: #fee2e2; border-color: #fca5a5; }
+.adm .dr-logo { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; }
+.adm .dr-logo-img, .adm .lg-preview, .adm .st-logo img { object-fit: contain; background: #fff; border: 1px solid var(--l); border-radius: 8px; }
+.adm .lg-preview { justify-self: start; }
+.adm .st-page { display: flex; flex-direction: column; gap: 16px; max-width: 720px; }
+.t-workbench .st-page { padding: 16px 20px; }
+.t-daylight-bento .st-page { padding-top: 8px; }
+.adm .st-logo { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.adm .st-logo img { border-radius: 16px; }
+.adm .st-logo-text { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.adm .st-logo-text .jb-retry { align-items: flex-start; }
+.adm .st-logo-text .au-export-panel { left: 0; right: auto; }
 .adm .dr-pager { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 .adm .dr-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
 /* A reason box opened from a button near the left edge opens rightwards, so it stays on screen. */

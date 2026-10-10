@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import type { LayerGroup, Map as LeafletMap } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { MapStation } from '@/lib/bff';
+import { BUILT_IN_LOGO, nextLogo } from '@/lib/logo';
 import { CountryShape, loadCountryShapes } from '@/lib/world';
 import { clusterPoints, clusterSize } from './cluster';
 
@@ -12,7 +13,9 @@ const SAME_PLACE = 0.02;
 
 /**
  * Flat map (Leaflet over bundled country outlines, no tile service). Stations near each other on screen draw as one
- * circle with a count; zooming in splits them. Colours come from the page's CSS, so light and dark need no redraw.
+ * circle with a count; zooming in splits them. A station on its own shows its logo (Tar 2026-10-10): the one staff
+ * uploaded, else the station's own from its server, else `fallbackLogo`. Only what is in view is drawn, so a logo
+ * is fetched when its station can be seen. Colours come from the page's CSS, so light and dark need no redraw.
  * Names go in as text nodes, never as HTML.
  */
 export function WorldMap({
@@ -22,6 +25,7 @@ export function WorldMap({
   onGroup,
   fit,
   labels,
+  fallbackLogo,
 }: {
   stations: MapStation[];
   selected: string | null;
@@ -29,6 +33,8 @@ export function WorldMap({
   onGroup: (members: MapStation[]) => void;
   fit: boolean;
   labels: { zoomIn: string; zoomOut: string; group: (n: number) => string };
+  /** The default logo staff uploaded, or null for the built-in one. */
+  fallbackLogo: string | null;
 }) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<{
@@ -42,8 +48,8 @@ export function WorldMap({
   group.current = onGroup;
   const text = useRef(labels);
   text.current = labels;
-  const state = useRef({ stations, selected });
-  state.current = { stations, selected };
+  const state = useRef({ stations, selected, fallbackLogo });
+  state.current = { stations, selected, fallbackLogo };
 
   useEffect(() => {
     let cancelled = false;
@@ -68,7 +74,8 @@ export function WorldMap({
         style: { className: 'explore-land', weight: 0.7, fillOpacity: 1 },
       }).addTo(m);
       map.current = { L, map: m, layer: L.layerGroup().addTo(m) };
-      m.on('zoomend', () => el.current?.dispatchEvent(new Event('map-draw')));
+      // After a zoom or a drag: what is in view has changed.
+      m.on('moveend', () => el.current?.dispatchEvent(new Event('map-draw')));
       el.current.dispatchEvent(new Event('map-ready'));
     });
     return () => {
@@ -82,20 +89,23 @@ export function WorldMap({
     const draw = () => {
       const m = map.current;
       if (!m) return;
-      const { stations: all, selected: on } = state.current;
+      const { stations: all, selected: on, fallbackLogo: fallback } = state.current;
       m.layer.clearLayers();
       const zoom = m.map.getZoom();
+      const view = m.map.getBounds().pad(0.15);
       const points = all.map((s) => ({
         ...m.map.project([s.lat, s.lon], zoom),
         item: s,
       }));
       for (const c of clusterPoints(points, 26)) {
         const ll = m.map.unproject([c.x, c.y], zoom);
+        if (!view.contains(ll)) continue;
         const node = document.createElement('span');
         if (c.members.length === 1) {
           const s = c.members[0];
           const chosen = s.id === on;
-          node.className = chosen ? 'explore-dot on' : 'explore-dot';
+          node.className = chosen ? 'explore-dot logo on' : 'explore-dot logo';
+          node.append(logoImage(s.logo ?? fallback ?? BUILT_IN_LOGO, fallback));
           m.L.marker(ll, {
             icon: m.L.divIcon({
               html: node,
@@ -146,7 +156,7 @@ export function WorldMap({
       node?.removeEventListener('map-ready', draw);
       node?.removeEventListener('map-draw', draw);
     };
-  }, [stations, selected]);
+  }, [stations, selected, fallbackLogo]);
 
   useEffect(() => {
     const fitNow = () => {
@@ -164,6 +174,21 @@ export function WorldMap({
   }, [stations, fit]);
 
   return <div ref={el} className="explore-canvas" data-testid="world-map" />;
+}
+
+/** A logo as a picture element: no referrer to the station's server, and the next fallback if it does not load. */
+function logoImage(src: string, fallback: string | null): HTMLImageElement {
+  const img = document.createElement('img');
+  img.alt = '';
+  img.decoding = 'async';
+  img.referrerPolicy = 'no-referrer';
+  img.draggable = false;
+  img.addEventListener('error', () => {
+    const next = nextLogo(img.getAttribute('src') ?? '', fallback);
+    if (next) img.src = next;
+  });
+  img.src = src;
+  return img;
 }
 
 type Ring = number[][];

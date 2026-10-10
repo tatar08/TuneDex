@@ -9,6 +9,7 @@ import { APP_CONFIG, AppConfig } from '../config';
 import { Database } from '../db/database';
 import { RequireRoles, StaffGuard } from '../staff/staff';
 import { parseStreamUrl } from '../stations/stations.schema';
+import { LogoIndex, LogoService } from './logos';
 
 /** Tests only: stands in for the network when asking Radio Browser. */
 export const DIRECTORY_FETCH = Symbol('DIRECTORY_FETCH');
@@ -26,6 +27,11 @@ export interface DirectoryStation {
   codec: 'mp3' | 'aac' | 'hls';
   bitrateKbps: number | null;
   logoUrl: string | null;
+  /**
+   * Set when staff uploaded a logo for this station: its version. The image is at
+   * /v1/directory/radio/logos/{id}?v={customLogoVersion} and goes before `logoUrl`.
+   */
+  customLogoVersion?: string | null;
   homepageUrl: string | null;
   /** Only in answers to hasGeo=true (the web map), so the apps' station shape stays as it was. */
   geo?: { lat: number; lon: number };
@@ -131,6 +137,18 @@ export function geoOf(r: Record<string, unknown>): { lat: number; lon: number } 
   return { lat: Math.round(lat * 100) / 100, lon: Math.round(lon * 100) / 100 };
 }
 
+/**
+ * A station's own logo is fetched by the viewer's browser or app, so its address follows the stream rules: public
+ * https host on port 443, never an IP address or a local name.
+ */
+function logoUrlOf(v: unknown): string | null {
+  try {
+    return typeof v === 'string' && v.trim() ? parseStreamUrl(v.trim(), 'logoUrl') : null;
+  } catch {
+    return null;
+  }
+}
+
 function httpsUrl(v: unknown): string | null {
   if (typeof v !== 'string' || v.length > 2048) return null;
   try {
@@ -168,7 +186,7 @@ export function toDirectoryStation(raw: unknown, withGeo = false): DirectoryStat
       ? [...new Set(r.tags.split(',').map((t) => t.trim().toLowerCase()).filter((t) => /^[\p{L}\p{N}][\p{L}\p{N} &+-]{0,29}$/u.test(t)))].slice(0, 5)
       : [];
   const bitrate = typeof r.bitrate === 'number' && Number.isInteger(r.bitrate) && r.bitrate > 0 && r.bitrate <= 1000 ? r.bitrate : null;
-  const station: DirectoryStation = { id, name, country, language, genres, streamUrl, codec, bitrateKbps: bitrate, logoUrl: httpsUrl(r.favicon), homepageUrl: httpsUrl(r.homepage) };
+  const station: DirectoryStation = { id, name, country, language, genres, streamUrl, codec, bitrateKbps: bitrate, logoUrl: logoUrlOf(r.favicon), homepageUrl: httpsUrl(r.homepage) };
   if (!withGeo) return station;
   const geo = geoOf(r);
   return geo ? { ...station, geo } : null;
@@ -191,6 +209,9 @@ function blockFor(s: DirectoryStation, blocks: BlockIndex): { id: string; kind: 
   const b = blocks.hosts.find((b) => host === b.value || host.endsWith(`.${b.value}`));
   return b ? { id: b.id, kind: 'host', value: b.value } : null;
 }
+
+/** The station with `customLogoVersion`: the version of the logo staff uploaded for it, or null. */
+const withLogo = (s: DirectoryStation, logos: LogoIndex): DirectoryStation => ({ ...s, customLogoVersion: logos.stations.get(s.id) ?? null });
 
 /** `country` (ISO alpha-2) or `q` (part of the name), `status` all | active | inactive, `offset`. */
 export function parseAdminDirectoryQuery(q: Record<string, unknown>): { country: string | null; q: string | null; status: 'all' | 'active' | 'inactive'; offset: number } {
@@ -230,15 +251,16 @@ export class DirectoryService {
     @Inject(DIRECTORY_FETCH) private readonly http: DirectoryFetch,
     private readonly db: Database,
     private readonly logger: StructuredLogger,
+    private readonly logos: LogoService,
   ) {}
 
-  async search(query: DirectoryQuery): Promise<{ stations: DirectoryStation[]; nextOffset: number | null; attribution: string }> {
+  async search(query: DirectoryQuery): Promise<{ stations: DirectoryStation[]; nextOffset: number | null; defaultLogoVersion: string | null; attribution: string }> {
     const dir = this.config.radioDirectory;
     if (!dir) throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'DEPENDENCY_UNAVAILABLE', { dependency: 'radio_directory', reason: 'not_configured' });
     const page = await this.upstream(dir.baseUrl, query);
-    const blocks = await this.blockIndex();
-    const stations = page.stations.filter((s) => !blockFor(s, blocks));
-    return { stations, nextOffset: page.full && query.offset + query.limit <= OFFSET_MAX ? query.offset + query.limit : null, attribution: DIRECTORY_ATTRIBUTION };
+    const [blocks, logos] = await Promise.all([this.blockIndex(), this.logos.index()]);
+    const stations = page.stations.filter((s) => !blockFor(s, blocks)).map((s) => withLogo(s, logos));
+    return { stations, nextOffset: page.full && query.offset + query.limit <= OFFSET_MAX ? query.offset + query.limit : null, defaultLogoVersion: logos.default, attribution: DIRECTORY_ATTRIBUTION };
   }
 
   private async upstream(baseUrl: string, q: DirectoryQuery): Promise<{ stations: DirectoryStation[]; full: boolean }> {
@@ -301,10 +323,10 @@ export class DirectoryService {
    * one in the featured regions (FEATURED_COUNTRIES, EUROPE), and each other country's 20 most listened. One request here stands for many upstream pages,
    * so the console's single address is not rate limited page by page.
    */
-  async map(country: string | null): Promise<{ stations: DirectoryStation[]; truncated: boolean; attribution: string }> {
+  async map(country: string | null): Promise<{ stations: DirectoryStation[]; truncated: boolean; defaultLogoVersion: string | null; attribution: string }> {
     const list = await this.bulk(country ? `country:${country}` : 'world', (base) => (country ? this.allPages(base, { countrycode: country }, COUNTRY_MAX, 'known') : this.world(base)));
-    const blocks = await this.blockIndex();
-    return { stations: list.stations.filter((s) => !blockFor(s, blocks)), truncated: list.truncated, attribution: DIRECTORY_ATTRIBUTION };
+    const [blocks, logos] = await Promise.all([this.blockIndex(), this.logos.index()]);
+    return { stations: list.stations.filter((s) => !blockFor(s, blocks)).map((s) => withLogo(s, logos)), truncated: list.truncated, defaultLogoVersion: logos.default, attribution: DIRECTORY_ATTRIBUTION };
   }
 
   /**
@@ -315,13 +337,13 @@ export class DirectoryService {
     const list = query.country
       ? await this.bulk(`country:${query.country}`, (base) => this.allPages(base, { countrycode: query.country! }, COUNTRY_MAX, 'known'))
       : await this.bulk(`name:${query.q}`, (base) => this.allPages(base, { name: query.q! }, ADMIN_PAGE * 2, 'none'));
-    const blocks = await this.blockIndex();
+    const [blocks, logos] = await Promise.all([this.blockIndex(), this.logos.index()]);
     const needle = query.country && query.q ? query.q.toLowerCase() : null;
     const rows = list.stations
       .filter((s) => !needle || s.name.toLowerCase().includes(needle))
       .map((s) => {
         const block = blockFor(s, blocks);
-        return { ...s, active: !block, block };
+        return { ...withLogo(s, logos), active: !block, block };
       })
       .filter((s) => query.status === 'all' || s.active === (query.status === 'active'));
     const stations = rows.slice(query.offset, query.offset + ADMIN_PAGE);
