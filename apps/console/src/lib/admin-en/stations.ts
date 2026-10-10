@@ -1,5 +1,12 @@
 /** English for the staff console (stations), keyed by the Thai text. `{0}`, `{1}` … are filled in by t(). */
 export const EN_STATIONS: Record<string, string> = {
+  'แผนที่คือหน้าแรก': 'Map as home',
+  'แผนที่เต็มพื้นที่ แผงสถานีโปรดและฟังล่าสุด โทนเข้ม': 'A map filling the main area, favourites and recent listening, dark appearance',
+  'สวนกลางคืน': 'Night garden',
+  'แผนที่ในสวนสีเข้ม ชั้นสถานีโปรดและฟังล่าสุด ตัวเล่นแบบแคปซูล': 'A dark map garden, favourite and recent shelves, with a capsule player',
+  'นิตยสารกลางวัน': 'Daylight editorial',
+  'ประเทศที่คุณเลือกเป็นหัวเรื่อง สถานีเด่นและชั้นรายการ อ่านได้ทั้งสว่างและมืด': 'Your chosen country as the headline, a featured station and lists, readable in light and dark',
+
   'แถบจูนสัญญาณ': 'Signal dial',
   'เลื่อนเลือกตำแหน่งสถานีโดยไม่เล่นอัตโนมัติ ตัวเล่นอยู่ด้านล่าง': 'Browse station positions without autoplay; the player stays at the bottom',
   'จูนรอบโลก': 'Tune the world',
