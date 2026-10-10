@@ -67,6 +67,11 @@ const CACHE_STALE_MS = 60 * 60_000;
 const CACHE_MAX = 500;
 const COUNTRY_TTL_MS = 60 * 60_000;
 const UPSTREAM_TIMEOUT_MS = 5000;
+/**
+ * One page of a whole-country or world list. Radio Browser sometimes takes over 20 s per page (staging 2026-10-10:
+ * 23-26 s for US pages); these lists load behind the map (warm-up, stale-while-revalidate), so waiting is fine.
+ */
+const BULK_PAGE_TIMEOUT_MS = 45_000;
 export const UPSTREAM_MAX_BYTES = 2 * 1024 * 1024;
 /**
  * Map regions where the explorer lists every station Radio Browser has, not only the world's most popular (Tar
@@ -336,7 +341,7 @@ export class DirectoryService implements OnApplicationBootstrap, OnApplicationSh
   private async request(baseUrl: string, key: string, geo: 'required' | 'known' | 'none', maxBytes: number, endpoint = 'search'): Promise<{ stations: DirectoryStation[]; raw: number }> {
     const res = await this.http(`${baseUrl}/json/stations/${endpoint}?${key}`, {
       headers: { accept: 'application/json', 'user-agent': `TuneDeck-API/${this.config.build}` },
-      signal: AbortSignal.timeout(maxBytes > UPSTREAM_MAX_BYTES ? UPSTREAM_TIMEOUT_MS * 3 : UPSTREAM_TIMEOUT_MS),
+      signal: AbortSignal.timeout(maxBytes > UPSTREAM_MAX_BYTES ? BULK_PAGE_TIMEOUT_MS : UPSTREAM_TIMEOUT_MS),
     });
     if (res.status !== 200) throw new Error(`status ${res.status}`);
     const body = await res.text();
