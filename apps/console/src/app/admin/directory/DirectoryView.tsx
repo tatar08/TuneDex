@@ -229,11 +229,93 @@ function SearchForm({ filter, className }: { filter: DirectoryFilter; className?
 
 const describe = (s: AdminDirectoryStation) => [s.country, s.language, s.codec.toUpperCase(), s.bitrateKbps ? `${s.bitrateKbps} kbps` : null, ...s.genres.slice(0, 3)].filter(Boolean).join(' · ');
 
+/** "13.7563, 100.5018" as copied from Google Maps (a comma or spaces between), or null. */
+export function parsePlace(text: string): { lat: number; lon: number } | null {
+  const m = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*[,\s]\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(text);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lon = Number(m[2]);
+  return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && !(lat === 0 && lon === 0) ? { lat, lon } : null;
+}
+
+/** Where the station shows on the map, and a box to set it by hand (Radio Browser has no place for many stations). */
+function PlaceButton({ s }: { s: AdminDirectoryStation }) {
+  const { csrfToken, t } = useAdmin();
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(s.geo ? `${s.geo.lat}, ${s.geo.lon}` : '');
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState('');
+  const where = s.geo ? `${s.geo.lat.toFixed(4)}, ${s.geo.lon.toFixed(4)}` : '';
+
+  async function save(remove: boolean) {
+    const place = remove ? null : parsePlace(text);
+    if (!remove && !place) return setProblem(t('พิมพ์ละติจูด, ลองจิจูด เช่น 13.7563, 100.5018'));
+    setBusy(true);
+    setProblem('');
+    const p = await send(`/bff/admin/directory/stations/${s.id}/geo${remove ? '/remove' : ''}`, place ?? {}, csrfToken);
+    setBusy(false);
+    if (p) return setProblem(t(p === 'value' || p === 'reason' ? 'พิมพ์ละติจูด, ลองจิจูด เช่น 13.7563, 100.5018' : PROBLEMS[p]));
+    setOpen(false);
+    router.refresh();
+  }
+
+  return (
+    <div className="jb-retry dr-place">
+      <small className="dim">
+        {s.geoSource === 'staff' ? t('📍 {0} (ทีมงานใส่)', where) : s.geoSource === 'radio-browser' ? t('📍 {0} (จาก Radio Browser)', where) : t('ไม่มีพิกัด ไม่ขึ้นบนแผนที่')}
+      </small>
+      <button type="button" className="btn secondary" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {s.geoSource === 'staff' ? t('แก้พิกัด') : t('ใส่พิกัด')}
+      </button>
+      {open && (
+        <form
+          className="au-export-panel"
+          aria-label={t('พิกัดของ {0}', s.name)}
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save(false);
+          }}
+        >
+          <label className="fld">
+            <span>{t('ละติจูด, ลองจิจูด (คัดลอกจาก Google Maps ได้)')}</span>
+            <input value={text} onChange={(e) => setText(e.target.value)} inputMode="decimal" placeholder="13.7563, 100.5018" maxLength={40} required autoFocus />
+          </label>
+          {parsePlace(text) && (
+            <a className="dim" href={`https://www.google.com/maps?q=${parsePlace(text)!.lat},${parsePlace(text)!.lon}`} target="_blank" rel="noopener noreferrer">
+              {t('ดูตำแหน่งนี้ใน Google Maps')}
+            </a>
+          )}
+          {problem && (
+            <p role="alert" className="au-export-err">
+              {problem}
+            </p>
+          )}
+          <div className="row">
+            <button type="submit" className="btn" disabled={busy}>
+              {busy ? t('กำลังบันทึก…') : t('บันทึกพิกัด')}
+            </button>
+            {s.geoSource === 'staff' && (
+              <button type="button" className="btn secondary" disabled={busy} onClick={() => void save(true)}>
+                {t('ลบพิกัดที่ใส่เอง')}
+              </button>
+            )}
+            <button type="button" className="btn secondary" onClick={() => setOpen(false)}>
+              {t('ยกเลิก')}
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
 /** On or off, and the switch. A station hidden by a host block is switched back on from the block list. */
 function StationActions({ s }: { s: AdminDirectoryStation }) {
   const t = useT();
   return (
     <span className="dr-actions">
+      <PlaceButton s={s} />
       <span className={s.active ? 'dr-state on' : 'dr-state off'}>{s.active ? t('เปิดอยู่') : t('ปิดอยู่')}</span>
       {s.active ? (
         <>

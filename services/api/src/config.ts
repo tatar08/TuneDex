@@ -77,9 +77,10 @@ export interface AppConfig {
   };
   /**
    * Community radio directory search (Radio Browser, decided by Tar 2026-10-05). Off unless RADIO_BROWSER_BASE_URL
-   * is set to one Radio Browser server, e.g. https://de1.api.radio-browser.info.
+   * is set to one Radio Browser server, e.g. https://de1.api.radio-browser.info. `warm`: read the web map's lists
+   * shortly after start, so the first viewer does not wait for them (on whenever the directory is configured).
    */
-  radioDirectory: { baseUrl: string } | null;
+  radioDirectory: { baseUrl: string; warm?: boolean } | null;
 }
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
@@ -232,7 +233,7 @@ function loadRadioDirectory(env: NodeJS.ProcessEnv): AppConfig['radioDirectory']
     throw new Error('RADIO_BROWSER_BASE_URL must be an https URL');
   }
   if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash) throw new Error('RADIO_BROWSER_BASE_URL must be an https URL');
-  return { baseUrl: u.origin + u.pathname.replace(/\/+$/, '') };
+  return { baseUrl: u.origin + u.pathname.replace(/\/+$/, ''), warm: true };
 }
 
 function loadCorsOrigins(env: NodeJS.ProcessEnv, appEnv: AppEnv): string[] {

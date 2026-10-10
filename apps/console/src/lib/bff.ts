@@ -431,6 +431,9 @@ export interface DirectorySearch {
 export interface AdminDirectoryStation extends DirectoryStation {
   active: boolean;
   block: { id: string; kind: 'station' | 'host'; value: string } | null;
+  /** The place on the map: staff's own when they set one, else Radio Browser's. */
+  geo?: { lat: number; lon: number };
+  geoSource: 'staff' | 'radio-browser' | null;
 }
 export interface AdminDirectoryList {
   stations: AdminDirectoryStation[];
@@ -984,6 +987,13 @@ export function createBff(deps: BffDeps) {
     },
     /** POST /bff/admin/directory/blocks and …/{id}/remove, each with a reason; the API checks roles and audits. */
     directoryBlock: (req: Request) => timed(req, '/bff/admin/directory/blocks', async (requestId) => forgetMap(await adminProxy(req, requestId, '/v1/admin/directory/blocks', true))),
+    /** POST /bff/admin/directory/stations/{id}/geo `{ lat, lon }` and …/geo/remove: a station's place set by hand. */
+    directoryGeo: (req: Request, id: string, remove: boolean) =>
+      timed(req, remove ? '/bff/admin/directory/stations/:id/geo/remove' : '/bff/admin/directory/stations/:id/geo', async (requestId) =>
+        /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(id)
+          ? forgetMap(await adminProxy(req, requestId, `/v1/admin/directory/stations/${id}/geo${remove ? '/remove' : ''}`, true))
+          : notFound(requestId),
+      ),
     directoryUnblock: (req: Request, id: string) =>
       timed(req, '/bff/admin/directory/blocks/:id/remove', async (requestId) =>
         /^[1-9]\d{0,17}$/.test(id) ? forgetMap(await adminProxy(req, requestId, `/v1/admin/directory/blocks/${id}/remove`, true)) : notFound(requestId),

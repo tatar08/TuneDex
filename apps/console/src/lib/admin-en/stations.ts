@@ -1,5 +1,16 @@
 /** English for the staff console (stations), keyed by the Thai text. `{0}`, `{1}` … are filled in by t(). */
 export const EN_STATIONS: Record<string, string> = {
+  'พิมพ์ละติจูด, ลองจิจูด เช่น 13.7563, 100.5018': 'Type latitude, longitude, e.g. 13.7563, 100.5018',
+  '📍 {0} (ทีมงานใส่)': '📍 {0} (set by staff)',
+  '📍 {0} (จาก Radio Browser)': '📍 {0} (from Radio Browser)',
+  'ไม่มีพิกัด ไม่ขึ้นบนแผนที่': 'No place, not on the map',
+  'แก้พิกัด': 'Edit place',
+  'ใส่พิกัด': 'Set place',
+  'พิกัดของ {0}': 'Place of {0}',
+  'ละติจูด, ลองจิจูด (คัดลอกจาก Google Maps ได้)': 'Latitude, longitude (you can copy it from Google Maps)',
+  'ดูตำแหน่งนี้ใน Google Maps': 'See this place in Google Maps',
+  'บันทึกพิกัด': 'Save place',
+  'ลบพิกัดที่ใส่เอง': 'Remove the place set by hand',
   'ทุกประเทศ (ค้นด้วยชื่อ)': 'All countries (search by name)',
   'ประเทศหลัก': 'Main countries',
   'ยุโรป': 'Europe',
