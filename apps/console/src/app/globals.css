@@ -215,10 +215,67 @@ a.btn { display: inline-block; text-decoration: none; }
 .explore-player .player .btn.secondary { color: var(--x-fg); border-color: var(--x-line); min-height: 44px; }
 .explore-player .player-state { margin: 6px 0 0; color: var(--x-muted); }
 .explore-player .player-state[data-state="failed"] { color: var(--danger); }
-@media (max-width: 860px) {
-  .explore-body { grid-template-columns: minmax(0, 1fr); }
-  .explore-canvas { height: 52vh; min-height: 300px; }
-  .explore-panel { border-left: 0; border-top: 1px solid var(--x-line); max-height: 75vh; min-height: 0; border-radius: 20px 20px 0 0; margin-top: -16px; position: relative; z-index: 2; }
-  .explore-panel::before { content: ""; align-self: center; width: 40px; height: 4px; border-radius: 2px; background: var(--x-line); margin-bottom: 4px; }
-  .explore-seg button { padding: 0 12px; }
+/* Big screens and landscape tablets: map beside the list, sized to the window. */
+.explore-canvas, .explore-panel { height: clamp(420px, calc(100dvh - 330px), 760px); max-height: none; }
+.explore-tools, .explore-handle { display: none; }
+@media (max-width: 1100px) { .explore-body { grid-template-columns: minmax(0, 1fr) 320px; } }
+.explore-dot.logo img { padding: 3px; }
+
+/* Phones, and tablets held upright: full-screen map, the list as a sheet pulled up from the bottom. */
+@media (max-width: 719px), (max-width: 1100px) and (orientation: portrait), (max-height: 500px) {
+  .shell.explore-shell { max-width: none; margin: 0; padding: 0; border-radius: 0; box-shadow: none; height: 100dvh; min-height: 0; display: flex; flex-direction: column; }
+  .explore-shell > .nav { padding: 10px max(16px, env(safe-area-inset-left)); }
+  .explore-shell > h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
+  .explore-shell > .lede { display: none; }
+  .explore-app { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 0; border-radius: 0; }
+  .explore-bar { padding: 10px 12px; gap: 8px; flex-wrap: nowrap; }
+  .explore-bar .explore-seg { display: none; }
+  .explore-search { flex: 1 1 55%; min-height: 44px; padding: 0 12px; }
+  .explore-country { flex: 1 1 45%; }
+  .explore-select { min-height: 44px; }
+  .explore-chips { padding: 8px 12px; }
+  .explore-body { flex: 1; min-height: 0; position: relative; display: block; }
+  .explore-stage { position: absolute; inset: 0; z-index: 0; }
+  .explore-canvas { height: 100%; min-height: 0; }
+  .explore-tools { position: absolute; top: 12px; left: 12px; z-index: 1001; display: flex; flex-direction: column; gap: 8px; }
+  .explore-tools button { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--x-line); background: var(--x-panel); color: var(--x-fg); display: grid; place-items: center; cursor: pointer; box-shadow: 0 4px 12px rgb(0 0 0 / 14%); }
+  .explore-overlay { top: 70px; }
+  .explore-panel { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; min-height: 0; max-height: none; height: 172px; padding: 0 16px 16px; border: 0; border-radius: 20px 20px 0 0; box-shadow: 0 -8px 24px rgb(0 0 0 / 14%); transition: height 0.25s ease; overscroll-behavior: contain; }
+  .explore-body[data-sheet="half"] .explore-panel { height: 55%; }
+  .explore-body[data-sheet="full"] .explore-panel { height: calc(100% - 8px); }
+  .explore-handle { display: grid; place-items: center; position: sticky; top: 0; z-index: 1; flex: none; width: calc(100% + 32px); margin: 0 -16px; height: 28px; border: 0; padding: 0; background: var(--x-panel); cursor: grab; touch-action: none; }
+  .explore-handle span { width: 40px; height: 5px; border-radius: 3px; background: var(--x-line); }
+  .explore-player .player { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  @media (prefers-reduced-motion: reduce) { .explore-panel { transition: none; } }
+}
+
+/* Phone: the account pages' links move to a bottom tab bar within thumb reach. */
+.tabbar { display: none; }
+@media (max-width: 719px) {
+  .shell:not(.auth) > .nav a, .shell:not(.auth) > .nav form { display: none; }
+  .shell:not(.auth) > .nav .brand { flex-basis: auto; margin-bottom: 0; }
+  .shell:not(.auth) { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+  .shell.explore-shell { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+  .tabbar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1100; padding: 4px max(4px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(4px, env(safe-area-inset-left)); background: var(--panel); border-top: 1px solid var(--line); }
+  .tabbar > a, .tabbar summary { flex: 1; min-width: 0; min-height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-decoration: none; color: var(--muted); font-size: 11.5px; font-weight: 600; line-height: 1.2; border-radius: 12px; cursor: pointer; list-style: none; }
+  .tabbar summary::-webkit-details-marker { display: none; }
+  .tabbar > a span, .tabbar summary span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tabbar [aria-current='page'] { color: var(--fg); }
+  .tabbar [aria-current='page'] svg { color: var(--ok); }
+  .tabbar-more { flex: 1; display: flex; min-width: 0; }
+  .tabbar-more summary { width: 100%; }
+  .tabbar-more summary svg { stroke-width: 3.2; }
+  .tabbar-menu { position: absolute; right: 8px; bottom: calc(100% + 8px); min-width: 210px; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; }
+  .tabbar-menu a, .tabbar-menu button { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 12px; border-radius: 10px; font-weight: 600; cursor: pointer; color: var(--fg); }
+  .tabbar-menu form { margin: 0; }
+  .tabbar-menu button { width: 100%; color: var(--danger); }
+  .tabbar-menu a:focus-visible, .tabbar-menu button:focus-visible, .tabbar summary:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .tabbar-menu [aria-current='page'] { background: var(--soft); }
+}
+
+/* Touch screens: 16px fields so iOS Safari does not zoom in when one is tapped. */
+@media (pointer: coarse) { input, select, textarea, .explore-search input { font-size: max(16px, 1em); } }
+/* Notched phones in landscape: keep content clear of the cut-out. */
+@media (max-width: 640px), (orientation: landscape) and (max-height: 500px) {
+  .shell { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
 }

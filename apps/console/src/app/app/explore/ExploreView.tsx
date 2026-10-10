@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import '@fontsource/ibm-plex-sans-thai/400.css';
 import '@fontsource/ibm-plex-sans-thai/500.css';
 import '@fontsource/ibm-plex-sans-thai/600.css';
@@ -22,6 +22,9 @@ const WorldGlobe = dynamic(() => import('./WorldGlobe').then((m) => m.WorldGlobe
 
 type View = 'map' | 'globe';
 type Look = 'auto' | 'light' | 'dark';
+/** How far the station list is pulled up over the map on a phone or a portrait tablet. */
+type Sheet = 'peek' | 'half' | 'full';
+const SHEETS: Sheet[] = ['peek', 'half', 'full'];
 const VIEW_KEY = 'tunedeck.web.exploreView';
 const LOOK_KEY = 'tunedeck.web.exploreLook';
 
@@ -83,6 +86,8 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
   const [genre, setGenre] = useState('');
   const [note, setNote] = useState('');
   const [noGlobe, setNoGlobe] = useState(false);
+  const [sheet, setSheet] = useState<Sheet>('peek');
+  const drag = useRef<number | null>(null);
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -199,7 +204,12 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
   const select = (s: MapListStation) => {
     setSelected(s);
     setNote('');
+    // On a phone the chosen station shows in the sheet, so lift it enough to see the station and its buttons.
+    setSheet((h) => (h === 'peek' ? 'half' : h));
   };
+  const step = (by: number) => setSheet((h) => SHEETS[Math.min(SHEETS.length - 1, Math.max(0, SHEETS.indexOf(h) + by))]);
+  const looks: Look[] = ['auto', 'light', 'dark'];
+  const lookName = { auto: t.exploreLookAuto, light: t.exploreLookLight, dark: t.exploreLookDark };
   const globe = view === 'globe' && !noGlobe;
 
   const row = (s: MapListStation, testId: string) => {
@@ -319,7 +329,7 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
           </div>
         )}
 
-        <div className="explore-body">
+        <div className="explore-body" data-sheet={sheet}>
           <div className="explore-stage">
             {globe ? (
               <WorldGlobe
@@ -350,9 +360,68 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
                 {t.exploreNoGlobe}
               </p>
             )}
+            {/* Phone and portrait tablet: the two switches shrink to round buttons on the map. */}
+            <div className="explore-tools">
+              <button
+                type="button"
+                aria-label={t.exploreSwitchView(view === 'globe' ? t.exploreMap : t.exploreGlobe)}
+                title={t.exploreSwitchView(view === 'globe' ? t.exploreMap : t.exploreGlobe)}
+                onClick={() => chooseView(view === 'globe' ? 'map' : 'globe')}
+              >
+                {view === 'globe' ? (
+                  <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+                    <path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" />
+                  </svg>
+                )}
+              </button>
+              <button
+                type="button"
+                aria-label={t.exploreSwitchLook(lookName[look])}
+                title={t.exploreSwitchLook(lookName[look])}
+                onClick={() => chooseLook(looks[(looks.indexOf(look) + 1) % looks.length])}
+              >
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <circle cx="12" cy="12" r="8" />
+                  {look === 'auto' ? <path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" /> : look === 'dark' ? <circle cx="12" cy="12" r="8" fill="currentColor" /> : null}
+                </svg>
+              </button>
+            </div>
           </div>
 
           <aside className="explore-panel" aria-labelledby="explore-list">
+            <button
+              type="button"
+              className="explore-handle"
+              aria-label={t.exploreSheet}
+              aria-expanded={sheet !== 'peek'}
+              onPointerDown={(e) => {
+                drag.current = e.clientY;
+                e.currentTarget.setPointerCapture?.(e.pointerId);
+              }}
+              onPointerUp={(e) => {
+                const from = drag.current;
+                drag.current = null;
+                if (from === null) return;
+                const dy = e.clientY - from;
+                if (Math.abs(dy) > 30) step(dy < 0 ? 1 : -1);
+                else setSheet((h) => (h === 'full' ? 'peek' : SHEETS[SHEETS.indexOf(h) + 1]));
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowUp') step(1);
+                if (e.key === 'ArrowDown') step(-1);
+              }}
+              onClick={(e) => {
+                // Keyboard Enter/Space arrive as a click with no pointer gesture before it.
+                if (e.detail === 0) setSheet((h) => (h === 'full' ? 'peek' : SHEETS[SHEETS.indexOf(h) + 1]));
+              }}
+            >
+              <span aria-hidden="true" />
+            </button>
             {selected && (
               <section className="explore-pick" aria-label={selected.name} data-testid="explore-pick">
                 <span className="explore-pick-head">

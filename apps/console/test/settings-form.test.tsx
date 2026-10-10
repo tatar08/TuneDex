@@ -57,7 +57,8 @@ describe('SettingsForm', () => {
     await user.tab(); // devices link
     await user.tab(); // privacy link
     await user.tab(); // sign-out button
-    await user.tab(); // theme radio group
+    // jsdom applies no CSS, so the phone's bottom tab bar (hidden on this width in a browser) is in the order too.
+    for (let i = 0; i < 12 && document.activeElement?.getAttribute('name') !== 'theme'; i++) await user.tab();
     expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'ตามระบบ' }));
     await user.keyboard('{ArrowRight}{ArrowRight}');
     expect((screen.getByRole('radio', { name: 'มืด' }) as HTMLInputElement).checked).toBe(true);

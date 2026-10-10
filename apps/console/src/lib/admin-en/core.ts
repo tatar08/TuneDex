@@ -20,6 +20,8 @@ export const EN_CORE: Record<string, string> = {
   'ตั้งค่าของฉัน': 'My settings',
   'ขยายเมนู': 'Expand menu',
   'ยุบเมนู': 'Collapse menu',
+  'เปิดเมนู': 'Open menu',
+  'ปิดเมนู': 'Close menu',
   'รอตรวจ {0}': '{0} awaiting review',
   'โหมดสี': 'Color mode',
   'เชื่อมต่อ API แล้ว': 'API connected',

@@ -925,3 +925,46 @@
 .adm .dr-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
 /* A reason box opened from a button near the left edge opens rightwards, so it stays on screen. */
 .t-daylight-bento .jb-bento .au-export-panel, .t-workbench .det .jb-retry .au-export-panel, .t-workbench .list .lh .au-export-panel { left: 0; right: auto; }
+
+/* Phones and upright tablets (Tar 2026-10-10): each theme's menu folds behind one button so a page opens on its
+   content, tables turn into one card per row, and touch targets reach 44px. */
+.adm-menu-btn { display: none; }
+@media (max-width: 900px) {
+  .adm .adm-menu-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; margin-left: auto; border: 1px solid var(--l); border-radius: 12px; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+  .adm .adm-menu-btn .ico { width: 20px; height: 20px; flex: none; }
+
+  .t-control-room .side { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; }
+  .adm.t-control-room[data-menu="closed"] .side > :not(.logo):not(.adm-menu-btn) { display: none; }
+  .adm.t-control-room[data-menu="open"] .side > :not(.logo):not(.adm-menu-btn) { flex-basis: 100%; }
+
+  .t-broadcast-rack .bar { padding: 10px 14px; gap: 10px; }
+  .adm.t-broadcast-rack[data-menu="closed"] .bar > :not(.brand):not(.adm-menu-btn) { display: none; }
+  .adm.t-broadcast-rack[data-menu="open"] .bar > .bands { flex-basis: 100%; }
+
+  .t-daylight-bento .nav { flex-wrap: wrap; gap: 10px; }
+  .t-daylight-bento .nav nav { flex-wrap: wrap; flex-basis: 100%; }
+  .t-daylight-bento .nav nav a { white-space: nowrap; }
+  .t-daylight-bento .nav .av { margin-left: 0; }
+  .adm.t-daylight-bento[data-menu="closed"] .nav > nav, .adm.t-daylight-bento[data-menu="closed"] .nav > .av { display: none; }
+
+  .t-minimal .fv-side, .t-minimal .fv-side.collapsed { padding: 12px 14px; border-radius: 22px; gap: 12px; }
+  .t-minimal .fv-side-top { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+  .t-minimal .fv-side-top > :not(.fv-brand):not(.adm-menu-btn) { flex-basis: 100%; }
+  .adm.t-minimal[data-menu="closed"] .fv-side-top > :not(.fv-brand):not(.adm-menu-btn), .adm.t-minimal[data-menu="closed"] .fv-side-foot { display: none; }
+
+  .t-workbench .rail { flex-wrap: nowrap; overflow-x: auto; padding: 6px 8px; align-items: center; scrollbar-width: none; }
+  .t-workbench .rail > * { flex: none; }
+}
+@media (max-width: 640px) {
+  .adm table:has(thead th), .adm table:has(thead th) tbody, .adm table:has(thead th) tr, .adm table:has(thead th) td { display: block; width: auto; }
+  .adm table:has(thead th) thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .adm table:has(thead th) tr { border: 1px solid var(--l); border-radius: 12px; padding: 8px 12px; margin: 0 0 10px; }
+  .adm table:has(thead th) td { display: grid; grid-template-columns: minmax(84px, 34%) minmax(0, 1fr); gap: 10px; padding: 4px 0; border: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+  .adm table:has(thead th) td::before { content: attr(data-label); color: var(--m); font-size: 12px; }
+  .adm table:has(thead th) td:not([data-label]), .adm table:has(thead th) td[data-label=""] { grid-template-columns: minmax(0, 1fr); }
+  .adm table:has(thead th) td:not([data-label])::before { content: none; }
+}
+@media (max-width: 900px) and (pointer: coarse) {
+  .adm button, .adm .btn, .adm select, .adm input:not([type="checkbox"]):not([type="radio"]) { min-height: 44px; }
+  .adm input, .adm select, .adm textarea { font-size: max(16px, 1em); }
+}
