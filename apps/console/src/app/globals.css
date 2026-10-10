@@ -210,11 +210,25 @@ a.btn { display: inline-block; text-decoration: none; }
 .explore-play.on { background: var(--x-on); color: var(--x-on-ink); }
 .explore-source { margin: 8px 0 0; font-size: 12.5px; color: var(--x-muted); }
 .explore-sub { font-size: 14px; margin: 14px 0 4px; color: var(--x-muted); font-weight: 500; }
-.explore-player { position: sticky; bottom: 0; z-index: 5; border-top: 1px solid var(--x-line); background: var(--x-bar); }
-.explore-player .player { position: static; margin: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; color: var(--x-fg); }
-.explore-player .player .btn.secondary { color: var(--x-fg); border-color: var(--x-line); min-height: 44px; }
-.explore-player .player-state { margin: 6px 0 0; color: var(--x-muted); }
-.explore-player .player-state[data-state="failed"] { color: var(--danger); }
+/* The explorer's player is one row (Tar 2026-10-10): logo, name, state, Stop. A bar under the map on a wide screen. */
+.explore-player { grid-column: 1 / -1; position: sticky; bottom: 0; z-index: 5; border-top: 1px solid var(--x-line); background: var(--x-bar); }
+.player.compact { position: static; margin: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; color: var(--x-fg); display: flex; align-items: center; gap: 12px; padding: 10px 16px; min-height: 64px; }
+.player.compact .player-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.player.compact .player-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player.compact .player-state { margin: 0; font-size: 13px; color: var(--x-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.player.compact .player-state[data-state="playing"] { color: var(--ok); }
+.player.compact .player-state[data-state="failed"] { color: var(--danger); }
+.player-eq { flex: none; display: none; align-items: flex-end; gap: 3px; height: 18px; }
+.player.compact[data-state="playing"] .player-eq { display: inline-flex; }
+.player-eq i { width: 4px; border-radius: 2px; background: var(--ok); height: 40%; animation: player-eq 0.9s ease-in-out infinite alternate; }
+.player-eq i:nth-child(2) { height: 100%; animation-delay: -0.3s; }
+.player-eq i:nth-child(3) { height: 65%; animation-delay: -0.6s; }
+@keyframes player-eq { to { height: 25%; } }
+@media (prefers-reduced-motion: reduce) { .player-eq i { animation: none; } }
+.player-stop { flex: none; width: 48px; height: 48px; border-radius: 50%; border: 0; display: grid; place-items: center; background: var(--ok); color: #04121a; cursor: pointer; }
+.player-stop:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.player-video.compact { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.sheet-only { display: none; }
 /* Big screens and landscape tablets: map beside the list, sized to the window. */
 .explore-canvas, .explore-panel { height: clamp(420px, calc(100dvh - 330px), 760px); max-height: none; }
 .explore-tools, .explore-handle { display: none; }
@@ -240,14 +254,42 @@ a.btn { display: inline-block; text-decoration: none; }
   .explore-tools { position: absolute; top: 12px; left: 12px; z-index: 1001; display: flex; flex-direction: column; gap: 8px; }
   .explore-tools button { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--x-line); background: var(--x-panel); color: var(--x-fg); display: grid; place-items: center; cursor: pointer; box-shadow: 0 4px 12px rgb(0 0 0 / 14%); }
   .explore-overlay { top: 70px; }
-  .explore-panel { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; min-height: 0; max-height: none; height: 172px; padding: 0 16px 16px; border: 0; border-radius: 20px 20px 0 0; box-shadow: 0 -8px 24px rgb(0 0 0 / 14%); transition: height 0.25s ease; overscroll-behavior: contain; }
-  .explore-body[data-sheet="half"] .explore-panel { height: 55%; }
-  .explore-body[data-sheet="full"] .explore-panel { height: calc(100% - 8px); }
+  /* At rest the sheet shows whole stations and nothing cut in half: three on a phone, five on an upright tablet. */
+  .explore-body { --sheet-rows: 3; --sheet-row: 65px; --sheet: calc(28px + var(--sheet-rows) * var(--sheet-row)); }
+  .explore-body[data-sheet="half"] { --sheet: 55%; }
+  .explore-body[data-sheet="full"] { --sheet: calc(100% - 8px); }
+  .explore-panel { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; min-height: 0; max-height: none; height: var(--sheet); gap: 0; padding: 0 16px; border: 0; border-radius: 20px 20px 0 0; box-shadow: 0 -8px 24px rgb(0 0 0 / 14%); transition: height 0.25s ease; overscroll-behavior: contain; scroll-snap-type: y proximity; scroll-padding-top: 28px; }
+  .explore-panel > h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
+  .explore-list li, .explore-pick { box-sizing: border-box; min-height: var(--sheet-row); scroll-snap-align: start; flex: none; }
+  .explore-list li { height: var(--sheet-row); padding: 0; }
+  .explore-list .explore-row { min-height: 0; padding: 0 8px; justify-content: center; overflow: hidden; }
+  .explore-list .explore-row span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .explore-list li.on { display: none; }
+  /* The picked station is the first row of the sheet, not a card of its own. */
+  .explore-pick { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+  .explore-pick-head { flex: 1; min-width: 0; gap: 8px; }
+  .explore-pick-head .explore-logo.big { width: 36px; height: 36px; border-radius: 10px; }
+  .explore-pick-text { padding-left: 8px; }
+  .explore-pick-text .explore-name, .explore-pick-text .explore-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .explore-pick-actions { flex: none; flex-wrap: nowrap; margin: 0; align-items: center; }
+  .explore-pick-actions .explore-btn { min-height: 44px; white-space: nowrap; }
+  .explore-pick-actions .explore-btn.primary { order: 2; width: 48px; height: 48px; padding: 0; border-radius: 50%; display: grid; place-items: center; }
+  .explore-pick > p { flex-basis: 100%; margin: 0; }
+  .wide-only { display: none; }
+  .sheet-only { display: inline; }
+  svg.sheet-only { display: block; }
+  /* The player floats on the map as a capsule just above the sheet, and rides up with it. */
+  .explore-player { position: absolute; left: 12px; right: 12px; bottom: calc(var(--sheet) + 10px); z-index: 3; border: 1px solid var(--ok); border-radius: 999px; background: color-mix(in srgb, var(--x-panel) 94%, transparent); box-shadow: 0 8px 22px rgb(0 0 0 / 28%); transition: bottom 0.25s ease; }
+  .explore-body[data-sheet="full"] .explore-player { bottom: 10px; }
+  .explore-body[data-sheet="full"][data-playing] .explore-panel { padding-bottom: 84px; }
+  .player.compact { min-height: 56px; padding: 4px 4px 4px 12px; gap: 10px; }
+  .player.compact .player-state { -webkit-line-clamp: 1; }
+  .player-stop { width: 44px; height: 44px; }
   .explore-handle { display: grid; place-items: center; position: sticky; top: 0; z-index: 1; flex: none; width: calc(100% + 32px); margin: 0 -16px; height: 28px; border: 0; padding: 0; background: var(--x-panel); cursor: grab; touch-action: none; }
   .explore-handle span { width: 40px; height: 5px; border-radius: 3px; background: var(--x-line); }
-  .explore-player .player { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
-  @media (prefers-reduced-motion: reduce) { .explore-panel { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .explore-panel, .explore-player { transition: none; } }
 }
+@media (min-width: 720px) and (max-width: 1100px) and (orientation: portrait) { .explore-body { --sheet-rows: 5; } }
 
 /* Phone: the account pages' links move to a bottom tab bar within thumb reach. */
 .tabbar { display: none; }

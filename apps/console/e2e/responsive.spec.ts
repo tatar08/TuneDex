@@ -82,14 +82,14 @@ for (const device of Object.keys(DEVICES) as (keyof typeof DEVICES)[]) {
     await page.route('**/bff/directory/map**', (route) =>
       route.fulfill({
         json: {
-          stations: [station(1, 'Bangkok FM', 13.75, 100.5), station(2, 'Chiang Mai Radio', 18.79, 98.98), station(3, 'Phuket Wave', 7.88, 98.39)],
+          stations: [station(1, 'Bangkok FM', 13.75, 100.5), station(2, 'Chiang Mai Radio', 18.79, 98.98), station(3, 'Phuket Wave', 7.88, 98.39), station(4, 'Khon Kaen Hit', 16.43, 102.83), station(5, 'Hat Yai News', 7.01, 100.47), station(6, 'Pattaya Beach Radio', 12.93, 100.88)],
           unmapped: [],
           attribution: 'Radio Browser',
         },
       }),
     );
     await page.getByLabel('ประเทศ').fill('ประเทศไทย');
-    await expect(page.getByTestId('explore-station')).toHaveCount(3);
+    await expect(page.getByTestId('explore-station')).toHaveCount(6);
     await fits(page, `${device}-explore`);
     const stage = await page.locator('.explore-stage').boundingBox();
     // The map takes most of the screen, not a strip under the menus.
@@ -98,6 +98,21 @@ for (const device of Object.keys(DEVICES) as (keyof typeof DEVICES)[]) {
       await page.getByRole('button', { name: 'เล่น Bangkok FM' }).click();
       await expect(page.getByTestId('explore-pick')).toBeVisible();
       await fits(page, `${device}-explore-picked`);
+      // At rest the sheet shows whole stations only (Tar 2026-10-10): the picked one first, three on a phone, five
+      // on an upright tablet, none cut in half. The player is one capsule on the map, clear of the sheet and the menu.
+      const rows = device === 'iphone' ? 3 : 5;
+      const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
+      const panel = await box('.explore-panel');
+      const whole = await page.evaluate(() => {
+        const p = document.querySelector('.explore-panel')!.getBoundingClientRect();
+        return [...document.querySelectorAll('[data-testid=explore-pick], .explore-list li')].map((e) => e.getBoundingClientRect()).filter((r) => r.height > 0 && r.bottom > p.top && r.top < p.bottom).map((r) => r.top >= p.top && r.bottom <= p.bottom + 1);
+      });
+      expect(whole, `${device}: stations in the resting sheet`).toEqual(Array(rows).fill(true));
+      await expect(page.getByTestId('explore-pick')).toContainText('Bangkok FM');
+      const player = await box('[data-testid=player]');
+      expect(player.height).toBeLessThanOrEqual(64);
+      expect(player.y + player.height).toBeLessThanOrEqual(panel.y);
+      expect(panel.y + panel.height).toBeLessThanOrEqual(DEVICES[device].height - (device === 'iphone' ? 56 : 0));
       await page.getByRole('button', { name: 'ขยายหรือย่อรายการสถานี' }).click();
       await expect(page.getByRole('button', { name: 'ขยายหรือย่อรายการสถานี' })).toHaveAttribute('aria-expanded', 'true');
       await page.getByRole('button', { name: 'เปลี่ยนเป็นลูกโลก' }).isVisible();

@@ -188,7 +188,7 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
     ]
       .filter(Boolean)
       .join(' · ');
-  const play = (s: MapListStation) => setNow({ name: s.name, url: s.streamUrl, hls: s.codec === 'hls' });
+  const play = (s: MapListStation) => setNow({ name: s.name, url: s.streamUrl, hls: s.codec === 'hls', logo: logoSrc(s) });
   const add = (s: MapListStation) =>
     setNote(
       appendChannel({
@@ -204,8 +204,6 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
   const select = (s: MapListStation) => {
     setSelected(s);
     setNote('');
-    // On a phone the chosen station shows in the sheet, so lift it enough to see the station and its buttons.
-    setSheet((h) => (h === 'peek' ? 'half' : h));
   };
   const step = (by: number) => setSheet((h) => SHEETS[Math.min(SHEETS.length - 1, Math.max(0, SHEETS.indexOf(h) + by))]);
   const looks: Look[] = ['auto', 'light', 'dark'];
@@ -329,7 +327,7 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
           </div>
         )}
 
-        <div className="explore-body" data-sheet={sheet}>
+        <div className="explore-body" data-sheet={sheet} data-playing={now ? 'true' : undefined}>
           <div className="explore-stage">
             {globe ? (
               <WorldGlobe
@@ -433,11 +431,17 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
                   </span>
                 </span>
                 <span className="explore-pick-actions">
-                  <button type="button" className="explore-btn primary" onClick={() => play(selected)}>
-                    {t.explorePlay}
+                  <button type="button" className="explore-btn primary" aria-label={t.explorePlay} onClick={() => play(selected)}>
+                    <svg className="sheet-only" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                      <path d="M8 5.5v13l10.5-6.5z" fill="currentColor" />
+                    </svg>
+                    <span className="wide-only">{t.explorePlay}</span>
                   </button>
-                  <button type="button" className="explore-btn" onClick={() => add(selected)}>
-                    {t.exploreAdd}
+                  <button type="button" className="explore-btn" aria-label={t.exploreAdd} onClick={() => add(selected)}>
+                    <span className="wide-only">{t.exploreAdd}</span>
+                    <span className="sheet-only" aria-hidden="true">
+                      {t.exploreAddShort}
+                    </span>
                   </button>
                 </span>
                 {note && (
@@ -475,13 +479,14 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
             )}
             <p className="explore-source">{t.exploreSource}</p>
           </aside>
-        </div>
 
-        {now && (
-          <div className="explore-player">
-            <MediaPlayer lang={lang} item={now} onStop={() => setNow(null)} />
-          </div>
-        )}
+          {/* A bar under the map and list on a wide screen; on a phone a capsule floating on the map, above the sheet. */}
+          {now && (
+            <div className="explore-player">
+              <MediaPlayer lang={lang} item={now} onStop={() => setNow(null)} compact />
+            </div>
+          )}
+        </div>
       </section>
     </main>
   );
