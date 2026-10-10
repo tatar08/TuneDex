@@ -12,6 +12,8 @@ export const WEB_THEMES = [
   { id: 'listen-find', group: 'codex', name: 'ค้นหาซ้าย ฟังขวา', hint: 'ค้นหาสถานีด้านซ้าย แผงฟังด้านขวาอยู่ที่เดิมทุกหน้า' },
   { id: 'country-window', group: 'joint', name: 'หน้าต่างประเทศ', hint: 'เลือกประเทศเอง รายการสถานีและพรีเซ็ตหกช่อง พร้อมแผงฟังด้านขวา' },
   { id: 'stage', group: 'frames', name: 'เวที', hint: 'เวทีสถานีขนาดใหญ่บนหน้าแรก และแถบเล่นต่อเนื่องในหน้าอื่น' },
+  { id: 'cockpit', group: 'claude', name: 'แผงหน้าปัดรถ', hint: 'แผงสถานีและข้อมูลคอลเลกชัน พรีเซ็ตหกช่องในเบราว์เซอร์ โทนเข้ม' },
+  { id: 'head-unit', group: 'frames', name: 'หน้าปัดวิทยุรถ', hint: 'เลือกสถานีด้วยแถบตำแหน่ง กดเล่นแยกต่างหาก พรีเซ็ตในเบราว์เซอร์ โทนเข้ม' },
 ] as const;
 export const WEB_THEME_GROUPS = [
   { id: 'classic', name: 'แบบดั้งเดิม' },
