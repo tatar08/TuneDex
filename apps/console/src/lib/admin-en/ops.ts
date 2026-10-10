@@ -1,5 +1,8 @@
 /** English for the staff console (ops), keyed by the Thai text. `{0}`, `{1}` … are filled in by t(). */
 export const EN_OPS: Record<string, string> = {
+  'ตั้งค่าระบบ': 'System settings',
+  'บัญชีนี้ไม่มีสิทธิ์ หรือโหลดข้อมูลไม่ได้ในขณะนี้ ลองโหลดหน้าใหม่': 'This account has no access, or the data cannot load right now. Reload the page.',
+  'เปลี่ยนโลโก้ของแต่ละสถานีได้ที่หน้า': 'Change each station’s logo on the page',
   'โลโก้ TuneDeck สำหรับสถานีที่ไม่มีโลโก้': 'TuneDeck logo for stations without one',
   'แสดงบนแผนที่และในรายการแทนสถานีที่ไม่มีโลโก้ของตัวเอง เปลี่ยนแล้วมีผลภายในไม่กี่นาที': 'Shown on the map and in lists for stations with no logo of their own. A change shows within a few minutes.',
   'โลโก้ที่แอดมินอัปโหลด': 'Logo uploaded by an admin',

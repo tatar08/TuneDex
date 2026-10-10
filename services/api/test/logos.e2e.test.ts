@@ -179,11 +179,11 @@ describe('station logos', () => {
     expect((await http().post(url).send(upload(PNG))).status).toBe(401);
   });
 
-  it('lets admins replace TuneDeck’s own logo, shown for stations with none', async () => {
+  it('lets catalog editors and admins replace TuneDeck’s own logo, shown for stations with none', async () => {
     expect((await http().get('/v1/brand/station-logo')).status).toBe(404);
     expect((await http().get('/v1/admin/brand/station-logo').set(as('admin')).expect(200)).body).toEqual({ custom: false });
-    // Catalog editors change station logos, not the company's.
-    expect((await http().post('/v1/admin/brand/station-logo').set(as('editor')).send(upload(PNG))).status).toBe(403);
+    for (const who of ['ops', 'user'] as const) expect((await http().post('/v1/admin/brand/station-logo').set(as(who)).send(upload(PNG))).status).toBe(403);
+    await http().post('/v1/admin/brand/station-logo').set(as('editor')).send(upload(PNG)).expect(200);
     const set = await http().post('/v1/admin/brand/station-logo').set(as('admin')).send(upload(JPEG, 'image/jpeg')).expect(200);
     const brand = await http().get('/v1/brand/station-logo').expect(200);
     expect(brand.headers['content-type']).toBe('image/jpeg');
@@ -192,6 +192,6 @@ describe('station logos', () => {
     await http().post('/v1/admin/brand/station-logo/remove').set(as('admin')).send({}).expect(204);
     expect((await http().get('/v1/brand/station-logo')).status).toBe(404);
     const audit = await t.pool.query<{ action: string }>(`SELECT action FROM audit_events WHERE action LIKE 'brand.logo.%' ORDER BY id`);
-    expect(audit.rows.map((r) => r.action)).toEqual(['brand.logo.set', 'brand.logo.remove']);
+    expect(audit.rows.map((r) => r.action)).toEqual(['brand.logo.set', 'brand.logo.set', 'brand.logo.remove']);
   });
 });

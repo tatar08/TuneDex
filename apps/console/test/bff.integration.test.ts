@@ -932,7 +932,6 @@ describe('logos through the BFF and the real API', () => {
 
   beforeAll(() => {
     api.staff('grant', 'bff-logo-admin', 'admin', '--by', 'test', '--reason', 'test');
-    api.staff('grant', 'bff-logo-editor', 'catalog_editor', '--by', 'test', '--reason', 'test');
   });
 
   it('always answers an image: TuneDeck’s built-in mark, then the logo admins upload', async () => {
@@ -943,8 +942,8 @@ describe('logos through the BFF and the real API', () => {
     expect(await unknown.text()).toContain('<svg');
     expect((await bff.stationLogo(new Request(`${BASE}/bff/logos/stations/x`), '../x')).headers.get('content-type')).toBe('image/svg+xml');
 
-    const editor = await signIn('bff-logo-editor');
-    expect((await brandPost(editor, { contentType: 'image/png', data: PNG.toString('base64') })).status).toBe(403);
+    const viewer = await signIn('bff-logo-viewer');
+    expect((await brandPost(viewer, { contentType: 'image/png', data: PNG.toString('base64') })).status).toBe(403);
     const admin = await signIn('bff-logo-admin');
     expect((await brandPost(admin, { contentType: 'image/png', data: PNG.toString('base64') })).status).toBe(200);
     const brand = await bff.defaultLogo();

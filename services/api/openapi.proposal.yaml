@@ -960,17 +960,17 @@ paths:
         '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/admin/brand/station-logo:
     get:
-      summary: Whether TuneDeck's station logo was replaced (admin)
-      description: 'Roles: admin. Cache-Control: no-store.'
+      summary: Whether TuneDeck's station logo was replaced (catalog_editor, admin)
+      description: 'Roles: catalog_editor or admin. Cache-Control: no-store.'
       responses:
         '200':
           description: State
           content: { application/json: { schema: { type: object, additionalProperties: false, required: [custom], properties: { custom: { type: boolean }, version: { type: string }, updatedAt: { type: string, format: date-time } } } } }
         '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '403': { description: 'ROLE_REQUIRED: needs admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     post:
-      summary: Upload TuneDeck's logo for stations without one (admin)
-      description: 'Roles: admin. Shown at once for every station with no logo of its own. Audited as brand.logo.set with type, size and SHA-256.'
+      summary: Upload TuneDeck's logo for stations without one (catalog_editor, admin)
+      description: 'Roles: catalog_editor or admin. Shown at once for every station with no logo of its own. Audited as brand.logo.set with type, size and SHA-256.'
       parameters:
         - { name: Idempotency-Key, in: header, required: false, description: 'Optional; see POST /v1/admin/stations', schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,128}$' } }
       requestBody:
@@ -990,19 +990,19 @@ paths:
           content: { application/json: { schema: { type: object, additionalProperties: false, required: [version], properties: { version: { type: string } } } } }
         '400': { $ref: '#/components/responses/Error' }
         '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '403': { description: 'ROLE_REQUIRED: needs admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/admin/brand/station-logo/remove:
     post:
-      summary: Go back to the apps' built-in TuneDeck logo (admin)
-      description: 'Roles: admin. Body {} . Audited as brand.logo.remove.'
+      summary: Go back to the apps' built-in TuneDeck logo (catalog_editor, admin)
+      description: 'Roles: catalog_editor or admin. Body {} . Audited as brand.logo.remove.'
       parameters:
         - { name: Idempotency-Key, in: header, required: false, description: 'Optional; see POST /v1/admin/stations', schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,128}$' } }
       responses:
         '204': { description: Removed }
         '400': { $ref: '#/components/responses/Error' }
         '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '403': { description: 'ROLE_REQUIRED: needs admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: None was uploaded, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/admin/directory/blocks:

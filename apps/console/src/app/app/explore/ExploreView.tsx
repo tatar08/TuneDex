@@ -355,8 +355,14 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
           <aside className="explore-panel" aria-labelledby="explore-list">
             {selected && (
               <section className="explore-pick" aria-label={selected.name} data-testid="explore-pick">
-                <span className="explore-name">{selected.name}</span>
-                <span className="explore-meta">{line(selected)}</span>
+                <span className="explore-pick-head">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- small same-origin logo */}
+                  <img className="explore-logo big" src={logoSrc(selected)} alt="" width={56} height={56} decoding="async" />
+                  <span className="explore-pick-text">
+                    <span className="explore-name">{selected.name}</span>
+                    <span className="explore-meta">{line(selected)}</span>
+                  </span>
+                </span>
                 <span className="explore-pick-actions">
                   <button type="button" className="explore-btn primary" onClick={() => play(selected)}>
                     {t.explorePlay}

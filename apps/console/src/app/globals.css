@@ -186,6 +186,9 @@ a.btn { display: inline-block; text-decoration: none; }
 .explore-dot.logo.on { width: 40px; height: 40px; box-shadow: 0 0 0 3px var(--x-on), 0 0 0 6px var(--x-dot); }
 .explore-dot.logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .explore-logo { flex: none; width: 36px; height: 36px; border-radius: 10px; object-fit: contain; background: #fff; border: 1px solid var(--x-line); align-self: center; }
+.explore-logo.big { width: 56px; height: 56px; border-radius: 14px; }
+.explore-pick-head { display: flex; gap: 12px; align-items: center; }
+.explore-pick-text { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
 .explore-cluster { display: grid; place-items: center; border-radius: 50%; background: var(--x-accent); color: var(--x-accent-ink); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--x-dot-ring), 0 3px 10px rgb(0 0 0 / 18%); }
 .explore-cluster.on { background: var(--x-on); color: var(--x-on-ink); box-shadow: 0 0 0 2px var(--x-dot-ring), 0 0 0 5px var(--x-accent); }
 .explore-app .leaflet-control-zoom { border: 0; box-shadow: 0 4px 12px rgb(0 0 0 / 14%); border-radius: 12px; overflow: hidden; }

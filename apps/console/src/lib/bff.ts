@@ -840,7 +840,6 @@ export function createBff(deps: BffDeps) {
 
   const logoCache = new Map<string, { at: number; image: { type: string; bytes: Uint8Array } | null }>();
   let brandCache: { at: number; image: { type: string; bytes: Uint8Array } | null } | null = null;
-  const brandStatus = new Map<string, { at: number; value: { custom: boolean; version?: string; updatedAt?: string } | null }>();
 
   /** An image from the API's public logo routes: only known image types, at most 64 KiB, else null. */
   async function fetchImage(path: string): Promise<{ type: string; bytes: Uint8Array } | null> {
@@ -867,7 +866,6 @@ export function createBff(deps: BffDeps) {
     if (res.ok) {
       logoCache.clear();
       brandCache = null;
-      brandStatus.clear();
     }
     return res;
   }
@@ -1046,18 +1044,11 @@ export function createBff(deps: BffDeps) {
       timed(req, remove ? '/bff/admin/brand/station-logo/remove' : '/bff/admin/brand/station-logo', async (requestId) =>
         forgetLogos(await adminProxy(req, requestId, `/v1/admin/brand/station-logo${remove ? '/remove' : ''}`, true, LOGO_BODY_BYTES)),
       ),
-    /** Server-side read for /admin/config: whether TuneDeck's logo was replaced. Null when not an admin or unreachable. */
-    async loadBrandLogo(ctx: SessionContext): Promise<{ custom: boolean; version?: string; updatedAt?: string } | null> {
-      // Kept a minute per session, so moving around the config page does not spend the staff member's API reads.
-      const hit = brandStatus.get(ctx.id);
-      if (hit && Date.now() - hit.at < 60_000) return hit.value;
-      const res = await callApi(ctx, '/v1/admin/brand/station-logo', { method: 'GET' }, `web_${randomUUID()}`).catch(() => null);
-      const value = res?.ok ? ((await res.json()) as { custom: boolean; version?: string; updatedAt?: string }) : null;
-      if (res && (res.ok || res.status === 403)) {
-        if (brandStatus.size >= 200) brandStatus.delete(brandStatus.keys().next().value!);
-        brandStatus.set(ctx.id, { at: Date.now(), value });
-      }
-      return value;
+    /** Server-side read for /admin/settings: whether TuneDeck's logo was replaced. Null when refused or unreachable, undefined when signed out. */
+    async loadBrandLogo(ctx: SessionContext): Promise<{ custom: boolean; version?: string; updatedAt?: string } | null | undefined> {
+      const res = await callApi(ctx, '/v1/admin/brand/station-logo', { method: 'GET' }, `web_${randomUUID()}`).catch(() => false as const);
+      if (res === null) return undefined;
+      return res && res.ok ? ((await res.json()) as { custom: boolean; version?: string; updatedAt?: string }) : null;
     },
     /**
      * GET /bff/logos/stations/{id}?v= : the station's logo through the API (the page loads images only from its own

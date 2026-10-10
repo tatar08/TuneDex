@@ -273,10 +273,10 @@ export class AdminStationLogoController {
   }
 }
 
-/** Admins replace TuneDeck's own logo, shown for stations without one (Tar 2026-10-10). */
+/** Catalog editors and admins replace TuneDeck's own logo, shown for stations without one (Tar 2026-10-10). */
 @Controller('v1/admin/brand/station-logo')
 @UseGuards(AuthGuard, StaffGuard)
-@RequireRoles('admin')
+@RequireRoles('catalog_editor', 'admin')
 export class AdminBrandLogoController {
   constructor(private readonly logos: LogoService) {}
 
