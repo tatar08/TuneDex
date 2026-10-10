@@ -414,9 +414,6 @@ a.btn { display: inline-block; text-decoration: none; }
 
 /* Extra desktop content is hidden in the shared phone layout. */
 .theme-top-nav, .shelf-home, .preset-discovery, .desktop-stream-state { display: none; }
-.st-theme-group { border: 0; padding: 0; margin: 0 0 20px; min-width: 0; }
-.st-theme-group legend { font-weight: 700; margin-bottom: 10px; }
-.st-themes { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
 .adm .theme-preview { grid-column: 1 / -1; grid-row: 1; display: block; width: 100%; max-width: 240px; height: auto; }
 .st-theme-card:has(input:focus-visible) { outline: 3px solid var(--a); outline-offset: 3px; }
 @media (min-width: 1101px) and (min-height: 501px) {
