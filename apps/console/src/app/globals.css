@@ -412,6 +412,15 @@ a.btn { display: inline-block; text-decoration: none; }
   .t-radio-wall .player-stop { width: 56px; height: 56px; }
 }
 
+@media (min-width: 1101px) and (min-height: 501px) {
+  .desktop-theme { color: var(--fg); }
+  :is(.t-cockpit, .t-head-unit, .t-tune-world, .t-map-home, .t-night-garden) { --ink: var(--web-accent); --ink-t: var(--web-accent-ink); --danger: #fb7185; color-scheme: dark; }
+  .listening-panel, .theme-stage { --danger: #fb7185; }
+  .desktop-theme .home-shell :where(button:not(.btn):not(.wall-play)) { font: inherit; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--fg); cursor: pointer; }
+  .desktop-theme .home-shell :where(button:disabled) { opacity: 0.5; cursor: default; }
+  .desktop-theme .home-shell :where(input[type="search"]) { font: inherit; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--line); color: var(--fg); background: var(--panel); }
+}
+
 /* Extra desktop content is hidden in the shared phone layout. */
 .theme-top-nav, .shelf-home, .preset-discovery, .desktop-stream-state { display: none; }
 .adm .theme-preview { grid-column: 1 / -1; grid-row: 1; display: block; width: 100%; max-width: 240px; height: auto; }
@@ -491,7 +500,7 @@ a.btn { display: inline-block; text-decoration: none; }
 .listening-panel, .theme-stage, .theme-home-intro, .theme-presets { display: none; }
 @media (min-width: 1101px) and (min-height: 501px) {
   .desktop-top-frame.desktop-theme .shell:not(.auth) { margin: 72px 0 0; max-width: none; padding: 32px; min-height: calc(100dvh - 72px); border-radius: 0; box-shadow: none; background: transparent; }
-  :is(.t-listen-find, .t-country-window) .shell:not(.auth) { margin-right: clamp(300px, 27vw, 400px); }
+  .desktop-top-frame:is(.t-listen-find, .t-country-window) .shell:not(.auth) { margin-right: clamp(300px, 27vw, 400px); }
   :is(.t-listen-find, .t-country-window) .theme-home-intro { display: grid; gap: 16px; margin-bottom: 24px; }
   .theme-home-intro h1 { font-size: 40px; margin: 0; }
   .theme-home-intro label { display: grid; gap: 8px; }
