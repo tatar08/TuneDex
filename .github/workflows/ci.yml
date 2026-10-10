@@ -43,7 +43,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
-      - run: npm test
+      # The GitHub reporter turns each failed test into an annotation, readable without the full log.
+      - run: npm test -- --reporters=default --reporters=github-actions
 
   console:
     runs-on: ubuntu-24.04
