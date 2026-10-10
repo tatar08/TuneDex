@@ -1,3 +1,4 @@
+import { WEB_THEMES } from '../src/lib/web-themes';
 import { Browser, expect, Page, test } from '@playwright/test';
 import { registerBrowserCleanup, startStack, Stack } from './stack';
 
@@ -22,6 +23,11 @@ test.beforeAll(async () => {
     const res = await call('e2e-th-admin2', `/v1/admin/stations/${made.id}/publish`, { reason: 'reviewed for the theme test' }, { 'if-match': '"1"' });
     expect(res.status, await res.text()).toBe(200);
   }
+});
+// Each visual case issues many catalog reads from one localhost address. Isolate only
+// transient catalog/shared-admin read counters in this disposable database; production limits stay enabled.
+test.beforeEach(async () => {
+  await stack.api.sql("DELETE FROM rate_limit_counters WHERE bucket LIKE 'ip:%:catalog' OR bucket LIKE 'user:%:read'");
 });
 test.afterAll(async () => {
   await stack?.stop();
@@ -156,37 +162,52 @@ test('an admin chooses the layout theme for everyone; editors cannot', async ({ 
 
 
 // Each batch layout uses the production app and the shared media element, not a standalone mockup.
-for (const [theme, label] of [['preset-wall', 'ผนังพรีเซ็ต'], ['shelves', 'ชั้นวางฟังเพลง'], ['studio', 'สตูดิโอ']]) {
+for (const { id: theme, name: label } of WEB_THEMES.filter(t => !['classic', 'radio-wall'].includes(t.id))) {
   test(`${theme}: desktop pages, persistent player, all accents and shared mobile layout`, async ({ browser }) => {
     test.setTimeout(180_000);
     const admin = await open(browser, 'e2e-th-admin', '/admin/settings');
     const form = admin.getByRole('form', { name: 'ธีมของเว็บผู้ใช้' });
-    await expect(form.locator('.theme-preview')).toHaveCount(5);
-    await form.getByRole('radio', { name: new RegExp(label) }).check();
+    await expect(form.locator('.theme-preview')).toHaveCount(WEB_THEMES.length);
+    await form.locator(`input[name=web-theme][value="${theme}"]`).check();
     await form.getByRole('button', { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' }).click();
     await expect(form.getByRole('status')).toContainText('บันทึกแล้ว');
     const page = await open(browser, `e2e-batch-${theme}`, '/app/home');
     await expect(page.getByTestId('app-frame')).toHaveClass(new RegExp(`t-${theme}`));
     await expect(page.getByTestId('player')).toHaveCount(0);
-    const desktop = theme === 'preset-wall' ? page.locator('#wall') : page.locator('.shelf-curated');
-    await desktop.getByRole('button', { name: 'เล่น Wall Jazz FM' }).click();
+    const desktop = theme === 'preset-wall' ? page.locator('#wall') : ['shelves','studio'].includes(theme) ? page.locator('.shelf-curated') : page.locator('.home-shell');
+    if (['cockpit','head-unit','signal-dial','tune-world'].includes(theme)) await page.locator('.tuning-stations ol button').filter({ hasText: 'Wall Jazz FM' }).click();
+    await desktop.getByRole('button', { name: 'เล่น Wall Jazz FM', exact: true }).first().click();
     await page.locator('.player-screen video').evaluate(v => v.setAttribute('data-kept', 'batch'));
+    if (['cockpit','head-unit','signal-dial','tune-world'].includes(theme)) {
+      await page.locator('.tuning-stations ol button').filter({ hasText: 'Wall News TH' }).click();
+      await expect(page.locator('.station-focus')).toContainText('Wall News TH');
+      await expect(page.locator('.player-screen video')).toHaveAttribute('src', 'https://stream.example.com/jazz.aac');
+    }
+    if (['cockpit','head-unit','country-window'].includes(theme)) {
+      await page.getByRole('button', { name: 'บันทึกสถานีที่เลือกในพรีเซ็ต 1', exact: true }).click();
+      const stored = await page.evaluate(()=>JSON.parse(localStorage.getItem('tunedeck.web.presets') ?? '[]'));
+      expect(stored[0].url).toBe(theme === 'country-window' ? 'https://stream.example.com/jazz.aac' : 'https://stream.example.com/news.aac');
+      await expect(page.locator('.player-screen video')).toHaveAttribute('src', 'https://stream.example.com/jazz.aac');
+      await page.getByRole('button', { name: 'ลบพรีเซ็ต 1', exact: true }).click();
+      expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('tunedeck.web.presets') ?? '[]')[0])).toBeNull();
+    }
     // Country changes fetch a different list but never start a new stream.
-    await page.locator(theme === 'preset-wall' ? '#discovery-country' : '#shelf-country').selectOption('JP');
+    const control = page.locator('select[id$=country]:visible').first();
+    if (await control.count()) await control.selectOption('JP');
     await expect(page.locator('.player-screen video')).toHaveAttribute('src', 'https://stream.example.com/jazz.aac');
     for (const width of [1360, 1920]) {
       await page.setViewportSize({ width, height: width === 1360 ? 860 : 1080 });
       for (const [, path] of [['หน้าแรก', '/app/home'], ['วิทยุ', '/app/radio'], ['สำรวจ', '/app/explore'], ['การตั้งค่า', '/app/settings'], ['อุปกรณ์', '/app/devices'], ['ความเป็นส่วนตัว', '/app/privacy'], ['ภาพรวม', '/app/overview']]) {
-        const nav = page.locator(theme === 'preset-wall' ? '.theme-top-nav' : '.side-nav');
-        if (theme === 'preset-wall' && path !== '/app/home' && path !== '/app/radio' && path !== '/app/explore') {
+        const nav = page.locator('.theme-top-nav:visible, .side-nav:visible');
+        if (await page.locator('.theme-top-nav:visible').count() && path !== '/app/home' && path !== '/app/radio' && path !== '/app/explore') {
           await page.locator('.theme-account').evaluate((d: HTMLDetailsElement) => { d.open = true; });
         }
         // Use the destination rather than translated labels, which can differ on account pages.
         await nav.locator(`a[href="${path}"]:not(.brand)`).click();
         await expect(page).toHaveURL(`${stack.base}${path}`, { timeout: 15_000 });
         await expect(page.locator('.player-screen video')).toHaveAttribute('data-kept', 'batch');
-        await expect(page.getByTestId('player')).toBeVisible();
-        const dock = await page.getByTestId('player').boundingBox();
+        await expect(page.locator('[data-testid=player]:visible')).toHaveCount(1);
+        const dock = await page.locator('[data-testid=player]:visible').boundingBox();
         expect(dock!.y + dock!.height).toBeLessThanOrEqual((await page.viewportSize())!.height);
         await expect(page.locator('.player-screen video')).toHaveAttribute('src', 'https://stream.example.com/jazz.aac');
         await page.evaluate(async () => { await document.fonts.ready; window.scrollTo(0, 0); });
@@ -213,6 +234,14 @@ for (const [theme, label] of [['preset-wall', 'ผนังพรีเซ็ต
         expect(contrast, `${theme} ${mode} ${accent} text on accent`).toBeGreaterThanOrEqual(4.5);
       }
       await page.goto(`${stack.base}/app/home`);
+      // Wide Home hydrates from the shared phone structure. Wait for its presenter,
+      // then read both colours atomically so a replaced SSR heading cannot yield "".
+      const home = ({cockpit:'.dashboard-home','head-unit':'.dashboard-home','signal-dial':'.tuning-home','tune-world':'.tuning-home','language-lanes':'.language-home','map-home':'.map-home-layout','night-garden':'.garden-home-layout',daylight:'.daylight-home'} as Record<string,string>)[theme];
+      if (home) await expect(page.locator(home)).toBeVisible();
+      await expect.poll(() => page.getByTestId('app-frame').evaluate(frame => {
+        const headline = frame.querySelector('.home-shell h1');
+        return !!headline && getComputedStyle(headline).color !== '' && getComputedStyle(headline).color === getComputedStyle(frame).color;
+      }), { message: `${theme} ${mode} headline must inherit the theme foreground` }).toBe(true);
       if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/${theme}-${mode}-home.png` });
       await page.goto(`${stack.base}/app/settings`);
     }
@@ -230,7 +259,7 @@ for (const [theme, label] of [['preset-wall', 'ผนังพรีเซ็ต
     // Verify both edges of the shared desktop guard without changing the mobile regression file.
     await page.setViewportSize({ width: 1101, height: 860 });
     await page.goto(`${stack.base}/app/home`);
-    const chrome = page.locator(theme === 'preset-wall' ? '.theme-top-nav' : '.side-nav');
+    const chrome = page.locator('.theme-top-nav, .side-nav').first();
     await expect(chrome).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
     await page.setViewportSize({ width: 1100, height: 860 });
@@ -254,4 +283,70 @@ test('login without a requested destination opens Home', async ({ browser }) => 
   await page.goto(`${stack.base}/auth/login`);
   await expect(page).toHaveURL(`${stack.base}/app/home`);
   await context.close();
+});
+
+for (const theme of ['map-home', 'night-garden', 'tune-world'].filter(id => WEB_THEMES.some(theme => String(theme.id) === id))) {
+  test(`${theme}: map selection is keyboard accessible and never autoplays`, async ({ browser }) => {
+    const admin = await open(browser, 'e2e-th-admin', '/admin/settings');
+    const form = admin.getByRole('form', { name: 'ธีมของเว็บผู้ใช้' });
+    await form.locator(`input[value="${theme}"]`).check();
+    await form.getByRole('button', { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' }).click();
+    await expect(form.getByRole('status')).toContainText('บันทึกแล้ว');
+    stack.idp.setUser(`map-select-${theme}`);
+    const page = await (await browser.newContext({ viewport: { width: 1360, height: 860 } })).newPage();
+    await page.route('**/bff/directory/map**', route => route.fulfill({ json: { stations: [{ id: 'fixture-map-jazz', name: 'Fixture Map Jazz', country: 'TH', language: 'th', genres: ['jazz'], codec: 'aac', bitrateKbps: 96, streamUrl: 'https://map.example.test/jazz.aac', lat: 13.75, lon: 100.5 }], unmapped: [] } }));
+    await page.goto(`${stack.base}/auth/login?returnTo=/app/home`);
+    await expect(page.getByTestId('app-frame')).toHaveClass(new RegExp(`t-${theme}`));
+    await page.locator('.map-station-picker select').selectOption('fixture-map-jazz');
+    await expect(page.locator('.station-focus')).toContainText('Fixture Map Jazz');
+    await expect(page.getByTestId('player')).toHaveCount(0);
+    await expect(page.locator('.player-screen video')).not.toHaveAttribute('src', /.+/);
+    await page.getByRole('button', { name: 'เล่น Fixture Map Jazz', exact: true }).click();
+    await expect(page.locator('.player-screen video')).toHaveAttribute('src', 'https://map.example.test/jazz.aac');
+    if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/${theme}-map-selection.png` });
+  });
+}
+
+test('language lanes independently filter actual station languages without starting audio', async ({ browser }) => {
+  test.skip(!WEB_THEMES.some(theme => String(theme.id) === 'language-lanes'), 'Language theme is introduced in batch 4');
+  const admin = await open(browser, 'e2e-th-admin', '/admin/settings');
+  const form = admin.getByRole('form', { name: 'ธีมของเว็บผู้ใช้' });
+  await form.locator('input[value="language-lanes"]').check();
+  await form.getByRole('button', { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' }).click();
+  await expect(form.getByRole('status')).toContainText('บันทึกแล้ว');
+  stack.idp.setUser('language-lanes-fixture');
+  const page = await (await browser.newContext({ viewport: { width: 1360, height: 860 } })).newPage();
+  await page.route('**/bff/directory/top**', route => route.fulfill({ json: { stations: ['en', 'ja', 'fr'].map(language => ({ id: `fixture-${language}`, name: `Fixture ${language}`, country: 'TH', language, genres: ['news'], codec: 'aac', bitrateKbps: 96, streamUrl: `https://fixture.example.test/${language}.aac` })) } }));
+  await page.goto(`${stack.base}/auth/login?returnTo=/app/home`);
+  const first = page.locator('.language-lane').first();
+  await first.locator('select').first().selectOption('ja');
+  await expect(first.getByRole('heading', { name: 'Fixture ja' })).toBeVisible();
+  await expect(first.getByRole('heading', { name: 'Fixture en' })).toHaveCount(0);
+  await expect(page.getByTestId('player')).toHaveCount(0);
+  await first.getByRole('button', { name: 'เล่น Fixture ja', exact: true }).click();
+  await expect(page.locator('.player-screen video')).toHaveAttribute('src', 'https://fixture.example.test/ja.aac');
+  await page.locator('.language-lane').nth(1).locator('select').first().selectOption('fr');
+  await expect(page.locator('.player-screen video')).toHaveAttribute('src', 'https://fixture.example.test/ja.aac');
+});
+
+test('browser presets survive reload, reject malformed entries and disclose failed storage', async ({ browser }) => {
+  const admin = await open(browser, 'e2e-th-admin', '/admin/settings');
+  const form = admin.getByRole('form', { name: 'ธีมของเว็บผู้ใช้' });
+  await form.locator('input[value="country-window"]').check();
+  await form.getByRole('button', { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' }).click();
+  await expect(form.getByRole('status')).toContainText('บันทึกแล้ว');
+  const page = await open(browser, 'preset-storage-fixture', '/app/home');
+  await page.getByRole('button', { name: 'บันทึกสถานีที่เลือกในพรีเซ็ต 1', exact: true }).click();
+  const saved = await page.evaluate(()=>JSON.parse(localStorage.getItem('tunedeck.web.presets') ?? '[]')[0]);
+  expect(saved.url).toMatch(/^https:\/\//);
+  await page.reload();
+  await expect(page.locator('.theme-presets').getByRole('button', { name: `เล่น ${saved.name}`, exact: true })).toBeVisible();
+  await expect(page.getByTestId('player')).toHaveCount(0);
+  await page.evaluate(()=>localStorage.setItem('tunedeck.web.presets', JSON.stringify([{name:'Bad fixture',url:'javascript:alert(1)'},null])));
+  await page.reload();
+  await expect(page.locator('.theme-presets').getByRole('button', { name: 'เล่น Bad fixture' })).toHaveCount(0);
+  await page.evaluate(()=>{Storage.prototype.setItem=()=>{throw new DOMException('Fixture denied','QuotaExceededError')};});
+  await page.getByRole('button', { name: 'บันทึกสถานีที่เลือกในพรีเซ็ต 1', exact: true }).click();
+  await expect(page.locator('.theme-presets').getByRole('alert')).toContainText('บันทึกพรีเซ็ตในเบราว์เซอร์ไม่ได้');
+  await expect(page.getByTestId('player')).toHaveCount(0);
 });

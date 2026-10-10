@@ -10,6 +10,9 @@ import { useWebTheme } from '../AppFrame';
 import { AppNav } from '../AppNav';
 import { COUNTRY_CODES } from '../explore/countries';
 import { logoSrc } from '../explore/logo';
+import { useDesktop } from '../desktop';
+import { ListeningPanel } from '../player/ListeningPanel';
+import { Presets } from './Presets';
 import { usePlayer } from '../player/Player';
 import type { NowPlaying } from '../radio/MediaPlayer';
 
@@ -40,6 +43,8 @@ function initials(name: string): { text: string; color: string } {
 export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang; csrfToken: string; favorites: Favorite[] | null; stations: CatalogStation[] | null }) {
   const t = strings(lang);
   const theme = useWebTheme();
+  const wide = useDesktop();
+  const [query, setQuery] = useState('');
   const { now, status, play, recent } = usePlayer();
   const meta = (s: CatalogStation) => [countryName(s.country, lang), s.genres.slice(0, 2).join(', ')].filter(Boolean).join(' · ');
   const card = (s: CatalogStation): Card => ({ key: s.id, name: s.name, url: s.streamUrl, hls: s.codec === 'hls', meta: meta(s) });
@@ -146,7 +151,7 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
         </button>
         <span className="wall-name">{c.name}</span>
         <span className="wall-meta legacy-stream-state">{on ? t.playerPlaying : c.meta}</span>
-        {['preset-wall', 'shelves', 'studio'].includes(theme) && (
+        {!['classic', 'radio-wall'].includes(theme) && (
           <span className="wall-meta desktop-stream-state">{on ? status === 'failed' ? t.playerFailed : status === 'playing' ? t.playerPlaying : t.playerConnecting : c.meta}</span>
         )}
       </li>
@@ -169,6 +174,12 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
   return (
     <main className="shell wide home-shell">
       <AppNav lang={lang} current="/app/home" csrfToken={csrfToken} />
+      {wide && ['listen-find', 'country-window'].includes(theme) && <div className="theme-home-intro">
+        <h1>{theme === 'country-window' ? t.countryHeading(countryName(country, lang)) : t.findTitle}</h1>
+        <label>{t.exploreSearch}<input value={query} onChange={e => setQuery(e.target.value)} type="search" /></label>
+        {countryControl('theme-country')}
+      </div>}
+      {wide && theme === 'stage' && <ListeningPanel stage />}
       <h1>{t.homeTitle}</h1>
       <p className="lede">{t.homeLede}</p>
       <div className="wall-tabs" role="tablist" aria-label={t.homeTitle}>
@@ -203,10 +214,11 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
           <p className="status">{empty}</p>
         ) : (
           <ul className="wall">
-            {shown.map((c) => tile(c))}
+            {shown.filter(c => !wide || !['listen-find', 'country-window'].includes(theme) || c.name.toLocaleLowerCase(lang).includes(query.toLocaleLowerCase(lang))).map((c) => tile(c))}
           </ul>
         )}
       </div>
+      {wide && theme === 'country-window' && <Presets lang={lang} candidate={now ?? highlights[0] ?? null} />}
       {theme === 'preset-wall' && <aside className="preset-discovery" aria-label={t.homeExplore}>
         <h2>{t.homeExplore}</h2>{countryControl('discovery-country')}
         {lists.popular.length ? <ul className="wall discovery-tiles">{lists.popular.slice(0, 3).map(c => tile(c, 'discovery-station'))}</ul> : <p className="status">{popular === null ? t.exploreLoading : popular === 'failed' ? t.exploreError : t.exploreNone}</p>}

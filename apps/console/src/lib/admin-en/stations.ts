@@ -1,5 +1,12 @@
 /** English for the staff console (stations), keyed by the Thai text. `{0}`, `{1}` … are filled in by t(). */
 export const EN_STATIONS: Record<string, string> = {
+  'ค้นหาซ้าย ฟังขวา': 'Listen and find',
+  'ค้นหาสถานีด้านซ้าย แผงฟังด้านขวาอยู่ที่เดิมทุกหน้า': 'Search on the left; a listening panel stays on the right on every page',
+  'หน้าต่างประเทศ': 'Country window',
+  'เลือกประเทศเอง รายการสถานีและพรีเซ็ตหกช่อง พร้อมแผงฟังด้านขวา': 'Choose a country; stations and six presets with a listening panel on the right',
+  'เวที': 'Stage',
+  'เวทีสถานีขนาดใหญ่บนหน้าแรก และแถบเล่นต่อเนื่องในหน้าอื่น': 'A large station stage on Home; a continuous player bar on other pages',
+
   'โลโก้ของ {0}': 'Logo of {0}',
   'เลือกรูปโลโก้ของ {0}': 'Choose a logo picture for {0}',
   'ลบโลโก้ที่อัปโหลด': 'Remove the uploaded logo',

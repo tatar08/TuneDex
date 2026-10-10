@@ -6,6 +6,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Lang, strings } from '@/lib/i18n';
 import { ACCENT_COOKIE, WebAccentId, WebThemeId } from '@/lib/web-themes';
 import { Icon, ICONS } from './AppNav';
+import { ListeningPanel } from './player/ListeningPanel';
 import { PlayerProvider } from './player/Player';
 
 const ThemeCtx = createContext<WebThemeId>('classic');
@@ -89,6 +90,8 @@ function TopNav({ lang, csrfToken }: { lang: Lang; csrfToken: string }) {
  */
 export function AppFrame({ theme, accent: initial, lang, csrfToken, children }: { theme: WebThemeId; accent: WebAccentId; lang: Lang; csrfToken: string | null; children: React.ReactNode }) {
   const [accent, set] = useState(initial);
+  const top = ['preset-wall', 'listen-find', 'country-window', 'stage'].includes(theme);
+  const extra = ['listen-find', 'country-window', 'stage'].includes(theme);
   const setAccent = (a: WebAccentId) => {
     set(a);
     document.cookie = `${ACCENT_COOKIE}=${a}; Path=/; Max-Age=31536000; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`;
@@ -96,11 +99,12 @@ export function AppFrame({ theme, accent: initial, lang, csrfToken, children }: 
   return (
     <ThemeCtx.Provider value={theme}>
       <AccentCtx.Provider value={{ accent, setAccent }}>
-      <div className={`app-frame t-${theme}`} data-accent={accent} data-testid="app-frame">
+      <div className={`app-frame t-${theme}${top ? ' desktop-top-frame' : ''}${extra ? ' desktop-theme' : ''}`} data-accent={accent} data-testid="app-frame">
         <PlayerProvider lang={lang}>
           {['radio-wall', 'shelves', 'studio'].includes(theme) && csrfToken && <SideNav lang={lang} csrfToken={csrfToken} />}
-          {theme === 'preset-wall' && csrfToken && <TopNav lang={lang} csrfToken={csrfToken} />}
+          {top && csrfToken && <TopNav lang={lang} csrfToken={csrfToken} />}
           {children}
+          {['listen-find', 'country-window'].includes(theme) && <ListeningPanel />}
         </PlayerProvider>
       </div>
       </AccentCtx.Provider>

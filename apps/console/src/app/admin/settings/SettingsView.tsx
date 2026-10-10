@@ -83,10 +83,10 @@ function WebThemePicker({ current }: { current: { theme: string; updatedBy: stri
         {WEB_THEME_GROUPS.flatMap((group) => WEB_THEMES.filter((th) => th.group === group.id).map((th) => (
           <label key={th.id} className={picked === th.id ? 'st-theme-card on' : 'st-theme-card'}>
             <span className="st-theme-category">{t(group.name)}</span>
-            <input type="radio" name="web-theme" value={th.id} checked={picked === th.id} onChange={() => setPicked(th.id)} />
+            <input type="radio" name="web-theme" value={th.id} aria-label={t(th.name)} aria-describedby={`theme-hint-${th.id}`} checked={picked === th.id} onChange={() => setPicked(th.id)} />
             <ThemePreview theme={th.id} />
             <b>{t(th.name)}</b>
-            <small className="dim">{t(th.hint)}</small>
+            <small id={`theme-hint-${th.id}`} className="dim">{t(th.hint)}</small>
           </label>
         )))}
       </div>
