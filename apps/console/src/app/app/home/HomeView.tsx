@@ -176,15 +176,19 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
   // Up to three distinct stations, drawn from real history, favourites and available catalogs.
   const highlights = [...lists.recent, ...lists.favorites, ...lists.popular, ...lists.curated].filter((c, i, all) => all.findIndex(x => x.url === c.url) === i).slice(0, 3);
 
+  const catalogNotice = stations === null ? <p className="status" role="alert">{t.radioLoadError}</p> : null;
   const allCards = [...lists.favorites, ...lists.popular, ...lists.curated, ...lists.links].filter((c,i,all)=>all.findIndex(x=>x.url===c.url)===i);
   if (wide && ['map-home', 'night-garden', 'daylight'].includes(theme)) return <main className="shell wide home-shell">
-    {theme === 'daylight' ? <DaylightHome lang={lang} country={country} countryControl={countryControl('editorial-country')} items={lists.popular.length?lists.popular:lists.curated} popular={lists.popular.length>0} favorites={favs}/> : <MapHome lang={lang} country={country} countryControl={countryControl('map-home-country')} items={allCards} favorites={favs} recent={lists.recent} garden={theme==='night-garden'}/>}
+    {catalogNotice}
+    {theme === 'daylight' ? <DaylightHome lang={lang} country={country} countryControl={countryControl('editorial-country')} items={lists.popular.length?lists.popular:lists.curated} popular={lists.popular.length>0} favorites={favs}/> : <MapHome catalogFailed={stations===null} lang={lang} country={country} countryControl={countryControl('map-home-country')} items={allCards} favorites={favs} recent={lists.recent} garden={theme==='night-garden'}/>}
   </main>;
   if (wide && ['signal-dial', 'tune-world', 'language-lanes'].includes(theme)) return <main className="shell wide home-shell">
+    {catalogNotice}
     {theme === 'language-lanes' ? <LanguageHome lang={lang} items={allCards} /> : <TuningHome lang={lang} items={allCards} country={country} countryControl={countryControl('tuning-country')} world={theme==='tune-world'} />}
   </main>;
 
   if (wide && ['cockpit', 'head-unit'].includes(theme)) return <main className="shell wide home-shell">
+    {catalogNotice}
     <DashboardHome lang={lang} items={[...lists.favorites, ...lists.popular, ...lists.curated, ...lists.links].filter((c,i,all)=>all.findIndex(x=>x.url===c.url)===i)} favorites={favs.length} headUnit={theme==='head-unit'} />
   </main>;
 

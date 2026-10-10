@@ -24,6 +24,11 @@ test.beforeAll(async () => {
     expect(res.status, await res.text()).toBe(200);
   }
 });
+// Each visual case issues many catalog reads from one localhost address. Isolate only
+// transient catalog counters in this disposable database; production limits stay enabled.
+test.beforeEach(async () => {
+  await stack.api.sql("DELETE FROM rate_limit_counters WHERE bucket LIKE 'ip:%:catalog'");
+});
 test.afterAll(async () => {
   await stack?.stop();
 });
@@ -340,3 +345,20 @@ test('browser presets survive reload, reject malformed entries and disclose fail
   await expect(page.locator('.theme-presets').getByRole('alert')).toContainText('บันทึกพรีเซ็ตในเบราว์เซอร์ไม่ได้');
   await expect(page.getByTestId('player')).toHaveCount(0);
 });
+
+ test('a throttled catalog is reported as a load failure in advanced Home', async ({ browser }) => {
+  test.skip(!WEB_THEMES.some(theme => String(theme.id) === 'map-home'), 'Map Home arrives in batch 5');
+  const admin = await open(browser, 'e2e-th-admin', '/admin/settings');
+  const form = admin.getByRole('form', { name: 'ธีมของเว็บผู้ใช้' });
+  await form.locator('input[value="map-home"]').check();
+  await form.getByRole('button', { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' }).click();
+  await expect(form.getByRole('status')).toContainText('บันทึกแล้ว');
+  await fetch(`${stack.api.url}/v1/catalog/radio?limit=100`);
+  await stack.api.sql("UPDATE rate_limit_counters SET hits = 100000 WHERE bucket LIKE 'ip:%:catalog' AND window_start = date_trunc('minute', now())");
+  const blocked = await fetch(`${stack.api.url}/v1/catalog/radio?limit=100`);
+  expect(blocked.status).toBe(429);
+  const page = await open(browser, 'e2e-catalog-throttled', '/app/home');
+  await expect(page.locator('.home-shell > [role=alert]')).toBeVisible();
+  await expect(page.locator('.map-shortcuts').first()).not.toContainText('ยังไม่มีสถานีที่เผยแพร่');
+  await expect(page.getByTestId('player')).toHaveCount(0);
+ });
