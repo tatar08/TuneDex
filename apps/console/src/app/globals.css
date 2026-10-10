@@ -368,6 +368,10 @@ a.btn { display: inline-block; text-decoration: none; }
 .wall-tabs [role="tab"] span { font-size: 12px; opacity: 0.7; font-variant-numeric: tabular-nums; }
 .wall-link { font-size: 14px; font-weight: 600; min-height: 44px; display: inline-flex; align-items: center; }
 .wall-tabs .wall-link:first-of-type { margin-left: auto; }
+.wall-country { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 16px; }
+.wall-country label { font-weight: 600; }
+.wall-country select { min-height: 44px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); font: inherit; max-width: 100%; }
+.wall-country .status { margin: 0; }
 .wall { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
 .wall li { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; padding: 16px; border-radius: 18px; background: var(--soft); border: 1px solid var(--line); min-width: 0; }
 .wall li.on { border-color: var(--ok); box-shadow: inset 4px 0 0 var(--ok); }

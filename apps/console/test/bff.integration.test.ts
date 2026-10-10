@@ -918,6 +918,45 @@ describe('world map stations', () => {
   });
 });
 
+describe('a country’s most listened stations for the home page', () => {
+  it('keeps Radio Browser’s order, takes logos from the map list, stands in with the map list when the search fails, and needs a session', async () => {
+    const st = (n: number, extra: object = {}) => ({ id: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`, name: `Top ${n}`, country: 'TH', language: 'thai', genres: ['pop'], codec: 'mp3', bitrateKbps: 128, streamUrl: `https://t${n}.example.test/live.mp3`, logoUrl: null, homepageUrl: null, ...extra });
+    let searchDown = false;
+    const asked: string[] = [];
+    const top = createBff({
+      config: config(),
+      oidc: new OidcClient(config()),
+      store: new MemorySessionStore(12 * 3600_000, 7 * 24 * 3600_000, () => Date.now()),
+      logWriter: () => undefined,
+      fetchImpl: async (input, init) => {
+        const url = new URL(String(input));
+        if (!url.pathname.startsWith('/v1/directory/radio')) return fetch(input, init);
+        asked.push(url.pathname + url.search);
+        if (url.pathname === '/v1/directory/radio/map') return new Response(JSON.stringify({ stations: [st(3, { logoVersion: 'aaaaaaaaaaaa', geo: { lat: 13.7, lon: 100.5 } }), st(1), st(2, { logoVersion: 'bbbbbbbbbbbb' })] }), { status: 200, headers: { 'content-type': 'application/json' } });
+        if (searchDown) return new Response('{}', { status: 503 });
+        // The search answers in listener order and carries no logo.
+        return new Response(JSON.stringify({ stations: [st(2), st(9, { streamUrl: 'http://plain.example.test/x.mp3' }), st(3), st(1)] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+    });
+    const req = (q: string, cookie?: string) => new Request(`${BASE}/bff/directory/top${q}`, { headers: cookie ? { cookie } : {} });
+    expect((await top.getTopStations(req('?country=TH'))).status).toBe(401);
+    const cookie = await signIn('top-user', top);
+    expect((await top.getTopStations(req('', cookie))).status).toBe(400);
+    expect((await top.getTopStations(req('?country=Thailand', cookie))).status).toBe(400);
+    const res = await top.getTopStations(req('?country=th', cookie));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { stations: { name: string; logoVersion?: string }[] };
+    expect(body.stations.map((s) => [s.name, s.logoVersion])).toEqual([['Top 2', 'bbbbbbbbbbbb'], ['Top 3', 'aaaaaaaaaaaa'], ['Top 1', undefined]]);
+    expect([...asked].sort()).toEqual(['/v1/directory/radio/map?country=TH', '/v1/directory/radio?country=TH&limit=48']);
+    // Kept in this process: the next viewer costs the API nothing.
+    await top.getTopStations(req('?country=TH', cookie));
+    expect(asked).toHaveLength(2);
+    searchDown = true;
+    const jp = (await (await top.getTopStations(req('?country=JP', cookie))).json()) as { stations: { name: string }[] };
+    expect(jp.stations.map((s) => s.name)).toEqual(['Top 3', 'Top 1', 'Top 2']);
+  });
+});
+
 describe('logos through the BFF and the real API', () => {
   const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(30, 5)]);
   const brandPost = async (cookie: string, body: unknown, remove = false) =>

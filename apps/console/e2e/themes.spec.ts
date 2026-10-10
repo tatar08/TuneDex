@@ -36,7 +36,8 @@ async function open(browser: Browser, user: string, path: string): Promise<Page>
 test('home has stations to play, and the sound keeps going from page to page', async ({ browser }) => {
   const page = await open(browser, 'e2e-th-user', '/app/home');
   await expect(page.getByRole('heading', { name: 'วิทยุของคุณ' })).toBeVisible();
-  // No favourites yet, so the wall opens on the curated stations rather than on nothing.
+  // No favourites yet and this stack has no Radio Browser, so the wall falls back from the country's most listened
+  // to the curated stations rather than opening on an error.
   await expect(page.getByRole('tab', { name: /คัดสรร/ })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('wall-station')).toHaveCount(2);
   await expect(page.getByTestId('player')).toHaveCount(0);
@@ -58,6 +59,37 @@ test('home has stations to play, and the sound keeps going from page to page', a
   await page.goto(`${stack.base}/app/home`);
   await page.getByRole('tab', { name: /ฟังล่าสุด/ }).click();
   await expect(page.getByTestId('wall-station')).toHaveText([/Wall Jazz FM/]);
+});
+
+test('home opens on the chosen country’s most listened stations, with their logos, and lists my own links', async ({ browser }) => {
+  stack.idp.setUser('e2e-th-popular');
+  const page = await (await browser.newContext({ viewport: { width: 1360, height: 860 } })).newPage();
+  const top = (country: string) =>
+    [1, 2, 3].map((n) => ({ id: `00000000-0000-4000-8000-00000000000${n}`, name: `${country} Top ${n}`, country, language: 'thai', genres: n === 1 ? ['pop', 'hits'] : [], codec: 'mp3', bitrateKbps: 128, streamUrl: `https://top${n}.example.test/${country}.mp3`, ...(n === 1 ? { logoVersion: 'abcdefabcdef' } : {}) }));
+  const asked: string[] = [];
+  await page.route('**/bff/directory/top**', (route) => {
+    const country = new URL(route.request().url()).searchParams.get('country')!;
+    asked.push(country);
+    return route.fulfill({ json: { stations: top(country), attribution: 'Radio Browser' } });
+  });
+  await page.addInitScript(() => localStorage.setItem('tunedeck.web.channels', JSON.stringify([{ id: 'c1', name: 'My Kept Station', url: 'https://kept.example.test/live.mp3', hls: false, group: 'ไทย' }])));
+  await page.goto(`${stack.base}/auth/login?returnTo=/app/home`);
+  await expect(page.getByRole('tab', { name: /ยอดนิยมในประเทศ/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('wall-station')).toHaveText([/TH Top 1.*pop, hits/, /TH Top 2/, /TH Top 3/]);
+  expect(asked).toEqual(['TH']);
+  // A station's own logo when it has one, TuneDeck's otherwise; always from this site.
+  await expect(page.getByTestId('wall-station').first().locator('img')).toHaveAttribute('src', '/bff/logos/stations/00000000-0000-4000-8000-000000000001?v=abcdefabcdef');
+  await expect(page.getByTestId('wall-station').nth(1).locator('img')).toHaveAttribute('src', '/bff/logos/default');
+  // The country is the viewer's choice and is remembered.
+  await page.getByLabel('ประเทศ', { exact: true }).selectOption('JP');
+  await expect(page.getByTestId('wall-station').first()).toContainText('JP Top 1');
+  await page.getByRole('button', { name: 'เล่น JP Top 1' }).click();
+  await expect(page.getByTestId('player')).toHaveAttribute('aria-label', 'กำลังเล่น: JP Top 1');
+  await page.reload();
+  await expect(page.getByLabel('ประเทศ', { exact: true })).toHaveValue('JP');
+  await page.getByRole('tab', { name: /ลิงก์ของฉัน/ }).click();
+  await expect(page.getByTestId('wall-station')).toHaveText([/My Kept Station.*ไทย/]);
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/home-links.png` });
 });
 
 test('a visitor chooses only a colour, kept in the browser', async ({ browser }) => {

@@ -840,6 +840,7 @@ export function createBff(deps: BffDeps) {
 
   const logoCache = new Map<string, { at: number; image: { type: string; bytes: Uint8Array } | null }>();
   let webTheme: { at: number; theme: string } | null = null;
+  const topCache = new Map<string, { at: number; stations: MapListStation[] }>();
   let brandCache: { at: number; image: { type: string; bytes: Uint8Array } | null } | null = null;
 
   /** An image from the API's public logo routes: only known image types, at most 64 KiB, else null. */
@@ -1365,6 +1366,35 @@ export function createBff(deps: BffDeps) {
         const result = await loadMapStations(raw ? raw.toUpperCase() : null, home ? home.toUpperCase() : null);
         if (!result.stations) return error(503, 'UPSTREAM_UNAVAILABLE', requestId);
         return json(200, { stations: result.stations, unmapped: result.unmapped ?? [], attribution: 'Radio Browser (www.radio-browser.info), community data' }, requestId, { 'cache-control': 'private, max-age=300' });
+      }),
+
+    /**
+     * GET /bff/directory/top?country=XX: a country's most listened community stations (Radio Browser's order), up to
+     * 48, for the home page. The order comes from the search; the logos from the country's map list, which this
+     * process already keeps. If the search fails, the head of the map list stands in.
+     */
+    getTopStations: (req: Request) =>
+      timed(req, '/bff/directory/top', async (requestId) => {
+        const ctx = await sessionFromCookie(req.headers.get('cookie'));
+        if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
+        const raw = new URL(req.url).searchParams.get('country') ?? '';
+        if (!/^[A-Za-z]{2}$/.test(raw)) return json(400, { code: 'VALIDATION_FAILED', requestId, details: { field: 'country' } }, requestId);
+        const country = raw.toUpperCase();
+        const hit = topCache.get(country);
+        let stations = hit && Date.now() - hit.at < MAP_CACHE_MS ? hit.stations : null;
+        if (!stations) {
+          const [top, map] = await Promise.all([directoryCall(`/v1/directory/radio?${new URLSearchParams({ country, limit: '48' })}`, 10_000), loadMapStations(country)]);
+          const all = [...(map.stations ?? []), ...(map.unmapped ?? [])];
+          if (!top && !map.stations) return error(503, 'UPSTREAM_UNAVAILABLE', requestId);
+          const logos = new Map(all.map((x) => [x.id, x.logoVersion]));
+          stations = top
+            ? top.filter((e) => typeof e.streamUrl === 'string' && e.streamUrl.startsWith('https://')).map((e) => pick({ ...e, logoVersion: logos.get(e.id) }))
+            : all.slice(0, 48).map(({ id, name, country: c, language, genres, codec, bitrateKbps, streamUrl, logoVersion }) => ({ id, name, country: c, language, genres, codec, bitrateKbps, streamUrl, ...(logoVersion ? { logoVersion } : {}) }));
+          topCache.delete(country);
+          topCache.set(country, { at: Date.now(), stations });
+          if (topCache.size > 100) topCache.delete(topCache.keys().next().value!);
+        }
+        return json(200, { stations, attribution: 'Radio Browser (www.radio-browser.info), community data' }, requestId, { 'cache-control': 'private, max-age=300' });
       }),
 
     async loadCatalog(): Promise<{ status: number; stations?: CatalogStation[]; truncated?: boolean }> {
