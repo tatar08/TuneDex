@@ -12,6 +12,7 @@ import { COUNTRY_CODES } from '../explore/countries';
 import { logoSrc } from '../explore/logo';
 import { useDesktop } from '../desktop';
 import { ListeningPanel } from '../player/ListeningPanel';
+import { MapHome, DaylightHome } from './EditorialHomes';
 import { TuningHome, LanguageHome } from './DiscoveryHomes';
 import { DashboardHome } from './DashboardHome';
 import { Presets } from './Presets';
@@ -176,6 +177,9 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
   const highlights = [...lists.recent, ...lists.favorites, ...lists.popular, ...lists.curated].filter((c, i, all) => all.findIndex(x => x.url === c.url) === i).slice(0, 3);
 
   const allCards = [...lists.favorites, ...lists.popular, ...lists.curated, ...lists.links].filter((c,i,all)=>all.findIndex(x=>x.url===c.url)===i);
+  if (wide && ['map-home', 'night-garden', 'daylight'].includes(theme)) return <main className="shell wide home-shell">
+    {theme === 'daylight' ? <DaylightHome lang={lang} country={country} countryControl={countryControl('editorial-country')} items={lists.popular.length?lists.popular:lists.curated} popular={lists.popular.length>0} favorites={favs}/> : <MapHome lang={lang} country={country} countryControl={countryControl('map-home-country')} items={allCards} favorites={favs} recent={lists.recent} garden={theme==='night-garden'}/>}
+  </main>;
   if (wide && ['signal-dial', 'tune-world', 'language-lanes'].includes(theme)) return <main className="shell wide home-shell">
     {theme === 'language-lanes' ? <LanguageHome lang={lang} items={allCards} /> : <TuningHome lang={lang} items={allCards} country={country} countryControl={countryControl('tuning-country')} world={theme==='tune-world'} />}
   </main>;

@@ -17,7 +17,7 @@ export function TuningHome({lang,items,country,countryControl,world}:{lang:Lang;
     <header><h1>{t.homeTitle}</h1><Link href="/app/explore" prefetch={false}>{t.homeExplore}</Link></header>
     <label>{t.exploreSearch}<input type="search" value={query} onChange={e=>setQuery(e.target.value)}/></label>{countryControl}
     <div className="tuning-focus-layout"><section className="station-focus" aria-label={t.stationSelected}><p>{t.stationSelected}</p><h2>{candidate?.name??t.listenChoose}</h2><p>{candidate?.meta}</p>{index>=0 && <p>{t.stationPosition(index+1,shown.length)}</p>}{candidate && <button className="btn" type="button" aria-label={t.playerPlay(candidate.name)} onClick={()=>play(candidate)}>{t.playerPlay(candidate.name)}</button>}<p className="status">{now?t.playerNow(now.name):t.listenChoose}</p></section>
-    {world && <ThemeMap lang={lang} country={country} selected={candidate?.key.replace(/^map:/,'')??null} onSelect={s=>setSelected({...s,key:`map:${s.key}`})}/>}</div>
+    {world && <ThemeMap dark lang={lang} country={country} selected={candidate?.key.replace(/^map:/,'')??null} onSelect={s=>setSelected({...s,key:`map:${s.key}`})}/>}</div>
     <section className="tuning-stations" aria-label={t.stationSelected}><div className="tuning-arrows"><button type="button" disabled={index<=0} onClick={()=>move(-1)}>{t.stationPrevious}</button><button type="button" disabled={index<0 || index>=shown.length-1} onClick={()=>move(1)}>{t.stationNext}</button></div><ol>{shown.map((s,i)=><li key={s.key}><button type="button" aria-pressed={candidate?.url===s.url} onClick={()=>setSelected(s)}>{i+1} · {s.name}</button></li>)}</ol>{!shown.length && <p role="status">{t.exploreNone}</p>}</section>
   </div>;
 }

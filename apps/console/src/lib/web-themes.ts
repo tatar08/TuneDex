@@ -17,6 +17,9 @@ export const WEB_THEMES = [
   { id: 'signal-dial', group: 'codex', name: 'แถบจูนสัญญาณ', hint: 'เลื่อนเลือกตำแหน่งสถานีโดยไม่เล่นอัตโนมัติ ตัวเล่นอยู่ด้านล่าง' },
   { id: 'tune-world', group: 'joint', name: 'จูนรอบโลก', hint: 'สถานีที่เลือก แผนที่จริง และแถบจูน โทนเข้ม' },
   { id: 'language-lanes', group: 'codex', name: 'ทางแยกภาษา', hint: 'สามคอลัมน์ภาษา เลือกภาษาและแนวเพลงแต่ละช่องแยกกัน' },
+  { id: 'map-home', group: 'claude', name: 'แผนที่คือหน้าแรก', hint: 'แผนที่เต็มพื้นที่ แผงสถานีโปรดและฟังล่าสุด โทนเข้ม' },
+  { id: 'night-garden', group: 'frames', name: 'สวนกลางคืน', hint: 'แผนที่ในสวนสีเข้ม ชั้นสถานีโปรดและฟังล่าสุด ตัวเล่นแบบแคปซูล' },
+  { id: 'daylight', group: 'claude', name: 'นิตยสารกลางวัน', hint: 'ประเทศที่คุณเลือกเป็นหัวเรื่อง สถานีเด่นและชั้นรายการ อ่านได้ทั้งสว่างและมืด' },
 ] as const;
 export const WEB_THEME_GROUPS = [
   { id: 'classic', name: 'แบบดั้งเดิม' },
