@@ -113,8 +113,21 @@ for (const device of Object.keys(DEVICES) as (keyof typeof DEVICES)[]) {
       expect(player.height).toBeLessThanOrEqual(64);
       expect(player.y + player.height).toBeLessThanOrEqual(panel.y);
       expect(panel.y + panel.height).toBeLessThanOrEqual(DEVICES[device].height - (device === 'iphone' ? 56 : 0));
-      await page.getByRole('button', { name: 'ขยายหรือย่อรายการสถานี' }).click();
-      await expect(page.getByRole('button', { name: 'ขยายหรือย่อรายการสถานี' })).toHaveAttribute('aria-expanded', 'true');
+      // A tap on the handle folds the sheet down to its handle and the count, and the player comes down with it;
+      // another tap, or picking a station, brings the three stations back (Tar 2026-10-11).
+      const handle = page.getByRole('button', { name: 'ขยายหรือย่อรายการสถานี' });
+      await handle.click();
+      await expect(handle).toHaveAttribute('aria-expanded', 'false');
+      await expect(page.getByTestId('explore-pick')).toBeHidden();
+      await expect(page.getByRole('heading', { name: 'โหลดแล้ว 6 สถานี' })).toBeVisible();
+      await expect.poll(async () => (await box('.explore-panel')).height).toBe(64);
+      const folded = await box('[data-testid=player]');
+      expect(folded.y).toBeGreaterThan(player.y + 100);
+      await fits(page, `${device}-explore-folded`);
+      await handle.click();
+      await expect(handle).toHaveAttribute('aria-expanded', 'true');
+      await expect(page.getByTestId('explore-pick')).toBeVisible();
+      await expect.poll(async () => (await box('.explore-panel')).height).toBe(panel.height);
       await page.getByRole('button', { name: 'เปลี่ยนเป็นลูกโลก' }).isVisible();
     }
   });

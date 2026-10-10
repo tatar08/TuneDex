@@ -256,7 +256,14 @@ a.btn { display: inline-block; text-decoration: none; }
   .explore-overlay { top: 70px; }
   /* At rest the sheet shows whole stations and nothing cut in half: three on a phone, five on an upright tablet. */
   .explore-body { --sheet-rows: 3; --sheet-row: 65px; --sheet: calc(28px + var(--sheet-rows) * var(--sheet-row)); }
+  /* Folded: the handle and the station count, so the map has the screen (Tar 2026-10-11). */
+  .explore-body[data-sheet="closed"] { --sheet: 64px; }
+  .explore-body[data-sheet="closed"] .explore-panel { overflow: hidden; }
+  .explore-body[data-sheet="closed"] .explore-panel > h2 { position: static; width: auto; height: 36px; clip: auto; margin: 0; flex: none; font-size: 15px; line-height: 28px; text-align: center; }
+  .explore-body[data-sheet="closed"] .explore-panel > :not(.explore-handle):not(h2) { display: none; }
   .explore-body[data-sheet="half"] { --sheet: 55%; }
+  /* The "showing N stations at this spot" line takes one whole row, so the rows under it are not cut. */
+  .explore-group { box-sizing: border-box; height: var(--sheet-row); margin: 0; flex: none; align-items: center; border-top: 1px solid var(--x-line); scroll-snap-align: start; }
   .explore-body[data-sheet="full"] { --sheet: calc(100% - 8px); }
   .explore-panel { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; min-height: 0; max-height: none; height: var(--sheet); gap: 0; padding: 0 16px; border: 0; border-radius: 20px 20px 0 0; box-shadow: 0 -8px 24px rgb(0 0 0 / 14%); transition: height 0.25s ease; overscroll-behavior: contain; scroll-snap-type: y proximity; scroll-padding-top: 28px; }
   .explore-panel > h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
