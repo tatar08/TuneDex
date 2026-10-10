@@ -66,7 +66,7 @@ test('explore shows community stations on a map or a globe, plays one and adds i
   // One row: the station, its state and Stop. No time line, since live radio cannot be wound back.
   await expect(page.getByTestId('player')).toHaveAttribute('aria-label', 'กำลังเล่น: Tokyo Wave');
   await expect(page.getByTestId('player')).toContainText('Tokyo Wave');
-  await expect(page.getByTestId('player').locator('video')).not.toHaveAttribute('controls');
+  await expect(page.locator('.player-screen video')).not.toHaveAttribute('controls');
   await expect(page.getByTestId('player').getByRole('button', { name: 'หยุด' })).toBeVisible();
   // A fake stream never starts, so the player says it is still connecting (or that it cannot play), never "playing".
   await expect(page.getByTestId('player').locator('.player-state')).toHaveAttribute('data-state', /connecting|failed/);

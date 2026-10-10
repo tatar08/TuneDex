@@ -5,7 +5,7 @@ import type { CatalogStation, Favorite, SyncResult } from '@/lib/bff';
 import { Lang, strings } from '@/lib/i18n';
 import { countryName, languageName } from '@/lib/names';
 import { AppNav } from '../AppNav';
-import { MediaPlayer, NowPlaying } from './MediaPlayer';
+import { usePlayer } from '../player/Player';
 import { MyChannels } from './MyChannels';
 
 type Problem = 'conflict' | 'expired' | 'rateLimited' | 'unavailable' | 'gone';
@@ -37,7 +37,7 @@ export function RadioView({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [announce, setAnnounce] = useState('');
-  const [now, setNow] = useState<NowPlaying | null>(null);
+  const { now, play: setNow } = usePlayer();
   const alertRef = useRef<HTMLDivElement>(null);
   const byId = new Map((stations ?? []).map((s) => [s.id, s]));
   const favoriteOf = new Map(favorites.map((f) => [f.stationId, f]));
@@ -117,7 +117,6 @@ export function RadioView({
       <AppNav lang={lang} current="/app/radio" csrfToken={csrfToken} />
       <h1>{t.radioTitle}</h1>
       <p className="lede">{t.radioLede}</p>
-      {now && <MediaPlayer lang={lang} item={now} onStop={() => setNow(null)} />}
       <p className="sr-only" role="status" aria-live="polite">
         {announce}
       </p>

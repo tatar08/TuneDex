@@ -311,7 +311,14 @@ test('the overview shows each phone’s last sync, and favorites picked on the w
   await expect(page.getByTestId('station')).toHaveCount(3);
   // The page plays the public catalog itself, with https media allowed on this page only.
   await page.getByRole('button', { name: 'เล่น Bangkok Jazz' }).click();
-  await expect(page.getByTestId('player')).toContainText('กำลังเล่น: Bangkok Jazz');
+  await expect(page.getByTestId('player')).toHaveAttribute('aria-label', 'กำลังเล่น: Bangkok Jazz');
+  // The player belongs to every account page: going to another page and back does not stop it (Tar 2026-10-11).
+  await page.getByRole('link', { name: 'การตั้งค่า' }).click();
+  await expect(page).toHaveURL(`${base}/app/settings`);
+  await expect(page.getByTestId('player')).toContainText('Bangkok Jazz');
+  await page.getByRole('link', { name: 'วิทยุ' }).click();
+  await expect(page).toHaveURL(`${base}/app/radio`);
+  await expect(page.getByTestId('player')).toContainText('Bangkok Jazz');
   await page.getByRole('button', { name: 'หยุด' }).click();
   await expect(page.getByTestId('player')).toHaveCount(0);
 
@@ -324,7 +331,7 @@ test('the overview shows each phone’s last sync, and favorites picked on the w
   await expect(page.getByText('เพิ่ม 1 รายการ (ข้าม 1 รายการที่ไม่ใช่ https)')).toBeVisible();
   await expect(page.getByTestId('channel')).toHaveText(['ช่องข่าว▶✕ข่าว · tv.example.test']);
   await page.getByRole('button', { name: 'เล่น ช่องข่าว' }).click();
-  await expect(page.getByTestId('player')).toContainText('กำลังเล่น: ช่องข่าว');
+  await expect(page.getByTestId('player')).toHaveAttribute('aria-label', 'กำลังเล่น: ช่องข่าว');
   await page.reload();
   await expect(page.getByTestId('channel')).toHaveCount(1);
   await page.getByRole('button', { name: 'ลบ ช่องข่าว' }).click();

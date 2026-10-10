@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DevicePreferencesView, DeviceView, SettingsView } from '@/lib/bff';
 import { accountLang, strings, type Lang } from '@/lib/i18n';
+import { WEB_ACCENTS } from '@/lib/web-themes';
+import { useAccent } from '../AppFrame';
 import { AppNav } from '../AppNav';
 
 type Values = SettingsView['settings'];
@@ -279,6 +281,8 @@ export function SettingsForm({
       </form>
       <p className="sr-only" aria-live="polite">{announce}</p>
 
+      <AccentPicker lang={lang} />
+
       <section className="device" aria-labelledby="device-title">
         <h2 id="device-title">{t.deviceTitle}</h2>
         {devices === null && <p className="status">{t.devicesLoadError}</p>}
@@ -307,5 +311,29 @@ export function SettingsForm({
         </p>
       </section>
     </main>
+  );
+}
+
+/**
+ * The one thing a visitor changes about the web app's look (Tar 2026-10-11): its colour. The layout is staff's
+ * choice. Kept in this browser, so it is not part of the settings the phones sync.
+ */
+function AccentPicker({ lang }: { lang: Lang }) {
+  const t = strings(lang);
+  const { accent, setAccent } = useAccent();
+  return (
+    <section className="device" aria-labelledby="accent-title">
+      <h2 id="accent-title">{t.accentTitle}</h2>
+      <div className="accents" role="radiogroup" aria-labelledby="accent-title">
+        {WEB_ACCENTS.map((a) => (
+          <label key={a.id} className="accent">
+            <input type="radio" name="web-accent" value={a.id} checked={accent === a.id} onChange={() => setAccent(a.id)} />
+            <span className="accent-dot" style={{ background: a.swatch }} aria-hidden="true" />
+            <span>{t[a.name]}</span>
+          </label>
+        ))}
+      </div>
+      <p className="status">{t.accentNote}</p>
+    </section>
   );
 }

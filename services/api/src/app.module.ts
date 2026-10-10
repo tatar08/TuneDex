@@ -17,6 +17,7 @@ import { boundedFetch } from './common/bounded-fetch';
 import { AdminDirectoryController, AdminDirectoryStationsController, DIRECTORY_FETCH, DirectoryController, DirectoryFetch, DirectoryService, UPSTREAM_MAX_BYTES } from './directory/directory';
 import { AdminBrandLogoController, AdminStationLogoController, LOGO_FETCH, LOGO_MAX_BYTES, LogoController, LogoService } from './directory/logos';
 import { AdminAuditController, AuditSearchService } from './audit/audit-search';
+import { AdminWebThemeController, WebThemeController, WebThemeService } from './brand/web-theme';
 import { AuthGuard, KEY_RESOLVER } from './auth/auth.guard';
 import { ErrorEnvelopeFilter } from './common/error.filter';
 import { IdempotencyInterceptor } from './common/idempotency';
@@ -71,7 +72,7 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController, DevicesController, DevicePreferencesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, MyExportsController, ExportDownloadController, AdminOverviewController, AdminMetricsController, AdminJobsController, AdminUsersController, AdminSupportDiagnosticsController, MySupportAccessController, AdminConfigController, PublicConfigController, SyncController, FavoritesController, BillingController, DirectoryController, AdminDirectoryController, AdminDirectoryStationsController, LogoController, AdminStationLogoController, AdminBrandLogoController],
+      controllers: [HealthController, SettingsController, DevicesController, DevicePreferencesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, MyExportsController, ExportDownloadController, AdminOverviewController, AdminMetricsController, AdminJobsController, AdminUsersController, AdminSupportDiagnosticsController, MySupportAccessController, AdminConfigController, PublicConfigController, SyncController, FavoritesController, BillingController, DirectoryController, AdminDirectoryController, AdminDirectoryStationsController, LogoController, AdminStationLogoController, AdminBrandLogoController, WebThemeController, AdminWebThemeController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },
@@ -103,6 +104,7 @@ export class AppModule {
         MetricsService,
         AlertService,
         DirectoryService,
+        WebThemeService,
         LogoService,
         ...(deps.logoFetch ? [{ provide: LOGO_FETCH, useValue: deps.logoFetch }] : []),
         { provide: DIRECTORY_FETCH, useValue: deps.directoryFetch ?? ((url: string, init: Parameters<DirectoryFetch>[1]) => boundedFetch(url, init, UPSTREAM_MAX_BYTES)) },

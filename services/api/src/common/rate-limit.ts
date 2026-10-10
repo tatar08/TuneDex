@@ -64,7 +64,7 @@ export class RateLimitInterceptor implements NestInterceptor {
     }
     if (req.path.startsWith('/v1/catalog/')) return { bucket: `ip:${addressKey(req.ip)}:catalog`, limit: limits.catalogPerMinutePerIp };
     // Logo images: a map can show dozens at once, and the web console asks for all its viewers from one address.
-    if (/^\/v1\/directory\/radio\/stations\/[^/]+\/logo$/.test(req.path) || req.path === '/v1/brand/station-logo') return { bucket: `ip:${addressKey(req.ip)}:logo`, limit: limits.catalogPerMinutePerIp * 10 };
+    if (/^\/v1\/directory\/radio\/stations\/[^/]+\/logo$/.test(req.path) || req.path === '/v1/brand/station-logo' || req.path === '/v1/brand/web-theme') return { bucket: `ip:${addressKey(req.ip)}:logo`, limit: limits.catalogPerMinutePerIp * 10 };
     if (req.path.startsWith('/v1/directory/')) return { bucket: `ip:${addressKey(req.ip)}:directory`, limit: limits.catalogPerMinutePerIp };
     // Deletion progress is public (the account can no longer sign in); tickets are unguessable, but cap guessing anyway.
     if (req.path.startsWith('/v1/account-deletions/')) return { bucket: `ip:${addressKey(req.ip)}:deletion`, limit: limits.catalogPerMinutePerIp };
