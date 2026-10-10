@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { THEMES } from '../src/lib/admin';
-import { startStack, Stack } from './stack';
+import { registerBrowserCleanup, startStack, Stack } from './stack';
+
+registerBrowserCleanup();
 
 // Doc 17: every staff page reads in English when the viewer picks English, in every theme.
 let stack: Stack;

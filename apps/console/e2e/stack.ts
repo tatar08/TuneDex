@@ -7,9 +7,12 @@ import { CLIENT_ID, CLIENT_SECRET, MockIdp, startMockIdp } from '../test/mock-id
 
 // These suites create contexts explicitly for multiple accounts and viewports. They are test-scoped:
 // retaining them across tests leaks pages, listeners and media elements into a long regression run.
-test.afterEach(async ({ browser }) => {
-  await Promise.all(browser.contexts().map(context => context.close()));
-});
+export function registerBrowserCleanup() {
+  // Register in each importing suite; a module-level hook would only belong to the first file in a worker.
+  test.afterEach(async ({ browser }) => {
+    await Promise.all(browser.contexts().map(context => context.close()));
+  });
+}
 
 /** Real Next.js build + real services/api + PostgreSQL, with the test-only IdP. */
 export interface Stack {

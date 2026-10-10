@@ -478,7 +478,8 @@ a.btn { display: inline-block; text-decoration: none; }
   .t-preset-wall .wall-play { width: 44px; height: 44px; }
   .t-preset-wall .preset-discovery { display: block; grid-column: 2; grid-row: 4; border-left: 1px solid var(--line); padding-left: 24px; min-width: 0; }
   .preset-discovery h2 { font-size: 21px; margin-top: 0; }
-  .preset-discovery .wall-country { display: grid; }
+  .preset-discovery .wall-country { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .preset-discovery .wall-country select { min-width: 0; width: 100%; }
   .preset-discovery .discovery-tiles { grid-template-columns: 1fr; margin-bottom: 20px; }
 }
 

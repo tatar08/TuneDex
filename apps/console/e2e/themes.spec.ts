@@ -1,5 +1,7 @@
 import { Browser, expect, Page, test } from '@playwright/test';
-import { startStack, Stack } from './stack';
+import { registerBrowserCleanup, startStack, Stack } from './stack';
+
+registerBrowserCleanup();
 
 // The frame every account page shares (Tar 2026-10-11): staff choose the layout theme for everyone, a visitor
 // chooses only a colour, and the home page always has something to play.
@@ -238,7 +240,7 @@ for (const [theme, label] of [['preset-wall', 'ผนังพรีเซ็ต
     await expect(chrome).toBeHidden();
     await expect(page.locator('.wall-tabs')).toBeVisible();
     await form.getByRole('radio', { name: /ดั้งเดิม/ }).check();
-    await form.getByRole('button' , { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' }).click();
+    await form.getByRole('button', { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' }).click();
     await expect(form.getByRole('status')).toContainText('บันทึกแล้ว');
     await page.context().close();
     await admin.context().close();
