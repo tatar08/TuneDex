@@ -14,6 +14,9 @@ export const WEB_THEMES = [
   { id: 'stage', group: 'frames', name: 'เวที', hint: 'เวทีสถานีขนาดใหญ่บนหน้าแรก และแถบเล่นต่อเนื่องในหน้าอื่น' },
   { id: 'cockpit', group: 'claude', name: 'แผงหน้าปัดรถ', hint: 'แผงสถานีและข้อมูลคอลเลกชัน พรีเซ็ตหกช่องในเบราว์เซอร์ โทนเข้ม' },
   { id: 'head-unit', group: 'frames', name: 'หน้าปัดวิทยุรถ', hint: 'เลือกสถานีด้วยแถบตำแหน่ง กดเล่นแยกต่างหาก พรีเซ็ตในเบราว์เซอร์ โทนเข้ม' },
+  { id: 'signal-dial', group: 'codex', name: 'แถบจูนสัญญาณ', hint: 'เลื่อนเลือกตำแหน่งสถานีโดยไม่เล่นอัตโนมัติ ตัวเล่นอยู่ด้านล่าง' },
+  { id: 'tune-world', group: 'joint', name: 'จูนรอบโลก', hint: 'สถานีที่เลือก แผนที่จริง และแถบจูน โทนเข้ม' },
+  { id: 'language-lanes', group: 'codex', name: 'ทางแยกภาษา', hint: 'สามคอลัมน์ภาษา เลือกภาษาและแนวเพลงแต่ละช่องแยกกัน' },
 ] as const;
 export const WEB_THEME_GROUPS = [
   { id: 'classic', name: 'แบบดั้งเดิม' },
