@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { createContext, Suspense, useContext, useEffect, useState } from 'react';
+import { createContext, Suspense, useContext, useEffect, useRef, useState } from 'react';
 import { canSeeAudit, canSeeConfig, canSeeLogs, canSeeStations, canSeeUsers, CatalogSummary, Mode, MODE_COOKIE, ROLE_LABELS, THEME_COOKIE, THEMES, ThemeId } from '@/lib/admin';
 import { Translate, translator } from '@/lib/admin-i18n';
 import type { StaffRole } from '@/lib/bff';
@@ -155,7 +155,31 @@ export function AdminShell({
   const [theme, setTheme] = useState<ThemeId>(initialTheme);
   const [mode, setMode] = useState<Mode>(initialMode);
   const [collapsed, setCollapsed] = useState(false);
+  // Phones and upright tablets fold each theme's menu behind one button, so a page starts with its content.
+  const [menuOpen, setMenuOpen] = useState(false);
   const pathname = usePathname();
+  useEffect(() => setMenuOpen(false), [pathname]);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // On a phone each table row becomes a card; every cell is labelled with its column header for that view.
+    const node = root.current;
+    if (!node) return;
+    const label = () => {
+      for (const table of node.querySelectorAll('table')) {
+        const heads = [...table.querySelectorAll('thead th')].map((th) => th.textContent?.trim() ?? '');
+        if (!heads.length) continue;
+        for (const tr of table.querySelectorAll('tbody tr'))
+          [...tr.children].forEach((td, i) => {
+            const text = heads[i];
+            if (text && td.getAttribute('data-label') !== text) td.setAttribute('data-label', text);
+          });
+      }
+    };
+    label();
+    const watch = new MutationObserver(label);
+    watch.observe(node, { childList: true, subtree: true });
+    return () => watch.disconnect();
+  }, [theme]);
   const isAdmin = roles.includes('admin');
   const t = translator(lang);
   const value: AdminContextValue = { theme, summary, roles, csrfToken, isAdmin, canEdit: isAdmin || roles.includes('catalog_editor'), lang, t };
@@ -191,6 +215,16 @@ export function AdminShell({
     </Link>
   ));
 
+  const here = nav.find((n) => on(n.href));
+  const menuButton = (
+    <button type="button" className="adm-menu-btn" aria-expanded={menuOpen} aria-label={menuOpen ? t('ปิดเมนู') : t('เปิดเมนู')} onClick={() => setMenuOpen((o) => !o)}>
+      <svg className="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true">
+        <path d={menuOpen ? 'M6 6l12 12M18 6L6 18' : 'M4 7h16M4 12h16M4 17h16'} />
+      </svg>
+      <span aria-hidden="true">{here ? t(here.label) : t('เมนู')}</span>
+    </button>
+  );
+
   let chrome: React.ReactNode;
   switch (theme) {
     case 'control-room':
@@ -200,6 +234,7 @@ export function AdminShell({
             <div className="logo">
               TuneDeck <span>· console</span>
             </div>
+            {menuButton}
             <nav className="grp" aria-label={t('เมนู')}>
               <h6>Console</h6>
               {links}
@@ -226,6 +261,7 @@ export function AdminShell({
             <span className="brand">
               TUNE<span>DECK</span>
             </span>
+            {menuButton}
             <nav className="bands" aria-label={t('เมนู')}>
               {links}
               <a href="/app/settings">{t('ตั้งค่าของฉัน')}</a>
@@ -249,6 +285,7 @@ export function AdminShell({
               <i aria-hidden="true" />
               TuneDeck
             </span>
+            {menuButton}
             <nav aria-label={t('เมนู')}>
               {links}
               <a href="/app/settings">{t('ตั้งค่าของฉัน')}</a>
@@ -308,6 +345,7 @@ export function AdminShell({
                   <small>Staff Console</small>
                 </span>
               </div>
+              {menuButton}
               <Suspense>
                 <SideSearch />
               </Suspense>
@@ -395,7 +433,7 @@ export function AdminShell({
 
   return (
     <AdminContext.Provider value={value}>
-      <div className={`adm t-${theme} ${fontClass}`} data-theme-id={theme} data-mode={theme === 'minimal' ? mode : undefined}>
+      <div ref={root} className={`adm t-${theme} ${fontClass}`} data-theme-id={theme} data-mode={theme === 'minimal' ? mode : undefined} data-menu={menuOpen ? 'open' : 'closed'}>
         {chrome}
       </div>
     </AdminContext.Provider>
