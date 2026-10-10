@@ -6,6 +6,7 @@ import type { CatalogStation, Favorite, MapListStation } from '@/lib/bff';
 import { Lang, strings } from '@/lib/i18n';
 import { countryName } from '@/lib/names';
 import { CHANNELS_KEY, readChannels } from '@/lib/playlist';
+import { useWebTheme } from '../AppFrame';
 import { AppNav } from '../AppNav';
 import { COUNTRY_CODES } from '../explore/countries';
 import { logoSrc } from '../explore/logo';
@@ -38,7 +39,8 @@ function initials(name: string): { text: string; color: string } {
  */
 export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang; csrfToken: string; favorites: Favorite[] | null; stations: CatalogStation[] | null }) {
   const t = strings(lang);
-  const { now, play, recent } = usePlayer();
+  const theme = useWebTheme();
+  const { now, status, play, recent } = usePlayer();
   const meta = (s: CatalogStation) => [countryName(s.country, lang), s.genres.slice(0, 2).join(', ')].filter(Boolean).join(' · ');
   const card = (s: CatalogStation): Card => ({ key: s.id, name: s.name, url: s.streamUrl, hls: s.codec === 'hls', meta: meta(s) });
   const byId = new Map((stations ?? []).map((s) => [s.id, s]));
@@ -124,6 +126,46 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
             ? stations === null ? t.radioLoadError : t.radioCatalogNone
             : t.homeRecentNone;
 
+  const tile = (c: Card, testId = 'wall-station') => {
+    const on = now?.url === c.url;
+    const mark = initials(c.name);
+    return (
+      <li key={c.key} className={on ? 'on' : undefined} data-testid={testId}>
+        {c.logo ? (
+          // eslint-disable-next-line @next/next/no-img-element -- small same-origin logo
+          <img className="wall-logo" src={c.logo} alt="" width={56} height={56} loading="lazy" decoding="async" />
+        ) : (
+          <span className="wall-logo" style={{ background: mark.color }} aria-hidden="true">
+            {mark.text}
+          </span>
+        )}
+        <button type="button" className="wall-play" aria-pressed={on} aria-label={t.playerPlay(c.name)} onClick={() => play({ name: c.name, url: c.url, hls: c.hls, logo: c.logo })}>
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path d="M8 5.5v13l10.5-6.5z" fill="currentColor" />
+          </svg>
+        </button>
+        <span className="wall-name">{c.name}</span>
+        <span className="wall-meta legacy-stream-state">{on ? t.playerPlaying : c.meta}</span>
+        {['preset-wall', 'shelves', 'studio'].includes(theme) && (
+          <span className="wall-meta desktop-stream-state">{on ? status === 'failed' ? t.playerFailed : status === 'playing' ? t.playerPlaying : t.playerConnecting : c.meta}</span>
+        )}
+      </li>
+    );
+  };
+
+  const countryControl = (id: string) => <div className="wall-country">
+    <label htmlFor={id}>{t.homeCountry}</label>
+    <select id={id} value={country} onChange={(e) => chooseCountry(e.target.value)}>{countries.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}</select>
+    <span className="status">{t.homePopularNote}</span>
+  </div>;
+  const shelf = (id: Tab) => <section className={`station-shelf shelf-${id}`} aria-labelledby={`shelf-${id}`} key={id}>
+    <div className="shelf-heading"><h2 id={`shelf-${id}`}>{tabs.find(([key]) => key === id)![1]}</h2><Link href={id === 'popular' ? '/app/explore' : '/app/radio'} prefetch={false}>{id === 'popular' ? t.homeExplore : t.homeManage}</Link></div>
+    {id === 'popular' && countryControl('shelf-country')}
+    {lists[id].length ? <ul className="wall shelf-tiles" aria-label={tabs.find(([key]) => key === id)![1]}>{lists[id].map(c => tile(c, 'shelf-station'))}</ul> : <p className="status">{id === 'favorites' ? favorites === null ? t.radioLoadError : t.homeFavoritesNone : id === 'recent' ? t.homeRecentNone : id === 'links' ? t.homeLinksNone : id === 'popular' ? popular === null ? t.exploreLoading : popular === 'failed' ? t.exploreError : t.exploreNone : stations === null ? t.radioLoadError : t.radioCatalogNone}</p>}
+  </section>;
+  // Up to three distinct stations, drawn from real history, favourites and available catalogs.
+  const highlights = [...lists.recent, ...lists.favorites, ...lists.popular, ...lists.curated].filter((c, i, all) => all.findIndex(x => x.url === c.url) === i).slice(0, 3);
+
   return (
     <main className="shell wide home-shell">
       <AppNav lang={lang} current="/app/home" csrfToken={csrfToken} />
@@ -161,32 +203,20 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
           <p className="status">{empty}</p>
         ) : (
           <ul className="wall">
-            {shown.map((c) => {
-              const on = now?.url === c.url;
-              const mark = initials(c.name);
-              return (
-                <li key={c.key} className={on ? 'on' : undefined} data-testid="wall-station">
-                  {c.logo ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- small same-origin logo
-                    <img className="wall-logo" src={c.logo} alt="" width={56} height={56} loading="lazy" decoding="async" />
-                  ) : (
-                    <span className="wall-logo" style={{ background: mark.color }} aria-hidden="true">
-                      {mark.text}
-                    </span>
-                  )}
-                  <button type="button" className="wall-play" aria-pressed={on} aria-label={t.playerPlay(c.name)} onClick={() => play({ name: c.name, url: c.url, hls: c.hls, logo: c.logo })}>
-                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                      <path d="M8 5.5v13l10.5-6.5z" fill="currentColor" />
-                    </svg>
-                  </button>
-                  <span className="wall-name">{c.name}</span>
-                  <span className="wall-meta">{on ? t.playerPlaying : c.meta}</span>
-                </li>
-              );
-            })}
+            {shown.map((c) => tile(c))}
           </ul>
         )}
       </div>
+      {theme === 'preset-wall' && <aside className="preset-discovery" aria-label={t.homeExplore}>
+        <h2>{t.homeExplore}</h2>{countryControl('discovery-country')}
+        {lists.popular.length ? <ul className="wall discovery-tiles">{lists.popular.slice(0, 3).map(c => tile(c, 'discovery-station'))}</ul> : <p className="status">{popular === null ? t.exploreLoading : popular === 'failed' ? t.exploreError : t.exploreNone}</p>}
+        <Link href="/app/explore" prefetch={false}>{t.homeExplore}</Link>
+      </aside>}
+      {['shelves', 'studio'].includes(theme) && <div className="shelf-home">
+        <header className="shelf-intro"><div><h1>{t.homeTitle}</h1><p className="lede">{t.homeLede}</p></div><Link href="/app/explore" prefetch={false}>{t.homeExplore}</Link></header>
+        {theme === 'studio' && highlights.length > 0 && <section className="studio-highlights" aria-label={t.homeTitle}><ul className="wall">{highlights.map(c => tile(c, 'studio-station'))}</ul></section>}
+        {(['favorites', 'recent', 'popular', 'curated', 'links'] as Tab[]).map(shelf)}
+      </div>}
     </main>
   );
 }

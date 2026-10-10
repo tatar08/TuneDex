@@ -68,7 +68,7 @@ export function openTransaction(value: string | undefined, secret: string, now =
 
 /** Only same-site paths under /app/ may be used as a post-login destination. */
 export function safeReturnTo(value: string | null | undefined): string {
-  const fallback = '/app/settings';
+  const fallback = '/app/home';
   if (!value || !(value.startsWith('/app/') || value === '/admin' || value.startsWith('/admin/')) || value.startsWith('//') || /[\\\s]/.test(value)) return fallback;
   return value.length <= 200 ? value : fallback;
 }

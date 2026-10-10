@@ -87,7 +87,7 @@ describe('login transaction cookie', () => {
     expect(safeReturnTo('/app/devices')).toBe('/app/devices');
     expect(safeReturnTo('/admin/stations')).toBe('/admin/stations');
     expect(safeReturnTo('/admin')).toBe('/admin');
-    for (const bad of ['https://x', '//x/app/', '/administrator', '/adminx/y', '/app/\\x', null]) expect(safeReturnTo(bad)).toBe('/app/settings');
+    for (const bad of ['https://x', '//x/app/', '/administrator', '/adminx/y', '/app/\\x', null]) expect(safeReturnTo(bad)).toBe('/app/home');
   });
 });
 

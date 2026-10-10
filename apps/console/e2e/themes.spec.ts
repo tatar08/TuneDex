@@ -151,3 +151,90 @@ test('an admin chooses the layout theme for everyone; editors cannot', async ({ 
   await form.getByRole('button', { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' }).click();
   await expect(form.getByRole('status')).toContainText('บันทึกแล้ว');
 });
+
+
+// Each batch layout uses the production app and the shared media element, not a standalone mockup.
+for (const [theme, label] of [['preset-wall', 'ผนังพรีเซ็ต'], ['shelves', 'ชั้นวางฟังเพลง'], ['studio', 'สตูดิโอ']]) {
+  test(`${theme}: desktop pages, persistent player, all accents and shared mobile layout`, async ({ browser }) => {
+    test.setTimeout(180_000);
+    const admin = await open(browser, 'e2e-th-admin', '/admin/settings');
+    const form = admin.getByRole('form', { name: 'ธีมของเว็บผู้ใช้' });
+    await expect(form.locator('.theme-preview')).toHaveCount(5);
+    await form.getByRole('radio', { name: new RegExp(label) }).check();
+    await form.getByRole('button', { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' }).click();
+    await expect(form.getByRole('status')).toContainText('บันทึกแล้ว');
+    const page = await open(browser, `e2e-batch-${theme}`, '/app/home');
+    await expect(page.getByTestId('app-frame')).toHaveClass(new RegExp(`t-${theme}`));
+    await expect(page.getByTestId('player')).toHaveCount(0);
+    const desktop = theme === 'preset-wall' ? page.locator('#wall') : page.locator('.shelf-curated');
+    await desktop.getByRole('button', { name: 'เล่น Wall Jazz FM' }).click();
+    await page.locator('.player-screen video').evaluate(v => v.setAttribute('data-kept', 'batch'));
+    // Country changes fetch a different list but never start a new stream.
+    await page.locator(theme === 'preset-wall' ? '#discovery-country' : '#shelf-country').selectOption('JP');
+    await expect(page.locator('.player-screen video')).toHaveAttribute('src', 'https://stream.example.com/jazz.aac');
+    for (const width of [1360, 1920]) {
+      await page.setViewportSize({ width, height: width === 1360 ? 860 : 1080 });
+      for (const [, path] of [['หน้าแรก', '/app/home'], ['วิทยุ', '/app/radio'], ['สำรวจ', '/app/explore'], ['การตั้งค่า', '/app/settings'], ['อุปกรณ์', '/app/devices'], ['ความเป็นส่วนตัว', '/app/privacy'], ['ภาพรวม', '/app/overview']]) {
+        const nav = page.locator(theme === 'preset-wall' ? '.theme-top-nav' : '.side-nav');
+        if (theme === 'preset-wall' && path !== '/app/home' && path !== '/app/radio' && path !== '/app/explore') {
+          await page.locator('.theme-account').evaluate((d: HTMLDetailsElement) => { d.open = true; });
+        }
+        // Use the destination rather than translated labels, which can differ on account pages.
+        await nav.locator(`a[href="${path}"]:not(.brand)`).click();
+        await expect(page).toHaveURL(`${stack.base}${path}`, { timeout: 15_000 });
+        await expect(page.locator('.player-screen video')).toHaveAttribute('data-kept', 'batch');
+        await expect(page.locator('.player-screen video')).toHaveAttribute('src', 'https://stream.example.com/jazz.aac');
+        await page.evaluate(async () => { await document.fonts.ready; window.scrollTo(0, 0); });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), `${theme} ${width} ${path}`).toBeLessThanOrEqual(0);
+        if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/${theme}-${width}-${path.split('/').pop()}.png` });
+      }
+    }
+    await page.goto(`${stack.base}/app/settings`);
+    for (const mode of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: mode });
+      for (const accent of ['default', 'green', 'blue', 'rose', 'violet']) {
+        await page.locator(`.accents input[value="${accent}"]`).check();
+        await expect(page.getByTestId('app-frame')).toHaveAttribute('data-accent', accent);
+        const contrast = await page.getByTestId('app-frame').evaluate(frame => {
+          const style = getComputedStyle(frame);
+          const luminance = (hex: string) => {
+            const rgb = hex.trim().slice(1).match(/../g)!.map(v => parseInt(v, 16) / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+            return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+          };
+          const a = luminance(style.getPropertyValue('--web-accent'));
+          const b = luminance(style.getPropertyValue('--web-accent-ink'));
+          return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+        });
+        expect(contrast, `${theme} ${mode} ${accent} text on accent`).toBeGreaterThanOrEqual(4.5);
+      }
+      await page.goto(`${stack.base}/app/home`);
+      if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/${theme}-${mode}-home.png` });
+      await page.goto(`${stack.base}/app/settings`);
+    }
+    for (const viewport of [{ width: 390, height: 844 }, { width: 820, height: 1180 }]) {
+      await page.setViewportSize(viewport);
+      await page.goto(`${stack.base}/app/home`);
+      await expect(page.locator('.shelf-home')).toBeHidden();
+      await expect(page.locator('.preset-discovery')).toBeHidden();
+      await expect(page.locator('.side-nav')).toBeHidden();
+      await expect(page.locator('.theme-top-nav')).toBeHidden();
+      await expect(page.locator('.wall-tabs')).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
+      if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/${theme}-${viewport.width}-home.png` });
+    }
+    await form.getByRole('radio', { name: /ดั้งเดิม/ }).check();
+    await form.getByRole('button', { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' }).click();
+    await expect(form.getByRole('status')).toContainText('บันทึกแล้ว');
+    await page.context().close();
+    await admin.context().close();
+  });
+}
+
+test('login without a requested destination opens Home', async ({ browser }) => {
+  stack.idp.setUser('e2e-home-default');
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto(`${stack.base}/auth/login`);
+  await expect(page).toHaveURL(`${stack.base}/app/home`);
+  await context.close();
+});

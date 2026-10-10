@@ -2,11 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Lang, strings } from '@/lib/i18n';
 import { ACCENT_COOKIE, WebAccentId, WebThemeId } from '@/lib/web-themes';
 import { Icon, ICONS } from './AppNav';
 import { PlayerProvider } from './player/Player';
+
+const ThemeCtx = createContext<WebThemeId>('classic');
+export const useWebTheme = () => useContext(ThemeCtx);
 
 const AccentCtx = createContext<{ accent: WebAccentId; setAccent: (a: WebAccentId) => void }>({ accent: 'default', setAccent: () => undefined });
 /** The visitor's colour and how to change it; kept a year in a cookie of this browser, so the server draws it at once. */
@@ -46,6 +49,40 @@ function SideNav({ lang, csrfToken }: { lang: Lang; csrfToken: string }) {
   );
 }
 
+/** Top navigation for the preset wall. Account destinations stay in one disclosure. */
+function TopNav({ lang, csrfToken }: { lang: Lang; csrfToken: string }) {
+  const t = strings(lang);
+  const path = usePathname();
+  const account = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (account.current) account.current.open = false;
+  }, [path]);
+  const link = (href: string, text: string) => (
+    <Link href={href} key={href} prefetch={false} aria-current={path === href ? 'page' : undefined}>{text}</Link>
+  );
+  return (
+    <nav className="theme-top-nav" aria-label={t.navMenu}>
+      <Link href="/app/home" className="brand" prefetch={false}>{t.appName}</Link>
+      {link('/app/home', t.navHome)}
+      {link('/app/radio', t.navRadio)}
+      {link('/app/explore', t.navExplore)}
+      <details ref={account} className="theme-account">
+        <summary>{t.navAccount}</summary>
+        <div>
+          {link('/app/overview', t.navOverview)}
+          {link('/app/settings', t.navSettings)}
+          {link('/app/devices', t.navDevices)}
+          {link('/app/privacy', t.navPrivacy)}
+          <form method="post" action="/auth/logout">
+            <input type="hidden" name="csrf" value={csrfToken} />
+            <button type="submit">{t.signOut}</button>
+          </form>
+        </div>
+      </details>
+    </nav>
+  );
+}
+
 /**
  * The frame around every account page: the layout theme (staff's choice), the visitor's colour and the shared
  * player. A theme changes only this frame and the home page; phones keep one layout whatever the theme.
@@ -57,13 +94,16 @@ export function AppFrame({ theme, accent: initial, lang, csrfToken, children }: 
     document.cookie = `${ACCENT_COOKIE}=${a}; Path=/; Max-Age=31536000; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`;
   };
   return (
-    <AccentCtx.Provider value={{ accent, setAccent }}>
+    <ThemeCtx.Provider value={theme}>
+      <AccentCtx.Provider value={{ accent, setAccent }}>
       <div className={`app-frame t-${theme}`} data-accent={accent} data-testid="app-frame">
         <PlayerProvider lang={lang}>
-          {theme === 'radio-wall' && csrfToken && <SideNav lang={lang} csrfToken={csrfToken} />}
+          {['radio-wall', 'shelves', 'studio'].includes(theme) && csrfToken && <SideNav lang={lang} csrfToken={csrfToken} />}
+          {theme === 'preset-wall' && csrfToken && <TopNav lang={lang} csrfToken={csrfToken} />}
           {children}
         </PlayerProvider>
       </div>
-    </AccentCtx.Provider>
+      </AccentCtx.Provider>
+    </ThemeCtx.Provider>
   );
 }

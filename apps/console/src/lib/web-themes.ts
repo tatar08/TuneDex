@@ -4,8 +4,18 @@
  * them (where the menu and the player sit) and the home page. Phones keep one layout whatever the theme.
  */
 export const WEB_THEMES = [
-  { id: 'classic', name: 'ดั้งเดิม', hint: 'การ์ดกลางจอ เมนูด้านบน แบบที่ใช้มาตลอด' },
-  { id: 'radio-wall', name: 'ผนังวิทยุส่วนตัว', hint: 'เมนูด้านข้าง หน้าแรกเป็นผนังปุ่มสถานี ตัวเล่นเป็นแถบล่างทุกหน้า' },
+  { id: 'classic', group: 'classic', name: 'ดั้งเดิม', hint: 'การ์ดกลางจอ เมนูด้านบน แบบที่ใช้มาตลอด' },
+  { id: 'radio-wall', group: 'joint', name: 'ผนังวิทยุส่วนตัว', hint: 'เมนูด้านข้าง หน้าแรกเป็นผนังปุ่มสถานี ตัวเล่นเป็นแถบล่างทุกหน้า' },
+  { id: 'preset-wall', group: 'codex', name: 'ผนังพรีเซ็ต', hint: 'เมนูด้านบน ปุ่มสถานีสี่คอลัมน์ พร้อมพื้นที่ค้นพบวิทยุข้างกัน' },
+  { id: 'shelves', group: 'claude', name: 'ชั้นวางฟังเพลง', hint: 'เมนูด้านข้าง ชั้นสถานีโปรด ฟังล่าสุด และยอดนิยมในประเทศที่เลือก' },
+  { id: 'studio', group: 'frames', name: 'สตูดิโอ', hint: 'เมนูด้านข้าง การ์ดสถานีเด่นสามใบ และชั้นสถานีในพื้นที่สว่าง' },
+] as const;
+export const WEB_THEME_GROUPS = [
+  { id: 'classic', name: 'แบบดั้งเดิม' },
+  { id: 'claude', name: 'แบบของ Claude' },
+  { id: 'codex', name: 'แบบของ Codex' },
+  { id: 'joint', name: 'ออกแบบร่วมกัน' },
+  { id: 'frames', name: 'ชุดสตูดิโอและเวที' },
 ] as const;
 export type WebThemeId = (typeof WEB_THEMES)[number]['id'];
 export const DEFAULT_WEB_THEME: WebThemeId = 'classic';

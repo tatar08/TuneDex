@@ -4,8 +4,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { formatLogTime } from '@/lib/admin';
-import { WEB_THEMES, webThemeFrom } from '@/lib/web-themes';
+import { WEB_THEMES, WEB_THEME_GROUPS, webThemeFrom } from '@/lib/web-themes';
 import { useAdmin, useT } from '../AdminShell';
+import { ThemePreview } from './ThemePreview';
 import { LogoUpload } from '../LogoUpload';
 
 /**
@@ -78,13 +79,21 @@ function WebThemePicker({ current }: { current: { theme: string; updatedBy: stri
     <form className="adm-panel st-theme" aria-labelledby="st-theme" onSubmit={save}>
       <h3 id="st-theme">{t('ธีมของเว็บผู้ใช้')}</h3>
       <p className="dim">{t('โครงหน้าที่ผู้ใช้ทุกคนเห็นบนคอมพิวเตอร์ ผู้ใช้เปลี่ยนเองไม่ได้ เลือกได้แค่สีในหน้าการตั้งค่าของตัวเอง มือถือใช้แบบเดียวทุกธีม')}</p>
-      <div className="st-themes" role="radiogroup" aria-labelledby="st-theme">
-        {WEB_THEMES.map((th) => (
-          <label key={th.id} className={picked === th.id ? 'st-theme-card on' : 'st-theme-card'}>
-            <input type="radio" name="web-theme" value={th.id} checked={picked === th.id} onChange={() => setPicked(th.id)} />
-            <b>{t(th.name)}</b>
-            <small className="dim">{t(th.hint)}</small>
-          </label>
+      <div className="st-theme-groups" role="radiogroup" aria-labelledby="st-theme">
+        {WEB_THEME_GROUPS.map((group) => (
+          <fieldset key={group.id} className="st-theme-group">
+            <legend>{t(group.name)}</legend>
+            <div className="st-themes">
+              {WEB_THEMES.filter((th) => th.group === group.id).map((th) => (
+                <label key={th.id} className={picked === th.id ? 'st-theme-card on' : 'st-theme-card'}>
+                  <input type="radio" name="web-theme" value={th.id} checked={picked === th.id} onChange={() => setPicked(th.id)} />
+                  <ThemePreview theme={th.id} />
+                  <b>{t(th.name)}</b>
+                  <small className="dim">{t(th.hint)}</small>
+                </label>
+              ))}
+            </div>
+          </fieldset>
         ))}
       </div>
       {current.updatedAt && <small className="dim">{t('เปลี่ยนล่าสุดโดย {0} · {1}', current.updatedBy ?? '—', formatLogTime(current.updatedAt, t.lang))}</small>}

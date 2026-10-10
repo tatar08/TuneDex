@@ -52,7 +52,7 @@ test('sign in, save by keyboard, resolve a conflict, sign out', async ({ browser
 
   // A second browser changes the same account, so the first one is now stale.
   const other = await (await browser.newContext()).newPage();
-  await other.goto(`${base}/auth/login`);
+  await other.goto(`${base}/auth/login?returnTo=/app/settings`);
   await expect(other).toHaveURL(`${base}/app/settings`);
   await other.getByRole('radio', { name: 'เฉพาะ Wi-Fi' }).check();
   await other.getByRole('button', { name: 'บันทึก' }).click();
@@ -435,8 +435,10 @@ test('pages run only scripts carrying the per-request nonce, and nothing the pol
   expect(csp).toContain("frame-ancestors 'none'");
   const again = (await page.goto(`${base}/login`))!.headers()['content-security-policy'];
   expect(again).not.toBe(csp);
-  // Hydrated pages still work: sign in and save a setting.
+  // Hydrated pages still work: the default sign-in opens Home, then settings can be saved.
   await page.getByRole('link', { name: 'เข้าสู่ระบบ' }).click();
+  await expect(page).toHaveURL(`${base}/app/home`);
+  await page.getByRole('link', { name: 'การตั้งค่า', exact: true }).first().click();
   await expect(page.getByRole('heading', { name: 'การตั้งค่า' })).toBeVisible();
   await page.getByRole('radio', { name: 'มืด' }).check();
   await page.getByRole('button', { name: 'บันทึก' }).click();
