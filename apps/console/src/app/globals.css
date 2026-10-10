@@ -485,7 +485,7 @@ a.btn { display: inline-block; text-decoration: none; }
 @media (min-width: 1101px) and (min-height: 501px) {
   :is(.t-preset-wall, .t-shelves, .t-studio) .legacy-stream-state { display: none; }
   :is(.t-preset-wall, .t-shelves, .t-studio) .desktop-stream-state { display: block; }
-  :is(.t-preset-wall, .t-shelves, .t-studio):is([data-accent="blue"], [data-accent="rose"], [data-accent="violet"]) { --web-accent-ink: #04121a; }
+  :is(.t-preset-wall, .t-shelves, .t-studio):is([data-accent="blue"], [data-accent="rose"], [data-accent="violet"]) { --web-accent-ink: #020617; }
   .t-studio { --bg: #f7f4ee; }
   @media (prefers-color-scheme: dark) { .t-studio { --bg: #0b0f19; } }
 }

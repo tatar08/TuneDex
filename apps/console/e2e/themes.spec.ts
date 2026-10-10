@@ -183,6 +183,9 @@ for (const [theme, label] of [['preset-wall', 'ผนังพรีเซ็ต
         await nav.locator(`a[href="${path}"]:not(.brand)`).click();
         await expect(page).toHaveURL(`${stack.base}${path}`, { timeout: 15_000 });
         await expect(page.locator('.player-screen video')).toHaveAttribute('data-kept', 'batch');
+        await expect(page.getByTestId('player')).toBeVisible();
+        const dock = await page.getByTestId('player').boundingBox();
+        expect(dock!.y + dock!.height).toBeLessThanOrEqual((await page.viewportSize())!.height);
         await expect(page.locator('.player-screen video')).toHaveAttribute('src', 'https://stream.example.com/jazz.aac');
         await page.evaluate(async () => { await document.fonts.ready; window.scrollTo(0, 0); });
         expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), `${theme} ${width} ${path}`).toBeLessThanOrEqual(0);
@@ -222,8 +225,20 @@ for (const [theme, label] of [['preset-wall', 'ผนังพรีเซ็ต
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
       if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/${theme}-${viewport.width}-home.png` });
     }
+    // Verify both edges of the shared desktop guard without changing the mobile regression file.
+    await page.setViewportSize({ width: 1101, height: 860 });
+    await page.goto(`${stack.base}/app/home`);
+    const chrome = page.locator(theme === 'preset-wall' ? '.theme-top-nav' : '.side-nav');
+    await expect(chrome).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
+    await page.setViewportSize({ width: 1100, height: 860 });
+    await expect(chrome).toBeHidden();
+    await expect(page.locator('.wall-tabs')).toBeVisible();
+    await page.setViewportSize({ width: 1360, height: 500 });
+    await expect(chrome).toBeHidden();
+    await expect(page.locator('.wall-tabs')).toBeVisible();
     await form.getByRole('radio', { name: /ดั้งเดิม/ }).check();
-    await form.getByRole('button', { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' }).click();
+    await form.getByRole('button' , { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' }).click();
     await expect(form.getByRole('status')).toContainText('บันทึกแล้ว');
     await page.context().close();
     await admin.context().close();

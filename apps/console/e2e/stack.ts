@@ -1,8 +1,15 @@
+import { test } from '@playwright/test';
 import { ChildProcess, spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { ApiProcess, startApi } from '../test/api-process';
 import { CLIENT_ID, CLIENT_SECRET, MockIdp, startMockIdp } from '../test/mock-idp';
+
+// These suites create contexts explicitly for multiple accounts and viewports. They are test-scoped:
+// retaining them across tests leaks pages, listeners and media elements into a long regression run.
+test.afterEach(async ({ browser }) => {
+  await Promise.all(browser.contexts().map(context => context.close()));
+});
 
 /** Real Next.js build + real services/api + PostgreSQL, with the test-only IdP. */
 export interface Stack {
