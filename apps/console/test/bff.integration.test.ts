@@ -116,7 +116,7 @@ describe('login', () => {
       const tx = cookieValue(start, 'td_login')!;
       const atIdp = await fetch(start.headers.get('location')!, { redirect: 'manual' });
       const cb = await bff.callback(new Request(atIdp.headers.get('location')!, { headers: { cookie: `td_login=${tx}` } }));
-      expect(cb.headers.get('location')).toBe('/app/settings');
+      expect(cb.headers.get('location')).toBe('/app/home');
     },
   );
 
@@ -138,7 +138,7 @@ describe('login', () => {
     const cbUrl = atIdp.headers.get('location')!;
     expect((await bff.callback(new Request(cbUrl))).headers.get('location')).toBe('/login?error=signin');
     const ok = await bff.callback(new Request(cbUrl, { headers: { cookie: `td_login=${tx}` } }));
-    expect(ok.headers.get('location')).toBe('/app/settings');
+    expect(ok.headers.get('location')).toBe('/app/home');
     const replay = await bff.callback(new Request(cbUrl, { headers: { cookie: `td_login=${tx}` } }));
     expect(replay.headers.get('location')).toBe('/login?error=signin');
   });

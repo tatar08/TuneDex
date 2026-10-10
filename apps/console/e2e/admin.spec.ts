@@ -1,5 +1,7 @@
 import { Browser, expect, Page, test } from '@playwright/test';
-import { startStack, Stack } from './stack';
+import { registerBrowserCleanup, startStack, Stack } from './stack';
+
+registerBrowserCleanup();
 
 let stack: Stack;
 

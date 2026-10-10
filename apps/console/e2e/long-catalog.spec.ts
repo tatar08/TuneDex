@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { Pool } from 'pg';
-import { startStack, Stack } from './stack';
+import { registerBrowserCleanup, startStack, Stack } from './stack';
+
+registerBrowserCleanup();
 
 let stack: Stack;
 
