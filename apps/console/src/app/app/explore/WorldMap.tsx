@@ -6,9 +6,14 @@ import 'leaflet/dist/leaflet.css';
 import type { MapStation } from '@/lib/bff';
 import { CountryShape, loadCountryShapes } from '@/lib/world';
 import { clusterPoints, clusterSize } from './cluster';
+import { logoSrc } from './logo';
 
 /** Below this many degrees a cluster's stations share one place, so zooming cannot split them; the list shows them instead. */
 const SAME_PLACE = 0.02;
+/** Single stations show their logo once few enough are on the map (or zoomed in), so a world view stays light. */
+const LOGO_PINS_MAX = 150;
+const LOGO_ZOOM = 5;
+
 
 /**
  * Flat map (Leaflet over bundled country outlines, no tile service). Stations near each other on screen draw as one
@@ -89,13 +94,23 @@ export function WorldMap({
         ...m.map.project([s.lat, s.lon], zoom),
         item: s,
       }));
-      for (const c of clusterPoints(points, 26)) {
+      const clusters = clusterPoints(points, 26);
+      const withLogos = zoom >= LOGO_ZOOM || clusters.filter((c) => c.members.length === 1).length <= LOGO_PINS_MAX;
+      for (const c of clusters) {
         const ll = m.map.unproject([c.x, c.y], zoom);
         const node = document.createElement('span');
         if (c.members.length === 1) {
           const s = c.members[0];
           const chosen = s.id === on;
-          node.className = chosen ? 'explore-dot on' : 'explore-dot';
+          node.className = `${chosen ? 'explore-dot on' : 'explore-dot'}${withLogos ? ' logo' : ''}`;
+          if (withLogos) {
+            const img = document.createElement('img');
+            img.src = logoSrc(s);
+            img.alt = '';
+            img.decoding = 'async';
+            img.loading = 'lazy';
+            node.append(img);
+          }
           m.L.marker(ll, {
             icon: m.L.divIcon({
               html: node,

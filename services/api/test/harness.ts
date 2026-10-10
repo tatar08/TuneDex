@@ -151,12 +151,12 @@ export async function createTestDatabase(): Promise<{ url: string; drop: () => P
   };
 }
 
-export async function createTestApp(databaseUrl: string, keyResolver: JWTVerifyGetKey, extra: Pick<AppDeps, 'probeDeps' | 'googleFetch' | 'googlePushKeys' | 'alertFetch' | 'directoryFetch'> & { config?: Partial<AppConfig> } = {}) {
+export async function createTestApp(databaseUrl: string, keyResolver: JWTVerifyGetKey, extra: Pick<AppDeps, 'probeDeps' | 'googleFetch' | 'googlePushKeys' | 'alertFetch' | 'directoryFetch' | 'logoFetch'> & { config?: Partial<AppConfig> } = {}) {
   const pool = createPool(databaseUrl);
   const logs: string[] = [];
   const idp = createFakeIdp();
   const moduleRef = await Test.createTestingModule({
-    imports: [AppModule.forRoot({ config: { ...testConfig(databaseUrl), ...extra.config }, pool, keyResolver, logWriter: (l) => logs.push(l), probeDeps: extra.probeDeps, idpFetch: idp.fetch, googleFetch: extra.googleFetch, googlePushKeys: extra.googlePushKeys, alertFetch: extra.alertFetch, directoryFetch: extra.directoryFetch })],
+    imports: [AppModule.forRoot({ config: { ...testConfig(databaseUrl), ...extra.config }, pool, keyResolver, logWriter: (l) => logs.push(l), probeDeps: extra.probeDeps, idpFetch: idp.fetch, googleFetch: extra.googleFetch, googlePushKeys: extra.googlePushKeys, alertFetch: extra.alertFetch, directoryFetch: extra.directoryFetch, logoFetch: extra.logoFetch })],
   }).compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false, bodyParser: false });
   configureApp(app);

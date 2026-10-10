@@ -769,6 +769,51 @@ paths:
           headers: { Retry-After: { schema: { type: integer } } }
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         '503': { description: 'DEPENDENCY_UNAVAILABLE with details {dependency: radio_directory, reason: not_configured | unreachable}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/directory/radio/stations/{stationId}/logo:
+    parameters:
+      - { name: stationId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: v, in: query, required: false, description: 'The station''s logoVersion; with it the image is cached for a year', schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,32}$' } }
+    get:
+      summary: A community station's logo (no sign-in)
+      description: 'The logo staff uploaded, else the station''s Radio Browser favicon read through our server (public https addresses only, at most 3 redirects, 64 KiB, a PNG, JPEG, WebP, GIF or ICO by its first bytes; kept a day). Only stations in the lists the map has loaded, and never blocked ones. The image type comes from the bytes, never from the station''s server. Rate limited per client address in its own bucket (ten times the catalog limit).'
+      security: []
+      responses:
+        '200':
+          description: The logo
+          headers:
+            Cache-Control: { schema: { type: string, example: 'public, max-age=31536000, immutable' } }
+            X-Content-Type-Options: { schema: { type: string, example: nosniff } }
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+            image/gif: { schema: { type: string, format: binary } }
+            image/x-icon: { schema: { type: string, format: binary } }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { description: 'NOT_FOUND: no logo to show; use TuneDeck''s', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/Error' }
+  /v1/brand/station-logo:
+    get:
+      summary: TuneDeck's logo for stations without one (no sign-in)
+      description: 'The logo admins uploaded; 404 when they have not, and the apps use their built-in one. Cached an hour. Same rate limit bucket as station logos.'
+      security: []
+      parameters:
+        - { name: v, in: query, required: false, schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,32}$' } }
+      responses:
+        '200':
+          description: The logo
+          headers:
+            Cache-Control: { schema: { type: string, example: 'public, max-age=3600' } }
+            X-Content-Type-Options: { schema: { type: string, example: nosniff } }
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+            image/gif: { schema: { type: string, format: binary } }
+            image/x-icon: { schema: { type: string, format: binary } }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { description: 'NOT_FOUND: none uploaded', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/Error' }
   /v1/directory/radio/countries:
     get:
       summary: Community station count per country (no sign-in)
@@ -870,6 +915,95 @@ paths:
         '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: No place was set for this station, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/admin/directory/stations/{stationId}/logo:
+    parameters:
+      - { name: stationId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Upload a community station's logo (catalog_editor, admin)
+      description: 'Roles: catalog_editor or admin. Replaces any earlier upload and wins over the Radio Browser favicon at once. Audited as directory.logo.set with type, size and SHA-256 (never the image).'
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, description: 'Optional; see POST /v1/admin/stations', schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,128}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [contentType, data]
+              properties:
+                contentType: { type: string, enum: [image/png, image/jpeg, image/webp] }
+                data: { type: string, format: byte, description: 'The image in base64, at most 65536 bytes decoded; its first bytes must match contentType (SVG is never accepted). The console shrinks images to 256 px before sending.' }
+      responses:
+        '200':
+          description: Stored
+          content: { application/json: { schema: { type: object, additionalProperties: false, required: [stationId, version], properties: { stationId: { type: string, format: uuid }, version: { type: string, description: The new logoVersion } } } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/admin/directory/stations/{stationId}/logo/remove:
+    parameters:
+      - { name: stationId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Remove an uploaded station logo (catalog_editor, admin)
+      description: 'Roles: catalog_editor or admin. Body {} . The Radio Browser favicon shows again, if any. Audited as directory.logo.remove.'
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, description: 'Optional; see POST /v1/admin/stations', schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,128}$' } }
+      responses:
+        '204': { description: Removed }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: No logo was uploaded for this station, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/admin/brand/station-logo:
+    get:
+      summary: Whether TuneDeck's station logo was replaced (admin)
+      description: 'Roles: admin. Cache-Control: no-store.'
+      responses:
+        '200':
+          description: State
+          content: { application/json: { schema: { type: object, additionalProperties: false, required: [custom], properties: { custom: { type: boolean }, version: { type: string }, updatedAt: { type: string, format: date-time } } } } }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    post:
+      summary: Upload TuneDeck's logo for stations without one (admin)
+      description: 'Roles: admin. Shown at once for every station with no logo of its own. Audited as brand.logo.set with type, size and SHA-256.'
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, description: 'Optional; see POST /v1/admin/stations', schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,128}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [contentType, data]
+              properties:
+                contentType: { type: string, enum: [image/png, image/jpeg, image/webp] }
+                data: { type: string, format: byte, description: 'The image in base64, at most 65536 bytes decoded; its first bytes must match contentType (SVG is never accepted). The console shrinks images to 256 px before sending.' }
+      responses:
+        '200':
+          description: Stored
+          content: { application/json: { schema: { type: object, additionalProperties: false, required: [version], properties: { version: { type: string } } } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/admin/brand/station-logo/remove:
+    post:
+      summary: Go back to the apps' built-in TuneDeck logo (admin)
+      description: 'Roles: admin. Body {} . Audited as brand.logo.remove.'
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, description: 'Optional; see POST /v1/admin/stations', schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,128}$' } }
+      responses:
+        '204': { description: Removed }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: None was uploaded, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/admin/directory/blocks:
     get:
@@ -2088,6 +2222,7 @@ components:
         codec: { type: string, enum: [mp3, aac, hls] }
         bitrateKbps: { type: integer, minimum: 1, maximum: 1000, nullable: true }
         logoUrl: { type: string, format: uri, nullable: true, description: 'https only; the station''s own logo, rights not checked by us' }
+        logoVersion: { type: string, pattern: '^[A-Za-z0-9_-]{12}$', description: 'Map and staff lists only: present when the station has a logo to show (uploaded by staff, else its Radio Browser favicon). Load it from GET /v1/directory/radio/stations/{stationId}/logo?v={logoVersion}; the value changes when the logo does. Absent: show TuneDeck''s logo (GET /v1/brand/station-logo, or the app''s built-in one).' }
         homepageUrl: { type: string, format: uri, nullable: true }
         geo:
           type: object
@@ -2102,9 +2237,10 @@ components:
       allOf:
         - { $ref: '#/components/schemas/DirectoryStation' }
         - type: object
-          required: [active, block, geoSource]
+          required: [active, block, geoSource, logoSource]
           properties:
             active: { type: boolean, description: false when a block hides it from users }
+            logoSource: { type: string, enum: [staff, radio-browser], nullable: true, description: 'staff when someone uploaded a logo (it replaces the Radio Browser favicon); null when the station has neither' }
             geoSource: { type: string, enum: [staff, radio-browser], nullable: true, description: 'staff when the place was set by hand (it replaces Radio Browser''s); null when the station has no place' }
             block:
               type: object

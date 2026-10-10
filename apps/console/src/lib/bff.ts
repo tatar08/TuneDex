@@ -96,6 +96,8 @@ export interface MapListStation {
   codec: string;
   bitrateKbps: number | null;
   streamUrl: string;
+  /** Set when the station has its own logo: /bff/logos/stations/{id}?v={logoVersion}. Otherwise TuneDeck's logo. */
+  logoVersion?: string;
 }
 
 /** A community station with coordinates, for the world map on /app/explore. */
@@ -434,6 +436,8 @@ export interface AdminDirectoryStation extends DirectoryStation {
   /** The place on the map: staff's own when they set one, else Radio Browser's. */
   geo?: { lat: number; lon: number };
   geoSource: 'staff' | 'radio-browser' | null;
+  logoSource: 'staff' | 'radio-browser' | null;
+  logoVersion?: string;
 }
 export interface AdminDirectoryList {
   stations: AdminDirectoryStation[];
@@ -540,6 +544,17 @@ const REAUTH_SKEW_SECONDS = 30;
 const REFRESH_SKEW_MS = 30_000;
 const MAX_BODY_BYTES = 16 * 1024;
 const MAP_CACHE_MS = 10 * 60_000;
+/** A logo upload: at most 64 KiB of image in base64 inside JSON. */
+const LOGO_BODY_BYTES = 96 * 1024;
+const LOGO_MAX_BYTES = 64 * 1024;
+const LOGO_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/x-icon']);
+const LOGO_CACHE_MAX = 1000;
+const LOGO_CACHE_MS = 24 * 60 * 60_000;
+const BRAND_CACHE_MS = 5 * 60_000;
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+/** TuneDeck's mark (same as the site icon), for stations without a logo until admins upload one. */
+export const BUILT_IN_LOGO =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36"><rect width="36" height="36" rx="12" fill="#0f172a"/><g transform="translate(6 6)" fill="none" stroke="#02c39a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10a8 8 0 0 1 16 0"/><path d="M7.5 12a4.5 4.5 0 0 1 9 0"/><circle cx="12" cy="14" r="1.6" fill="#02c39a"/><path d="M12 16v4"/></g></svg>';
 
 /**
  * Reads a request body as text, stopping as soon as it passes `max` bytes (a declared Content-Length over the
@@ -747,7 +762,7 @@ export function createBff(deps: BffDeps) {
   }
 
   /** Forwards one staff call to the API. The API enforces roles; the BFF adds session, CSRF and size checks. */
-  async function adminProxy(req: Request, requestId: string, apiPath: string, mutation: boolean): Promise<Response> {
+  async function adminProxy(req: Request, requestId: string, apiPath: string, mutation: boolean, maxBody = MAX_BODY_BYTES): Promise<Response> {
     const ctx = await sessionFromCookie(req.headers.get('cookie'));
     if (!ctx) return error(401, 'SESSION_EXPIRED', requestId);
     const headers: Record<string, string> = {};
@@ -755,7 +770,7 @@ export function createBff(deps: BffDeps) {
     if (mutation) {
       if (!csrfOk(req, ctx)) return error(403, 'CSRF_REJECTED', requestId);
       if (!req.headers.get('content-type')?.startsWith('application/json')) return error(415, 'UNSUPPORTED_MEDIA_TYPE', requestId);
-      const text = await readBodyCapped(req);
+      const text = await readBodyCapped(req, maxBody);
       if (text === null) return error(413, 'PAYLOAD_TOO_LARGE', requestId);
       body = text;
       headers['content-type'] = 'application/json';
@@ -823,6 +838,40 @@ export function createBff(deps: BffDeps) {
     return ((await res.json()) as { stations: DirectoryEntry[] }).stations;
   }
 
+  const logoCache = new Map<string, { at: number; image: { type: string; bytes: Uint8Array } | null }>();
+  let brandCache: { at: number; image: { type: string; bytes: Uint8Array } | null } | null = null;
+  const brandStatus = new Map<string, { at: number; value: { custom: boolean; version?: string; updatedAt?: string } | null }>();
+
+  /** An image from the API's public logo routes: only known image types, at most 64 KiB, else null. */
+  async function fetchImage(path: string): Promise<{ type: string; bytes: Uint8Array } | null> {
+    const res = await fetchImpl(`${config.apiBaseUrl}${path}`, { headers: { accept: 'image/*' }, signal: AbortSignal.timeout(8000), redirect: 'error' }).catch(() => null);
+    const type = res?.headers.get('content-type')?.split(';')[0].trim() ?? '';
+    if (!res?.ok || !LOGO_TYPES.has(type)) {
+      await res?.body?.cancel().catch(() => undefined);
+      return null;
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer().catch(() => new ArrayBuffer(0)));
+    return bytes.byteLength > 0 && bytes.byteLength <= LOGO_MAX_BYTES ? { type, bytes } : null;
+  }
+
+  const imageResponse = (image: { type: string; bytes: Uint8Array }, cache: string) =>
+    new Response(image.bytes as BodyInit, { status: 200, headers: { 'content-type': image.type, 'cache-control': cache, 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" } });
+
+  async function brandImage(): Promise<Response> {
+    if (!brandCache || Date.now() - brandCache.at > BRAND_CACHE_MS) brandCache = { at: Date.now(), image: await fetchImage('/v1/brand/station-logo') };
+    return imageResponse(brandCache.image ?? { type: 'image/svg+xml', bytes: new TextEncoder().encode(BUILT_IN_LOGO) }, 'public, max-age=300');
+  }
+
+  /** After a logo change: the next request reads the new one (the map's versions change through forgetMap). */
+  function forgetLogos(res: Response): Response {
+    if (res.ok) {
+      logoCache.clear();
+      brandCache = null;
+      brandStatus.clear();
+    }
+    return res;
+  }
+
   /** Countries the API's world map list already holds in full, so a viewer from there needs nothing extra. */
   const IN_WORLD_MAP = new Set(['TH', 'JP', 'KR', 'US', ...'AD AL AT BA BE BG BY CH CY CZ DE DK EE ES FI FO FR GB GG GI GR HR HU IE IM IS IT JE LI LT LU LV MC MD ME MK MT NL NO PL PT RO RS RU SE SI SK SM UA VA'.split(' ')]);
 
@@ -871,7 +920,7 @@ export function createBff(deps: BffDeps) {
     return res;
   };
 
-  const pick = ({ id, name, country, language, genres, codec, bitrateKbps, streamUrl }: Omit<DirectoryEntry, 'geo'>): MapListStation => ({ id, name, country, language, genres, codec, bitrateKbps, streamUrl });
+  const pick = ({ id, name, country, language, genres, codec, bitrateKbps, streamUrl, logoVersion }: Omit<DirectoryEntry, 'geo'>): MapListStation => ({ id, name, country, language, genres, codec, bitrateKbps, streamUrl, ...(logoVersion ? { logoVersion } : {}) });
 
   return {
     names,
@@ -987,6 +1036,49 @@ export function createBff(deps: BffDeps) {
     },
     /** POST /bff/admin/directory/blocks and …/{id}/remove, each with a reason; the API checks roles and audits. */
     directoryBlock: (req: Request) => timed(req, '/bff/admin/directory/blocks', async (requestId) => forgetMap(await adminProxy(req, requestId, '/v1/admin/directory/blocks', true))),
+    /** POST /bff/admin/directory/stations/{id}/logo `{ contentType, data }` and …/logo/remove: a station's own logo. */
+    directoryLogo: (req: Request, id: string, remove: boolean) =>
+      timed(req, remove ? '/bff/admin/directory/stations/:id/logo/remove' : '/bff/admin/directory/stations/:id/logo', async (requestId) =>
+        UUID_RE.test(id) ? forgetLogos(await forgetMap(await adminProxy(req, requestId, `/v1/admin/directory/stations/${id}/logo${remove ? '/remove' : ''}`, true, LOGO_BODY_BYTES))) : notFound(requestId),
+      ),
+    /** POST /bff/admin/brand/station-logo and …/remove (admins): TuneDeck's logo for stations without one. */
+    brandLogo: (req: Request, remove: boolean) =>
+      timed(req, remove ? '/bff/admin/brand/station-logo/remove' : '/bff/admin/brand/station-logo', async (requestId) =>
+        forgetLogos(await adminProxy(req, requestId, `/v1/admin/brand/station-logo${remove ? '/remove' : ''}`, true, LOGO_BODY_BYTES)),
+      ),
+    /** Server-side read for /admin/config: whether TuneDeck's logo was replaced. Null when not an admin or unreachable. */
+    async loadBrandLogo(ctx: SessionContext): Promise<{ custom: boolean; version?: string; updatedAt?: string } | null> {
+      // Kept a minute per session, so moving around the config page does not spend the staff member's API reads.
+      const hit = brandStatus.get(ctx.id);
+      if (hit && Date.now() - hit.at < 60_000) return hit.value;
+      const res = await callApi(ctx, '/v1/admin/brand/station-logo', { method: 'GET' }, `web_${randomUUID()}`).catch(() => null);
+      const value = res?.ok ? ((await res.json()) as { custom: boolean; version?: string; updatedAt?: string }) : null;
+      if (res && (res.ok || res.status === 403)) {
+        if (brandStatus.size >= 200) brandStatus.delete(brandStatus.keys().next().value!);
+        brandStatus.set(ctx.id, { at: Date.now(), value });
+      }
+      return value;
+    },
+    /**
+     * GET /bff/logos/stations/{id}?v= : the station's logo through the API (the page loads images only from its own
+     * address), else TuneDeck's. Always an image, so a map pin never shows a broken picture.
+     */
+    stationLogo: async (req: Request, id: string) => {
+      const v = new URL(req.url).searchParams.get('v');
+      if (!UUID_RE.test(id) || (v !== null && !/^[A-Za-z0-9_-]{1,32}$/.test(v))) return brandImage();
+      const key = `${id.toLowerCase()}:${v ?? ''}`;
+      let hit = logoCache.get(key);
+      if (!hit || Date.now() - hit.at > LOGO_CACHE_MS) {
+        const image = await fetchImage(`/v1/directory/radio/stations/${id.toLowerCase()}/logo${v ? `?v=${v}` : ''}`);
+        hit = { at: image ? Date.now() : Date.now() - LOGO_CACHE_MS + 10 * 60_000, image };
+        if (logoCache.size >= LOGO_CACHE_MAX) logoCache.delete(logoCache.keys().next().value!);
+        logoCache.set(key, hit);
+      }
+      return hit.image ? imageResponse(hit.image, v ? 'public, max-age=31536000, immutable' : 'public, max-age=3600') : brandImage();
+    },
+    /** GET /bff/logos/default: TuneDeck's logo (the one admins uploaded, else the built-in mark). */
+    defaultLogo: () => brandImage(),
+
     /** POST /bff/admin/directory/stations/{id}/geo `{ lat, lon }` and …/geo/remove: a station's place set by hand. */
     directoryGeo: (req: Request, id: string, remove: boolean) =>
       timed(req, remove ? '/bff/admin/directory/stations/:id/geo/remove' : '/bff/admin/directory/stations/:id/geo', async (requestId) =>

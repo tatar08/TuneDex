@@ -1,5 +1,15 @@
 /** English for the staff console (stations), keyed by the Thai text. `{0}`, `{1}` … are filled in by t(). */
 export const EN_STATIONS: Record<string, string> = {
+  'โลโก้ของ {0}': 'Logo of {0}',
+  'เลือกรูปโลโก้ของ {0}': 'Choose a logo picture for {0}',
+  'ลบโลโก้ที่อัปโหลด': 'Remove the uploaded logo',
+  'บัญชีนี้ไม่มีสิทธิ์เปลี่ยนโลโก้นี้': 'This account may not change this logo',
+  'ใช้รูป PNG, JPEG หรือ WebP ที่ไม่ใหญ่เกินไป': 'Use a PNG, JPEG or WebP picture that is not too large',
+  'โลโก้ที่ทีมงานอัปโหลด': 'Logo uploaded by staff',
+  'โลโก้จาก Radio Browser (ถ้าโหลดไม่ได้ใช้โลโก้ TuneDeck)': 'Logo from Radio Browser (TuneDeck logo if it cannot load)',
+  'ไม่มีโลโก้ ใช้โลโก้ TuneDeck': 'No logo, the TuneDeck logo shows',
+  'เปลี่ยนโลโก้': 'Change logo',
+  'อัปโหลดโลโก้': 'Upload logo',
   'พิมพ์ละติจูด, ลองจิจูด เช่น 13.7563, 100.5018': 'Type latitude, longitude, e.g. 13.7563, 100.5018',
   '📍 {0} (ทีมงานใส่)': '📍 {0} (set by staff)',
   '📍 {0} (จาก Radio Browser)': '📍 {0} (from Radio Browser)',

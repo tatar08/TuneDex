@@ -12,6 +12,7 @@ import type {
 } from "@/lib/bff";
 import type { Translate } from "@/lib/admin-i18n";
 import { useAdmin, useT } from "../AdminShell";
+import { LogoUpload } from "../LogoUpload";
 import { isMfaRequired, MfaLink, MFA_NEEDED } from "../MfaPrompt";
 
 /**
@@ -804,11 +805,31 @@ function Problem({ status }: { status: number }) {
   );
 }
 
-export function ConfigView(props: { view?: AdminConfigView; status: number }) {
+/** TuneDeck's logo for stations without one (Tar 2026-10-10). Admins only; the same panel in every theme. */
+function BrandLogo({ brand }: { brand: { custom: boolean; version?: string } }) {
+  const t = useT();
+  return (
+    <section className="adm-note lg-brand" aria-label={t("โลโก้ TuneDeck สำหรับสถานีที่ไม่มีโลโก้")}>
+      <h2>{t("โลโก้ TuneDeck สำหรับสถานีที่ไม่มีโลโก้")}</h2>
+      <p className="dim">{t("แสดงบนแผนที่และในรายการแทนสถานีที่ไม่มีโลโก้ของตัวเอง เปลี่ยนแล้วมีผลภายในไม่กี่นาที")}</p>
+      <LogoUpload
+        src={`/bff/logos/default?r=${brand.version ?? "built-in"}`}
+        note={brand.custom ? t("โลโก้ที่แอดมินอัปโหลด") : t("โลโก้มาตรฐานของ TuneDeck")}
+        uploaded={brand.custom}
+        path="/bff/admin/brand/station-logo"
+        name="TuneDeck"
+        label={t("อัปโหลดโลโก้ใหม่")}
+      />
+    </section>
+  );
+}
+
+export function ConfigView(props: { view?: AdminConfigView; status: number; brand?: { custom: boolean; version?: string } | null }) {
   const [flash, setFlash] = useState("");
   if (!props.view) return <Problem status={props.status} />;
   return (
     <Flash.Provider value={setFlash}>
+      {props.brand && <BrandLogo brand={props.brand} />}
       {flash && (
         <p className="adm-ok jb-flash" role="status">
           {flash}

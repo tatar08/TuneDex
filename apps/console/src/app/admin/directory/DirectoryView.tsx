@@ -7,6 +7,7 @@ import { COUNTRY_CODES } from '@/app/app/explore/countries';
 import type { AdminDirectoryList, AdminDirectoryStation, DirectoryBlock, DirectoryFilter } from '@/lib/bff';
 import { countryName } from '@/lib/names';
 import { useAdmin, useT } from '../AdminShell';
+import { LogoUpload } from '../LogoUpload';
 
 /**
  * Worldwide radio (Radio Browser community directory, Tar 2026-10-05): staff see what users would find for a
@@ -310,11 +311,27 @@ function PlaceButton({ s }: { s: AdminDirectoryStation }) {
   );
 }
 
+/** The logo the map shows for the station, and a way to upload a better one. */
+function StationLogo({ s }: { s: AdminDirectoryStation }) {
+  const t = useT();
+  return (
+    <LogoUpload
+      src={s.logoVersion ? `/bff/logos/stations/${s.id}?v=${s.logoVersion}` : '/bff/logos/default'}
+      note={s.logoSource === 'staff' ? t('โลโก้ที่ทีมงานอัปโหลด') : s.logoSource === 'radio-browser' ? t('โลโก้จาก Radio Browser (ถ้าโหลดไม่ได้ใช้โลโก้ TuneDeck)') : t('ไม่มีโลโก้ ใช้โลโก้ TuneDeck')}
+      uploaded={s.logoSource === 'staff'}
+      path={`/bff/admin/directory/stations/${s.id}/logo`}
+      name={s.name}
+      label={s.logoSource === 'staff' ? t('เปลี่ยนโลโก้') : t('อัปโหลดโลโก้')}
+    />
+  );
+}
+
 /** On or off, and the switch. A station hidden by a host block is switched back on from the block list. */
 function StationActions({ s }: { s: AdminDirectoryStation }) {
   const t = useT();
   return (
     <span className="dr-actions">
+      <StationLogo s={s} />
       <PlaceButton s={s} />
       <span className={s.active ? 'dr-state on' : 'dr-state off'}>{s.active ? t('เปิดอยู่') : t('ปิดอยู่')}</span>
       {s.active ? (

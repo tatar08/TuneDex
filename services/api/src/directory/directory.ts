@@ -10,6 +10,7 @@ import { APP_CONFIG, AppConfig } from '../config';
 import { Database } from '../db/database';
 import { RequireRoles, StaffGuard } from '../staff/staff';
 import { parseStreamUrl } from '../stations/stations.schema';
+import { logoVersion } from './logo-version';
 
 /** Tests only: stands in for the network when asking Radio Browser. */
 export const DIRECTORY_FETCH = Symbol('DIRECTORY_FETCH');
@@ -30,6 +31,11 @@ export interface DirectoryStation {
   homepageUrl: string | null;
   /** Only in answers to hasGeo=true (the web map), so the apps' station shape stays as it was. */
   geo?: { lat: number; lon: number };
+  /**
+   * Map and staff lists only: set when the station has a logo to show (staff-uploaded, else its Radio Browser
+   * favicon), read from GET /v1/directory/radio/stations/{id}/logo?v={logoVersion}. Changes when the logo does.
+   */
+  logoVersion?: string;
 }
 
 export interface DirectoryQuery {
@@ -87,6 +93,8 @@ const BULK_RETRY_MS = 5 * 60_000;
 const BULK_CACHE_MAX = 300;
 const BULK_CONCURRENCY = 4;
 const ADMIN_PAGE = 100;
+/** Stations remembered for logo requests (about the world list plus a few whole countries). */
+const KNOWN_MAX = 50_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HOST = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const UNSAFE = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g;
@@ -181,6 +189,8 @@ export interface AdminDirectoryStation extends DirectoryStation {
   block: { id: string; kind: 'station' | 'host'; value: string } | null;
   /** 'staff' when someone set the place by hand (it wins over Radio Browser's), null when there is none. */
   geoSource: 'staff' | 'radio-browser' | null;
+  /** 'staff' when someone uploaded a logo (it wins over Radio Browser's favicon), null when there is none. */
+  logoSource: 'staff' | 'radio-browser' | null;
 }
 
 type GeoOverrides = Map<string, { lat: number; lon: number }>;
@@ -231,6 +241,14 @@ const withPlace = (s: DirectoryStation, places: GeoOverrides): DirectoryStation 
   return p ? { ...s, geo: { lat: p.lat, lon: p.lon } } : s;
 };
 
+type StaffLogos = Map<string, string>;
+
+/** With the logo version the map and staff lists carry: an uploaded logo's hash, else the favicon link's. */
+const withLogo = (s: DirectoryStation, logos: StaffLogos): DirectoryStation => {
+  const sha = logos.get(s.id);
+  return sha ? { ...s, logoVersion: logoVersion(`staff:${sha}`) } : s.logoUrl ? { ...s, logoVersion: logoVersion(`rb:${s.logoUrl}`) } : s;
+};
+
 /** Lower case, without a trailing dot, so `radio.example.com.` cannot slip past a block on `example.com`. */
 const hostOf = (url: string) => new URL(url).hostname.toLowerCase().replace(/\.+$/, '');
 
@@ -248,6 +266,8 @@ export class DirectoryService implements OnApplicationBootstrap, OnApplicationSh
   private readonly bulkCache = new Map<string, BulkList>();
   private readonly bulkInFlight = new Map<string, Promise<BulkList>>();
   private warmTimer: NodeJS.Timeout | null = null;
+  /** Every station in the cached lists by id, so a logo request can find its favicon without asking Radio Browser. */
+  private readonly known = new Map<string, DirectoryStation>();
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -342,15 +362,15 @@ export class DirectoryService implements OnApplicationBootstrap, OnApplicationSh
    */
   async map(country: string | null): Promise<{ stations: DirectoryStation[]; truncated: boolean; attribution: string }> {
     const list = await this.bulk(country ? `country:${country}` : 'world', (base) => (country ? this.allPages(base, { countrycode: country }, COUNTRY_MAX, 'known') : this.world(base)));
-    const [blocks, places] = await Promise.all([this.blockIndex(), this.geoOverrides()]);
-    let stations = list.stations.map((s) => withPlace(s, places));
+    const [blocks, places, logos] = await Promise.all([this.blockIndex(), this.geoOverrides(), this.staffLogos()]);
+    let stations = list.stations.map((s) => withLogo(withPlace(s, places), logos));
     if (!country && places.size) {
       // The world list asks Radio Browser only for stations with coordinates, so hand-placed ones are read by id.
       const have = new Set(stations.map((s) => s.id));
       const missing = [...places.keys()].filter((id) => !have.has(id)).sort();
       if (missing.length) {
         const extra = await this.bulk(`ids:${createHash('sha256').update(missing.join(',')).digest('base64url')}`, (base) => this.byIds(base, missing)).catch(() => null);
-        stations = [...stations, ...(extra?.stations ?? []).map((s) => withPlace(s, places))];
+        stations = [...stations, ...(extra?.stations ?? []).map((s) => withLogo(withPlace(s, places), logos))];
       }
     }
     return { stations: stations.filter((s) => !blockFor(s, blocks)), truncated: list.truncated, attribution: DIRECTORY_ATTRIBUTION };
@@ -364,14 +384,15 @@ export class DirectoryService implements OnApplicationBootstrap, OnApplicationSh
     const list = query.country
       ? await this.bulk(`country:${query.country}`, (base) => this.allPages(base, { countrycode: query.country! }, COUNTRY_MAX, 'known'))
       : await this.bulk(`name:${query.q}`, (base) => this.allPages(base, { name: query.q! }, ADMIN_PAGE * 2, 'none'));
-    const [blocks, places] = await Promise.all([this.blockIndex(), this.geoOverrides()]);
+    const [blocks, places, logos] = await Promise.all([this.blockIndex(), this.geoOverrides(), this.staffLogos()]);
     const needle = query.country && query.q ? query.q.toLowerCase() : null;
     const rows = list.stations
       .filter((s) => !needle || s.name.toLowerCase().includes(needle))
       .map((s): AdminDirectoryStation => {
         const block = blockFor(s, blocks);
         const geoSource = places.has(s.id) ? 'staff' : s.geo ? 'radio-browser' : null;
-        return { ...withPlace(s, places), active: !block, block, geoSource };
+        const logoSource = logos.has(s.id) ? 'staff' : s.logoUrl ? 'radio-browser' : null;
+        return { ...withLogo(withPlace(s, places), logos), active: !block, block, geoSource, logoSource };
       })
       .filter((s) => query.status === 'all' || s.active === (query.status === 'active'));
     const stations = rows.slice(query.offset, query.offset + ADMIN_PAGE);
@@ -386,6 +407,18 @@ export class DirectoryService implements OnApplicationBootstrap, OnApplicationSh
       stations.push(...page.stations);
     }
     return { at: Date.now(), stations, truncated: false };
+  }
+
+  /** A station from the cached lists, or null when it is not in one or staff blocked it. */
+  async station(id: string): Promise<DirectoryStation | null> {
+    const s = this.known.get(id);
+    if (!s) return null;
+    return blockFor(s, await this.blockIndex()) ? null : s;
+  }
+
+  private async staffLogos(): Promise<StaffLogos> {
+    const rows = await this.db.query<{ key: string; sha256: string }>(`SELECT key, sha256 FROM logo_images WHERE key LIKE 'station:%'`);
+    return new Map(rows.map((r) => [r.key.slice('station:'.length), r.sha256]));
   }
 
   private async geoOverrides(): Promise<GeoOverrides> {
@@ -487,6 +520,11 @@ export class DirectoryService implements OnApplicationBootstrap, OnApplicationSh
           this.bulkCache.delete(key);
           this.bulkCache.set(key, entry);
           if (this.bulkCache.size > BULK_CACHE_MAX) this.bulkCache.delete(this.bulkCache.keys().next().value!);
+          for (const s of entry.stations) {
+            this.known.delete(s.id);
+            this.known.set(s.id, s);
+          }
+          while (this.known.size > KNOWN_MAX) this.known.delete(this.known.keys().next().value!);
           return entry;
         })
         .catch((err: unknown) => {

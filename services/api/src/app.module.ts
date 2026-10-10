@@ -15,6 +15,7 @@ import { AdminMetricsController, MetricsService } from './overview/metrics';
 import { ALERT_FETCH, AlertFetch, AlertService } from './overview/alerts';
 import { boundedFetch } from './common/bounded-fetch';
 import { AdminDirectoryController, AdminDirectoryStationsController, DIRECTORY_FETCH, DirectoryController, DirectoryFetch, DirectoryService, UPSTREAM_MAX_BYTES } from './directory/directory';
+import { AdminBrandLogoController, AdminStationLogoController, LOGO_FETCH, LOGO_MAX_BYTES, LogoController, LogoService } from './directory/logos';
 import { AdminAuditController, AuditSearchService } from './audit/audit-search';
 import { AuthGuard, KEY_RESOLVER } from './auth/auth.guard';
 import { ErrorEnvelopeFilter } from './common/error.filter';
@@ -60,6 +61,8 @@ export interface AppDeps {
   alertFetch?: AlertFetch;
   /** Tests only: fake Radio Browser server. */
   directoryFetch?: DirectoryFetch;
+  /** Tests only: fake DNS and HTTPS for station favicons. */
+  logoFetch?: ProbeDeps;
   googlePushKeys?: JWTVerifyGetKey;
 }
 
@@ -68,7 +71,7 @@ export class AppModule {
   static forRoot(deps: AppDeps): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, SettingsController, DevicesController, DevicePreferencesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, MyExportsController, ExportDownloadController, AdminOverviewController, AdminMetricsController, AdminJobsController, AdminUsersController, AdminSupportDiagnosticsController, MySupportAccessController, AdminConfigController, PublicConfigController, SyncController, FavoritesController, BillingController, DirectoryController, AdminDirectoryController, AdminDirectoryStationsController],
+      controllers: [HealthController, SettingsController, DevicesController, DevicePreferencesController, AdminStationsController, CatalogController, StaffController, AdminLogsController, AdminAuditController, DiagnosticsUploadController, MyDiagnosticsController, MyAccountController, AccountDeletionStatusController, MyExportsController, ExportDownloadController, AdminOverviewController, AdminMetricsController, AdminJobsController, AdminUsersController, AdminSupportDiagnosticsController, MySupportAccessController, AdminConfigController, PublicConfigController, SyncController, FavoritesController, BillingController, DirectoryController, AdminDirectoryController, AdminDirectoryStationsController, LogoController, AdminStationLogoController, AdminBrandLogoController],
       providers: [
         { provide: APP_CONFIG, useValue: deps.config },
         { provide: PG_POOL, useValue: deps.pool },
@@ -100,6 +103,8 @@ export class AppModule {
         MetricsService,
         AlertService,
         DirectoryService,
+        LogoService,
+        ...(deps.logoFetch ? [{ provide: LOGO_FETCH, useValue: deps.logoFetch }] : []),
         { provide: DIRECTORY_FETCH, useValue: deps.directoryFetch ?? ((url: string, init: Parameters<DirectoryFetch>[1]) => boundedFetch(url, init, UPSTREAM_MAX_BYTES)) },
         { provide: ALERT_FETCH, useValue: deps.alertFetch ?? ((url: string, init: Parameters<AlertFetch>[1]) => boundedFetch(url, init, 64 * 1024)) },
         JobsService,
@@ -149,6 +154,8 @@ export function configureApp(app: NestExpressApplication): INestApplication {
   app.use('/v1/sync/push', json({ limit: PUSH_MAX_BYTES }));
   // Store payloads carry certificate chains.
   app.use(['/v1/billing/verify', '/v1/webhooks'], json({ limit: WEBHOOK_MAX_BYTES }));
+  // A logo upload is a small image in base64 (at most 64 KiB, so about 88 KiB of JSON).
+  app.use([/^\/v1\/admin\/directory\/stations\/[^/]+\/logo$/, '/v1/admin/brand/station-logo'], json({ limit: Math.ceil((LOGO_MAX_BYTES * 4) / 3) + 1024 }));
   app.useBodyParser('json', { limit: '16kb' });
   app.useGlobalFilters(new ErrorEnvelopeFilter(logger));
   return app;
