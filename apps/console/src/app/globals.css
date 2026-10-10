@@ -580,3 +580,8 @@ a.btn { display: inline-block; text-decoration: none; }
   .language-lane h2 { font-size: 20px; overflow-wrap: anywhere; }
   .language-lane button { min-height: 44px; white-space: normal; }
 }
+
+@media (min-width: 1101px) and (min-height: 501px) {
+  .map-station-picker { display: grid; gap: 8px; padding: 16px; }
+  .map-station-picker select { min-width: 0; width: 100%; min-height: 44px; background: var(--x-panel); color: var(--x-fg); }
+}
