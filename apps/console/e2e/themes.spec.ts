@@ -25,9 +25,9 @@ test.beforeAll(async () => {
   }
 });
 // Each visual case issues many catalog reads from one localhost address. Isolate only
-// transient catalog counters in this disposable database; production limits stay enabled.
+// transient catalog/shared-admin read counters in this disposable database; production limits stay enabled.
 test.beforeEach(async () => {
-  await stack.api.sql("DELETE FROM rate_limit_counters WHERE bucket LIKE 'ip:%:catalog'");
+  await stack.api.sql("DELETE FROM rate_limit_counters WHERE bucket LIKE 'ip:%:catalog' OR bucket LIKE 'user:%:read'");
 });
 test.afterAll(async () => {
   await stack?.stop();
