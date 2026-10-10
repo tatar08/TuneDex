@@ -654,3 +654,21 @@ test('an admin drafts the app config, a second admin publishes it signed, in eve
   expect(audit.rows.map((r) => r.action)).toEqual(['config.update', 'config.stage', 'config.publish']);
 });
 
+
+test('a catalog editor replaces TuneDeck’s logo on the system settings page, then goes back to the built-in one', async ({ browser }) => {
+  const page = await signInAs(browser, 'e2e-dir-editor', '/admin/settings');
+  await expect(page.getByRole('heading', { name: 'ตั้งค่าระบบ' })).toBeVisible();
+  await expect(page.getByText('โลโก้มาตรฐานของ TuneDeck')).toBeVisible();
+  // A 1x1 PNG; the page shrinks and re-encodes it before sending.
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  await page.getByLabel('เลือกรูปโลโก้ของ TuneDeck').setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: png });
+  await expect(page.getByText('โลโก้ที่ทีมงานอัปโหลด')).toBeVisible();
+  const served = await page.request.get(`${stack.base}/bff/logos/default`);
+  expect(served.headers()['content-type']).toMatch(/^image\/(webp|png)$/);
+  await page.getByRole('button', { name: 'ลบโลโก้ที่อัปโหลด' }).click();
+  await expect(page.getByText('โลโก้มาตรฐานของ TuneDeck')).toBeVisible();
+  expect((await page.request.get(`${stack.base}/bff/logos/default`)).headers()['content-type']).toBe('image/svg+xml');
+  // Operators have no catalog role: no menu entry.
+  const ops = await signInAs(browser, 'e2e-ops', '/admin/overview');
+  await expect(ops.getByRole('link', { name: 'ตั้งค่าระบบ' })).toHaveCount(0);
+});

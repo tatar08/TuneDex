@@ -12,6 +12,7 @@ import { appendChannel } from '@/lib/playlist';
 import { AppNav } from '../AppNav';
 import { MediaPlayer, NowPlaying } from '../radio/MediaPlayer';
 import { COUNTRY_CODES } from './countries';
+import { logoSrc } from './logo';
 import type { GlobePalette } from './WorldGlobe';
 
 const WorldMap = dynamic(() => import('./WorldMap').then((m) => m.WorldMap), {
@@ -205,6 +206,8 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
     const playingThis = now?.url === s.streamUrl;
     return (
       <li key={s.id} data-testid={testId} className={selected?.id === s.id ? 'on' : undefined}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- small same-origin logo */}
+        <img className="explore-logo" src={logoSrc(s)} alt="" width={36} height={36} loading="lazy" decoding="async" />
         <button type="button" className="explore-row" aria-current={selected?.id === s.id ? 'true' : undefined} onClick={() => select(s)}>
           <span className="explore-name">{s.name}</span>
           <span className="explore-meta">{line(s)}</span>
@@ -352,8 +355,14 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
           <aside className="explore-panel" aria-labelledby="explore-list">
             {selected && (
               <section className="explore-pick" aria-label={selected.name} data-testid="explore-pick">
-                <span className="explore-name">{selected.name}</span>
-                <span className="explore-meta">{line(selected)}</span>
+                <span className="explore-pick-head">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- small same-origin logo */}
+                  <img className="explore-logo big" src={logoSrc(selected)} alt="" width={56} height={56} decoding="async" />
+                  <span className="explore-pick-text">
+                    <span className="explore-name">{selected.name}</span>
+                    <span className="explore-meta">{line(selected)}</span>
+                  </span>
+                </span>
                 <span className="explore-pick-actions">
                   <button type="button" className="explore-btn primary" onClick={() => play(selected)}>
                     {t.explorePlay}

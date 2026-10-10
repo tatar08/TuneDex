@@ -1,4 +1,5 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Injectable, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Injectable, OnApplicationBootstrap, OnApplicationShutdown, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { UNSAFE_TEXT } from '../common/text-safety';
 import type { Request, Response } from 'express';
 import { writeAudit } from '../audit/audit';
@@ -9,6 +10,7 @@ import { APP_CONFIG, AppConfig } from '../config';
 import { Database } from '../db/database';
 import { RequireRoles, StaffGuard } from '../staff/staff';
 import { parseStreamUrl } from '../stations/stations.schema';
+import { logoVersion } from './logo-version';
 
 /** Tests only: stands in for the network when asking Radio Browser. */
 export const DIRECTORY_FETCH = Symbol('DIRECTORY_FETCH');
@@ -29,6 +31,11 @@ export interface DirectoryStation {
   homepageUrl: string | null;
   /** Only in answers to hasGeo=true (the web map), so the apps' station shape stays as it was. */
   geo?: { lat: number; lon: number };
+  /**
+   * Map and staff lists only: set when the station has a logo to show (staff-uploaded, else its Radio Browser
+   * favicon), read from GET /v1/directory/radio/stations/{id}/logo?v={logoVersion}. Changes when the logo does.
+   */
+  logoVersion?: string;
 }
 
 export interface DirectoryQuery {
@@ -86,6 +93,8 @@ const BULK_RETRY_MS = 5 * 60_000;
 const BULK_CACHE_MAX = 300;
 const BULK_CONCURRENCY = 4;
 const ADMIN_PAGE = 100;
+/** Stations remembered for logo requests (about the world list plus a few whole countries). */
+const KNOWN_MAX = 50_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HOST = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const UNSAFE = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g;
@@ -174,10 +183,28 @@ export function toDirectoryStation(raw: unknown, withGeo = false): DirectoryStat
   return geo ? { ...station, geo } : null;
 }
 
-/** A community station as staff see it: blocked ones too, with the block that hides it. */
+/** A community station as staff see it: blocked ones too, with the block that hides it, and where its place comes from. */
 export interface AdminDirectoryStation extends DirectoryStation {
   active: boolean;
   block: { id: string; kind: 'station' | 'host'; value: string } | null;
+  /** 'staff' when someone set the place by hand (it wins over Radio Browser's), null when there is none. */
+  geoSource: 'staff' | 'radio-browser' | null;
+  /** 'staff' when someone uploaded a logo (it wins over Radio Browser's favicon), null when there is none. */
+  logoSource: 'staff' | 'radio-browser' | null;
+}
+
+type GeoOverrides = Map<string, { lat: number; lon: number }>;
+
+/** Body of a hand-set place: `{ lat, lon }` in degrees, kept to 4 decimals (about 10 m). */
+export function parseGeo(body: unknown): { lat: number; lon: number } {
+  const b = typeof body === 'object' && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+  if (!b) throw invalid('body', 'must_be_object');
+  for (const k of Object.keys(b)) if (!['lat', 'lon'].includes(k)) throw invalid(k, 'unknown_field');
+  const { lat, lon } = b;
+  if (typeof lat !== 'number' || !Number.isFinite(lat) || Math.abs(lat) > 90) throw invalid('lat', 'out_of_range', { min: -90, max: 90 });
+  if (typeof lon !== 'number' || !Number.isFinite(lon) || Math.abs(lon) > 180) throw invalid('lon', 'out_of_range', { min: -180, max: 180 });
+  if (lat === 0 && lon === 0) throw invalid('lat', 'out_of_range');
+  return { lat: Math.round(lat * 10_000) / 10_000, lon: Math.round(lon * 10_000) / 10_000 };
 }
 
 type BulkList = { at: number; stations: DirectoryStation[]; truncated: boolean };
@@ -208,6 +235,20 @@ export function parseAdminDirectoryQuery(q: Record<string, unknown>): { country:
   return { country: country?.toUpperCase() ?? null, q: name, status, offset };
 }
 
+/** The station with its hand-set place, when staff set one. */
+const withPlace = (s: DirectoryStation, places: GeoOverrides): DirectoryStation => {
+  const p = places.get(s.id);
+  return p ? { ...s, geo: { lat: p.lat, lon: p.lon } } : s;
+};
+
+type StaffLogos = Map<string, string>;
+
+/** With the logo version the map and staff lists carry: an uploaded logo's hash, else the favicon link's. */
+const withLogo = (s: DirectoryStation, logos: StaffLogos): DirectoryStation => {
+  const sha = logos.get(s.id);
+  return sha ? { ...s, logoVersion: logoVersion(`staff:${sha}`) } : s.logoUrl ? { ...s, logoVersion: logoVersion(`rb:${s.logoUrl}`) } : s;
+};
+
 /** Lower case, without a trailing dot, so `radio.example.com.` cannot slip past a block on `example.com`. */
 const hostOf = (url: string) => new URL(url).hostname.toLowerCase().replace(/\.+$/, '');
 
@@ -217,13 +258,16 @@ const hostOf = (url: string) => new URL(url).hostname.toLowerCase().replace(/\.+
  * blocked never appear. Search text is never logged. Off unless RADIO_BROWSER_BASE_URL is set.
  */
 @Injectable()
-export class DirectoryService {
+export class DirectoryService implements OnApplicationBootstrap, OnApplicationShutdown {
   private readonly cache = new Map<string, { at: number; stations: DirectoryStation[]; full: boolean }>();
   /** One upstream call per search at a time: concurrent misses for the same search share it. */
   private readonly inFlight = new Map<string, Promise<{ stations: DirectoryStation[]; full: boolean }>>();
   private countryCache: { at: number; countries: { country: string; stations: number }[] } | null = null;
   private readonly bulkCache = new Map<string, BulkList>();
   private readonly bulkInFlight = new Map<string, Promise<BulkList>>();
+  private warmTimer: NodeJS.Timeout | null = null;
+  /** Every station in the cached lists by id, so a logo request can find its favicon without asking Radio Browser. */
+  private readonly known = new Map<string, DirectoryStation>();
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -231,6 +275,21 @@ export class DirectoryService {
     private readonly db: Database,
     private readonly logger: StructuredLogger,
   ) {}
+
+  /** Reads the web map's lists soon after start (world first, then the featured countries one by one). */
+  onApplicationBootstrap(): void {
+    if (!this.config.radioDirectory?.warm) return;
+    this.warmTimer = setTimeout(() => {
+      void (async () => {
+        for (const country of [null, ...FEATURED_COUNTRIES]) await this.map(country).catch(() => undefined);
+      })();
+    }, 5_000);
+    this.warmTimer.unref();
+  }
+
+  onApplicationShutdown(): void {
+    if (this.warmTimer) clearTimeout(this.warmTimer);
+  }
 
   async search(query: DirectoryQuery): Promise<{ stations: DirectoryStation[]; nextOffset: number | null; attribution: string }> {
     const dir = this.config.radioDirectory;
@@ -274,8 +333,8 @@ export class DirectoryService {
   }
 
   /** One upstream search; `raw` is how many records Radio Browser sent before our filters. Throws when it fails. */
-  private async request(baseUrl: string, key: string, geo: 'required' | 'known' | 'none', maxBytes: number): Promise<{ stations: DirectoryStation[]; raw: number }> {
-    const res = await this.http(`${baseUrl}/json/stations/search?${key}`, {
+  private async request(baseUrl: string, key: string, geo: 'required' | 'known' | 'none', maxBytes: number, endpoint = 'search'): Promise<{ stations: DirectoryStation[]; raw: number }> {
+    const res = await this.http(`${baseUrl}/json/stations/${endpoint}?${key}`, {
       headers: { accept: 'application/json', 'user-agent': `TuneDeck-API/${this.config.build}` },
       signal: AbortSignal.timeout(maxBytes > UPSTREAM_MAX_BYTES ? UPSTREAM_TIMEOUT_MS * 3 : UPSTREAM_TIMEOUT_MS),
     });
@@ -303,8 +362,18 @@ export class DirectoryService {
    */
   async map(country: string | null): Promise<{ stations: DirectoryStation[]; truncated: boolean; attribution: string }> {
     const list = await this.bulk(country ? `country:${country}` : 'world', (base) => (country ? this.allPages(base, { countrycode: country }, COUNTRY_MAX, 'known') : this.world(base)));
-    const blocks = await this.blockIndex();
-    return { stations: list.stations.filter((s) => !blockFor(s, blocks)), truncated: list.truncated, attribution: DIRECTORY_ATTRIBUTION };
+    const [blocks, places, logos] = await Promise.all([this.blockIndex(), this.geoOverrides(), this.staffLogos()]);
+    let stations = list.stations.map((s) => withLogo(withPlace(s, places), logos));
+    if (!country && places.size) {
+      // The world list asks Radio Browser only for stations with coordinates, so hand-placed ones are read by id.
+      const have = new Set(stations.map((s) => s.id));
+      const missing = [...places.keys()].filter((id) => !have.has(id)).sort();
+      if (missing.length) {
+        const extra = await this.bulk(`ids:${createHash('sha256').update(missing.join(',')).digest('base64url')}`, (base) => this.byIds(base, missing)).catch(() => null);
+        stations = [...stations, ...(extra?.stations ?? []).map((s) => withLogo(withPlace(s, places), logos))];
+      }
+    }
+    return { stations: stations.filter((s) => !blockFor(s, blocks)), truncated: list.truncated, attribution: DIRECTORY_ATTRIBUTION };
   }
 
   /**
@@ -315,17 +384,83 @@ export class DirectoryService {
     const list = query.country
       ? await this.bulk(`country:${query.country}`, (base) => this.allPages(base, { countrycode: query.country! }, COUNTRY_MAX, 'known'))
       : await this.bulk(`name:${query.q}`, (base) => this.allPages(base, { name: query.q! }, ADMIN_PAGE * 2, 'none'));
-    const blocks = await this.blockIndex();
+    const [blocks, places, logos] = await Promise.all([this.blockIndex(), this.geoOverrides(), this.staffLogos()]);
     const needle = query.country && query.q ? query.q.toLowerCase() : null;
     const rows = list.stations
       .filter((s) => !needle || s.name.toLowerCase().includes(needle))
-      .map((s) => {
+      .map((s): AdminDirectoryStation => {
         const block = blockFor(s, blocks);
-        return { ...s, active: !block, block };
+        const geoSource = places.has(s.id) ? 'staff' : s.geo ? 'radio-browser' : null;
+        const logoSource = logos.has(s.id) ? 'staff' : s.logoUrl ? 'radio-browser' : null;
+        return { ...withLogo(withPlace(s, places), logos), active: !block, block, geoSource, logoSource };
       })
       .filter((s) => query.status === 'all' || s.active === (query.status === 'active'));
     const stations = rows.slice(query.offset, query.offset + ADMIN_PAGE);
     return { stations, total: rows.length, nextOffset: query.offset + ADMIN_PAGE < rows.length ? query.offset + ADMIN_PAGE : null, truncated: list.truncated, attribution: DIRECTORY_ATTRIBUTION };
+  }
+
+  /** Stations by Radio Browser id, 100 to a call, coordinates kept where known. */
+  private async byIds(baseUrl: string, ids: string[]): Promise<BulkList> {
+    const stations: DirectoryStation[] = [];
+    for (let i = 0; i < ids.length; i += 100) {
+      const page = await this.request(baseUrl, new URLSearchParams({ uuids: ids.slice(i, i + 100).join(',') }).toString(), 'known', BULK_MAX_BYTES, 'byuuid');
+      stations.push(...page.stations);
+    }
+    return { at: Date.now(), stations, truncated: false };
+  }
+
+  /** A station from the cached lists, or null when it is not in one or staff blocked it. */
+  async station(id: string): Promise<DirectoryStation | null> {
+    const s = this.known.get(id);
+    if (!s) return null;
+    return blockFor(s, await this.blockIndex()) ? null : s;
+  }
+
+  private async staffLogos(): Promise<StaffLogos> {
+    const rows = await this.db.query<{ key: string; sha256: string }>(`SELECT key, sha256 FROM logo_images WHERE key LIKE 'station:%'`);
+    return new Map(rows.map((r) => [r.key.slice('station:'.length), r.sha256]));
+  }
+
+  private async geoOverrides(): Promise<GeoOverrides> {
+    const rows = await this.db.query<{ station_id: string; lat: string; lon: string }>('SELECT station_id, lat::text, lon::text FROM directory_geo');
+    return new Map(rows.map((r) => [r.station_id, { lat: Number(r.lat), lon: Number(r.lon) }]));
+  }
+
+  /** Sets (or moves) the place of one station by hand; it shows on the web map at once. Audited as directory.geo.set. */
+  async setGeo(actor: { userId: string; requestId: string }, id: string, place: { lat: number; lon: number }): Promise<{ stationId: string; lat: number; lon: number }> {
+    await this.db.transaction(async (query) => {
+      const [before] = await query<{ lat: string; lon: string }>('SELECT lat::text, lon::text FROM directory_geo WHERE station_id = $1', [id]);
+      await query(
+        `INSERT INTO directory_geo (station_id, lat, lon, updated_by) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (station_id) DO UPDATE SET lat = EXCLUDED.lat, lon = EXCLUDED.lon, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+        [id, place.lat, place.lon, actor.userId],
+      );
+      await writeAudit(query, {
+        actor: `user:${actor.userId}`,
+        action: 'directory.geo.set',
+        targetType: 'directory_station',
+        targetId: id,
+        changes: { lat: place.lat, lon: place.lon, ...(before ? { before: { lat: Number(before.lat), lon: Number(before.lon) } } : {}) },
+        requestId: actor.requestId,
+      });
+    });
+    return { stationId: id, ...place };
+  }
+
+  /** Back to Radio Browser's own place (or none). Audited as directory.geo.remove. */
+  async removeGeo(actor: { userId: string; requestId: string }, id: string): Promise<void> {
+    await this.db.transaction(async (query) => {
+      const [row] = await query<{ lat: string; lon: string }>('DELETE FROM directory_geo WHERE station_id = $1 RETURNING lat::text, lon::text', [id]);
+      if (!row) throw new ApiError(HttpStatus.NOT_FOUND, 'NOT_FOUND');
+      await writeAudit(query, {
+        actor: `user:${actor.userId}`,
+        action: 'directory.geo.remove',
+        targetType: 'directory_station',
+        targetId: id,
+        changes: { before: { lat: Number(row.lat), lon: Number(row.lon) } },
+        requestId: actor.requestId,
+      });
+    });
   }
 
   /** The world map list: most popular worldwide first, then each featured country, a few countries at a time. */
@@ -385,6 +520,11 @@ export class DirectoryService {
           this.bulkCache.delete(key);
           this.bulkCache.set(key, entry);
           if (this.bulkCache.size > BULK_CACHE_MAX) this.bulkCache.delete(this.bulkCache.keys().next().value!);
+          for (const s of entry.stations) {
+            this.known.delete(s.id);
+            this.known.set(s.id, s);
+          }
+          while (this.known.size > KNOWN_MAX) this.known.delete(this.known.keys().next().value!);
           return entry;
         })
         .catch((err: unknown) => {
@@ -554,6 +694,26 @@ export class AdminDirectoryStationsController {
     const query = parseAdminDirectoryQuery(q);
     res.setHeader('Cache-Control', 'no-store');
     return this.directory.adminList(query);
+  }
+
+  /** Where the station is, set by hand: `{ lat, lon }`. */
+  @Post(':id/geo')
+  @HttpCode(HttpStatus.OK)
+  async setGeo(@Req() req: Request, @Param('id') id: string, @Body() body: unknown, @Res({ passthrough: true }) res: Response) {
+    const station = id.toLowerCase();
+    if (!UUID.test(station)) throw invalid('id', 'must_be_uuid');
+    res.setHeader('Cache-Control', 'no-store');
+    return this.directory.setGeo({ userId: req.actor!.userId, requestId: req.requestId }, station, parseGeo(body));
+  }
+
+  @Post(':id/geo/remove')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async removeGeo(@Req() req: Request, @Param('id') id: string, @Body() body: unknown) {
+    const station = id.toLowerCase();
+    if (!UUID.test(station)) throw invalid('id', 'must_be_uuid');
+    const b = typeof body === 'object' && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+    for (const k of Object.keys(b)) throw invalid(k, 'unknown_field');
+    await this.directory.removeGeo({ userId: req.actor!.userId, requestId: req.requestId }, station);
   }
 }
 

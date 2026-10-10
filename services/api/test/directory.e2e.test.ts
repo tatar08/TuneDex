@@ -349,4 +349,50 @@ describe('community radio directory (Radio Browser)', () => {
     for (const who of ['ops', 'user'] as const) expect((await http().get('/v1/admin/directory/stations?country=KR').set(as(who))).status).toBe(403);
     expect((await http().get('/v1/admin/directory/stations?country=KR')).status).toBe(401);
   });
+
+  it('lets staff place a station by hand, which the map and the staff list use instead of Radio Browser', async () => {
+    reply = {
+      status: 200,
+      body: (u: URL) => {
+        if (u.pathname === '/json/stations/byuuid') return u.searchParams.get('uuids')!.split(',').map((id) => rb(Number(id.slice(-4)), { countrycode: 'MN', name: `Placed ${id.slice(-4)}` }));
+        return u.searchParams.get('countrycode') === 'MN' ? [rb(5001, { countrycode: 'MN', name: 'Ulaanbaatar FM' }), rb(5002, { countrycode: 'MN', name: 'Steppe Radio', geo_lat: 47.9, geo_long: 106.9 })] : [];
+      },
+    };
+    const place = await http().post(`/v1/admin/directory/stations/${uuid(5001).toUpperCase()}/geo`).set(as('editor')).send({ lat: 47.918812, lon: 106.917701 });
+    expect(place.status).toBe(200);
+    expect(place.body).toEqual({ stationId: uuid(5001), lat: 47.9188, lon: 106.9177 });
+    // Moving it again replaces the place.
+    await http().post(`/v1/admin/directory/stations/${uuid(5001)}/geo`).set(as('admin')).send({ lat: 47.92, lon: 106.92 }).expect(200);
+
+    const country = (await http().get('/v1/directory/radio/map?country=MN').expect(200)).body.stations;
+    expect(country.map((s: { name: string; geo?: unknown }) => [s.name, s.geo ?? null])).toEqual([
+      ['Ulaanbaatar FM', { lat: 47.92, lon: 106.92 }],
+      ['Steppe Radio', { lat: 47.9, lon: 106.9 }],
+    ]);
+    const staff = (await http().get('/v1/admin/directory/stations?country=MN').set(as('editor')).expect(200)).body.stations;
+    expect(staff.map((s: { geoSource: string | null }) => s.geoSource)).toEqual(['staff', 'radio-browser']);
+
+    // The world list holds only stations Radio Browser has coordinates for, so a hand-placed one is read by id.
+    calls.length = 0;
+    const world = (await http().get('/v1/directory/radio/map').expect(200)).body.stations;
+    expect(world.find((s: { id: string }) => s.id === uuid(5001)).geo).toEqual({ lat: 47.92, lon: 106.92 });
+    expect(calls.filter((c) => c.url.includes('/json/stations/byuuid')).length).toBe(1);
+
+    await http().post(`/v1/admin/directory/stations/${uuid(5001)}/geo/remove`).set(as('editor')).send({}).expect(204);
+    expect((await http().post(`/v1/admin/directory/stations/${uuid(5001)}/geo/remove`).set(as('editor')).send({})).status).toBe(404);
+    expect((await http().get('/v1/directory/radio/map?country=MN').expect(200)).body.stations[0].geo).toBeUndefined();
+
+    const audit = await t.pool.query<{ action: string; changes: Record<string, unknown> }>(`SELECT action, changes FROM audit_events WHERE action LIKE 'directory.geo.%' ORDER BY id`);
+    expect(audit.rows).toEqual([
+      { action: 'directory.geo.set', changes: { lat: 47.9188, lon: 106.9177 } },
+      { action: 'directory.geo.set', changes: { lat: 47.92, lon: 106.92, before: { lat: 47.9188, lon: 106.9177 } } },
+      { action: 'directory.geo.remove', changes: { before: { lat: 47.92, lon: 106.92 } } },
+    ]);
+
+    for (const body of [{ lat: 91, lon: 0 }, { lat: 10, lon: 181 }, { lat: '13.7', lon: 100 }, { lat: 0, lon: 0 }, { lat: 13, lon: 100, note: 'x' }, {}]) {
+      expect((await http().post(`/v1/admin/directory/stations/${uuid(5001)}/geo`).set(as('admin')).send(body)).status).toBe(400);
+    }
+    expect((await http().post('/v1/admin/directory/stations/not-a-uuid/geo').set(as('admin')).send({ lat: 13, lon: 100 })).status).toBe(400);
+    for (const who of ['ops', 'user'] as const) expect((await http().post(`/v1/admin/directory/stations/${uuid(5001)}/geo`).set(as(who)).send({ lat: 13, lon: 100 })).status).toBe(403);
+  });
 });

@@ -176,9 +176,10 @@ export const systemResolve = async (host: string) => (await lookup(host, { all: 
 
 /**
  * Real HTTPS GET pinned to `address` with normal certificate checks against the host name.
- * Hangs up after the first bytes (enough to spot a playlist), never past LIMITS.bodyBytes.
+ * Hangs up after the first bytes (enough to spot a playlist), or after `upTo` bytes for callers that need the body
+ * (station logos), never holding more than that.
  */
-export function httpsFetchFrom(address: string, url: URL, signal: AbortSignal): Promise<FetchedHead> {
+export function httpsFetchFrom(address: string, url: URL, signal: AbortSignal, upTo = SNIFF_BYTES): Promise<FetchedHead> {
   return new Promise((resolve, reject) => {
     const req = request(
       {
@@ -198,13 +199,13 @@ export function httpsFetchFrom(address: string, url: URL, signal: AbortSignal): 
         const finish = () => {
           res.destroy();
           req.destroy();
-          resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).subarray(0, LIMITS.bodyBytes) });
+          resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).subarray(0, Math.max(upTo, LIMITS.bodyBytes)) });
         };
         if ((res.statusCode ?? 0) >= 300) return finish();
         res.on('data', (c: Buffer) => {
           chunks.push(c);
           size += c.length;
-          if (size >= SNIFF_BYTES) finish();
+          if (size >= upTo) finish();
         });
         res.on('end', finish);
         res.on('error', reject);

@@ -916,6 +916,11 @@
 .adm .dr-state { display: inline-block; padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--l); }
 .adm .dr-state.on { color: #166534; background: #dcfce7; border-color: #86efac; }
 .adm .dr-state.off { color: #991b1b; background: #fee2e2; border-color: #fca5a5; }
+.adm .lg-upload { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.adm .lg-thumb { width: 32px; height: 32px; border-radius: 8px; object-fit: contain; background: #fff; border: 1px solid rgba(127, 127, 127, 0.3); }
+.adm .lg-brand { margin-bottom: 16px; }
+.adm .lg-brand h2 { font-size: 1rem; margin: 0 0 4px; }
+.adm .dr-place { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .adm .dr-pager { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 .adm .dr-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
 /* A reason box opened from a button near the left edge opens rightwards, so it stays on screen. */

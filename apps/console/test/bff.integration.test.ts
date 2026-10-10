@@ -917,3 +917,40 @@ describe('world map stations', () => {
     expect((await mapped.getMapStations(req('?home=xyz', cookie))).status).toBe(400);
   });
 });
+
+describe('logos through the BFF and the real API', () => {
+  const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(30, 5)]);
+  const brandPost = async (cookie: string, body: unknown, remove = false) =>
+    bff.brandLogo(
+      new Request(`${BASE}/bff/admin/brand/station-logo${remove ? '/remove' : ''}`, {
+        method: 'POST',
+        headers: { cookie, 'content-type': 'application/json', origin: BASE, 'x-csrf-token': await csrfFor(cookie) },
+        body: JSON.stringify(body),
+      }),
+      remove,
+    );
+
+  beforeAll(() => {
+    api.staff('grant', 'bff-logo-admin', 'admin', '--by', 'test', '--reason', 'test');
+  });
+
+  it('always answers an image: TuneDeck’s built-in mark, then the logo admins upload', async () => {
+    const unknown = await bff.stationLogo(new Request(`${BASE}/bff/logos/stations/00000000-0000-4000-8000-000000000001?v=abc`), '00000000-0000-4000-8000-000000000001');
+    expect(unknown.status).toBe(200);
+    expect(unknown.headers.get('content-type')).toBe('image/svg+xml');
+    expect(unknown.headers.get('cache-control')).toBe('public, max-age=300');
+    expect(await unknown.text()).toContain('<svg');
+    expect((await bff.stationLogo(new Request(`${BASE}/bff/logos/stations/x`), '../x')).headers.get('content-type')).toBe('image/svg+xml');
+
+    const viewer = await signIn('bff-logo-viewer');
+    expect((await brandPost(viewer, { contentType: 'image/png', data: PNG.toString('base64') })).status).toBe(403);
+    const admin = await signIn('bff-logo-admin');
+    expect((await brandPost(admin, { contentType: 'image/png', data: PNG.toString('base64') })).status).toBe(200);
+    const brand = await bff.defaultLogo();
+    expect(brand.headers.get('content-type')).toBe('image/png');
+    expect(brand.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(Buffer.compare(Buffer.from(await brand.arrayBuffer()), PNG)).toBe(0);
+    expect((await brandPost(admin, {}, true)).status).toBe(204);
+    expect((await bff.defaultLogo()).headers.get('content-type')).toBe('image/svg+xml');
+  });
+});
