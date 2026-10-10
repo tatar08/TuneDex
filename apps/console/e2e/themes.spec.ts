@@ -234,9 +234,14 @@ for (const { id: theme, name: label } of WEB_THEMES.filter(t => !['classic', 'ra
         expect(contrast, `${theme} ${mode} ${accent} text on accent`).toBeGreaterThanOrEqual(4.5);
       }
       await page.goto(`${stack.base}/app/home`);
-      const foreground = await page.locator('.home-shell h1').first().evaluate(el => getComputedStyle(el).color);
-      const frameForeground = await page.getByTestId('app-frame').evaluate(el => getComputedStyle(el).color);
-      expect(foreground, `${theme} ${mode} headline must inherit the theme foreground`).toBe(frameForeground);
+      // Wide Home hydrates from the shared phone structure. Wait for its presenter,
+      // then read both colours atomically so a replaced SSR heading cannot yield "".
+      const home = ({cockpit:'.dashboard-home','head-unit':'.dashboard-home','signal-dial':'.tuning-home','tune-world':'.tuning-home','language-lanes':'.language-home','map-home':'.map-home-layout','night-garden':'.garden-home-layout',daylight:'.daylight-home'} as Record<string,string>)[theme];
+      if (home) await expect(page.locator(home)).toBeVisible();
+      await expect.poll(() => page.getByTestId('app-frame').evaluate(frame => {
+        const headline = frame.querySelector('.home-shell h1');
+        return !!headline && getComputedStyle(headline).color !== '' && getComputedStyle(headline).color === getComputedStyle(frame).color;
+      }), { message: `${theme} ${mode} headline must inherit the theme foreground` }).toBe(true);
       if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/${theme}-${mode}-home.png` });
       await page.goto(`${stack.base}/app/settings`);
     }
