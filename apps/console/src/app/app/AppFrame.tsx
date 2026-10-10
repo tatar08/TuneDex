@@ -90,8 +90,9 @@ function TopNav({ lang, csrfToken }: { lang: Lang; csrfToken: string }) {
  */
 export function AppFrame({ theme, accent: initial, lang, csrfToken, children }: { theme: WebThemeId; accent: WebAccentId; lang: Lang; csrfToken: string | null; children: React.ReactNode }) {
   const [accent, set] = useState(initial);
-  const top = ['preset-wall', 'listen-find', 'country-window', 'stage', 'cockpit', 'head-unit'].includes(theme);
-  const extra = ['listen-find', 'country-window', 'stage', 'cockpit', 'head-unit'].includes(theme);
+  const top = ['preset-wall', 'listen-find', 'country-window', 'stage', 'cockpit', 'head-unit', 'signal-dial', 'language-lanes'].includes(theme);
+  const side = ['tune-world'].includes(theme);
+  const extra = ['listen-find', 'country-window', 'stage', 'cockpit', 'head-unit', 'signal-dial', 'language-lanes', 'tune-world'].includes(theme);
   const setAccent = (a: WebAccentId) => {
     set(a);
     document.cookie = `${ACCENT_COOKIE}=${a}; Path=/; Max-Age=31536000; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`;
@@ -99,9 +100,9 @@ export function AppFrame({ theme, accent: initial, lang, csrfToken, children }: 
   return (
     <ThemeCtx.Provider value={theme}>
       <AccentCtx.Provider value={{ accent, setAccent }}>
-      <div className={`app-frame t-${theme}${top ? ' desktop-top-frame' : ''}${extra ? ' desktop-theme' : ''}`} data-accent={accent} data-testid="app-frame">
+      <div className={`app-frame t-${theme}${top ? ' desktop-top-frame' : ''}${side ? ' desktop-side-frame' : ''}${extra ? ' desktop-theme' : ''}`} data-accent={accent} data-testid="app-frame">
         <PlayerProvider lang={lang}>
-          {['radio-wall', 'shelves', 'studio'].includes(theme) && csrfToken && <SideNav lang={lang} csrfToken={csrfToken} />}
+          {(side || ['radio-wall', 'shelves', 'studio'].includes(theme)) && csrfToken && <SideNav lang={lang} csrfToken={csrfToken} />}
           {top && csrfToken && <TopNav lang={lang} csrfToken={csrfToken} />}
           {children}
           {['listen-find', 'country-window'].includes(theme) && <ListeningPanel />}

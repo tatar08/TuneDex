@@ -1,5 +1,12 @@
 /** English for the staff console (stations), keyed by the Thai text. `{0}`, `{1}` … are filled in by t(). */
 export const EN_STATIONS: Record<string, string> = {
+  'แถบจูนสัญญาณ': 'Signal dial',
+  'เลื่อนเลือกตำแหน่งสถานีโดยไม่เล่นอัตโนมัติ ตัวเล่นอยู่ด้านล่าง': 'Browse station positions without autoplay; the player stays at the bottom',
+  'จูนรอบโลก': 'Tune the world',
+  'สถานีที่เลือก แผนที่จริง และแถบจูน โทนเข้ม': 'Selected station, real map and tuning strip, dark appearance',
+  'ทางแยกภาษา': 'Language lanes',
+  'สามคอลัมน์ภาษา เลือกภาษาและแนวเพลงแต่ละช่องแยกกัน': 'Three language columns with independent language and genre choices',
+
   'แผงหน้าปัดรถ': 'Cockpit',
   'แผงสถานีและข้อมูลคอลเลกชัน พรีเซ็ตหกช่องในเบราว์เซอร์ โทนเข้ม': 'A station dashboard and collection counts; six browser presets, dark appearance',
   'หน้าปัดวิทยุรถ': 'Head unit',

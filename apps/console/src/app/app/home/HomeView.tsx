@@ -12,6 +12,7 @@ import { COUNTRY_CODES } from '../explore/countries';
 import { logoSrc } from '../explore/logo';
 import { useDesktop } from '../desktop';
 import { ListeningPanel } from '../player/ListeningPanel';
+import { TuningHome, LanguageHome } from './DiscoveryHomes';
 import { DashboardHome } from './DashboardHome';
 import { Presets } from './Presets';
 import { usePlayer } from '../player/Player';
@@ -22,6 +23,8 @@ const COUNTRY_KEY = 'tunedeck.web.homeCountry';
 export interface Card extends NowPlaying {
   key: string;
   meta: string;
+  language?: string | null;
+  genres?: string[];
 }
 
 const TILES = ['#0f766e', '#b45309', '#1d4ed8', '#be185d', '#4d7c0f', '#6d28d9'];
@@ -48,7 +51,7 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
   const [query, setQuery] = useState('');
   const { now, status, play, recent } = usePlayer();
   const meta = (s: CatalogStation) => [countryName(s.country, lang), s.genres.slice(0, 2).join(', ')].filter(Boolean).join(' · ');
-  const card = (s: CatalogStation): Card => ({ key: s.id, name: s.name, url: s.streamUrl, hls: s.codec === 'hls', meta: meta(s) });
+  const card = (s: CatalogStation): Card => ({ key: s.id, name: s.name, url: s.streamUrl, hls: s.codec === 'hls', language: s.language, genres: s.genres, meta: meta(s) });
   const byId = new Map((stations ?? []).map((s) => [s.id, s]));
   const [country, setCountry] = useState('TH');
   const [popular, setPopular] = useState<MapListStation[] | null | 'failed'>(null);
@@ -56,7 +59,7 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
   const favs = [...(favorites ?? [])].sort((a, b) => a.order - b.order).flatMap((f) => (byId.has(f.stationId) ? [card(byId.get(f.stationId)!)] : []));
   const lists: Record<Tab, Card[]> = {
     favorites: favs,
-    popular: Array.isArray(popular) ? popular.map((s) => ({ key: s.id, name: s.name, url: s.streamUrl, hls: s.codec === 'hls', logo: logoSrc(s), meta: s.genres.slice(0, 2).join(', ') || countryName(s.country ?? country, lang) })) : [],
+    popular: Array.isArray(popular) ? popular.map((s) => ({ key: s.id, name: s.name, url: s.streamUrl, hls: s.codec === 'hls', language: s.language, genres: s.genres, logo: logoSrc(s), meta: s.genres.slice(0, 2).join(', ') || countryName(s.country ?? country, lang) })) : [],
     links,
     curated: (stations ?? []).map(card),
     recent: recent.map((r) => ({ ...r, key: r.url, meta: t.homeRecentMeta })),
@@ -171,6 +174,11 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
   </section>;
   // Up to three distinct stations, drawn from real history, favourites and available catalogs.
   const highlights = [...lists.recent, ...lists.favorites, ...lists.popular, ...lists.curated].filter((c, i, all) => all.findIndex(x => x.url === c.url) === i).slice(0, 3);
+
+  const allCards = [...lists.favorites, ...lists.popular, ...lists.curated, ...lists.links].filter((c,i,all)=>all.findIndex(x=>x.url===c.url)===i);
+  if (wide && ['signal-dial', 'tune-world', 'language-lanes'].includes(theme)) return <main className="shell wide home-shell">
+    {theme === 'language-lanes' ? <LanguageHome lang={lang} items={allCards} /> : <TuningHome lang={lang} items={allCards} country={country} countryControl={countryControl('tuning-country')} world={theme==='tune-world'} />}
+  </main>;
 
   if (wide && ['cockpit', 'head-unit'].includes(theme)) return <main className="shell wide home-shell">
     <DashboardHome lang={lang} items={[...lists.favorites, ...lists.popular, ...lists.curated, ...lists.links].filter((c,i,all)=>all.findIndex(x=>x.url===c.url)===i)} favorites={favs.length} headUnit={theme==='head-unit'} />
