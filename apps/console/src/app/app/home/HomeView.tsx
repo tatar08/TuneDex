@@ -1,15 +1,19 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import type { CatalogStation, Favorite } from '@/lib/bff';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CatalogStation, Favorite, MapListStation } from '@/lib/bff';
 import { Lang, strings } from '@/lib/i18n';
 import { countryName } from '@/lib/names';
+import { CHANNELS_KEY, readChannels } from '@/lib/playlist';
 import { AppNav } from '../AppNav';
+import { COUNTRY_CODES } from '../explore/countries';
+import { logoSrc } from '../explore/logo';
 import { usePlayer } from '../player/Player';
 import type { NowPlaying } from '../radio/MediaPlayer';
 
-type Tab = 'favorites' | 'curated' | 'recent';
+type Tab = 'favorites' | 'popular' | 'links' | 'curated' | 'recent';
+const COUNTRY_KEY = 'tunedeck.web.homeCountry';
 interface Card extends NowPlaying {
   key: string;
   meta: string;
@@ -27,8 +31,10 @@ function initials(name: string): { text: string; color: string } {
 
 /**
  * Home as a wall of station buttons (the "Personal Radio Wall" Claude and Codex designed together, Consult/013):
- * favourites, the curated catalog, or what this browser played last. Opens on favourites when there are some,
- * else on the catalog, so there is always something to press. A press on Play is the only thing that starts sound.
+ * favourites, a chosen country's most listened community stations, the viewer's own links, the curated catalog, or
+ * what this browser played last. Opens on favourites when there are some, else on the country's most listened
+ * (the curated catalog if the directory is off), so there is always something to press. The country is the
+ * viewer's choice, never a guess presented as "near you". A press on Play is the only thing that starts sound.
  */
 export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang; csrfToken: string; favorites: Favorite[] | null; stations: CatalogStation[] | null }) {
   const t = strings(lang);
@@ -36,22 +42,87 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
   const meta = (s: CatalogStation) => [countryName(s.country, lang), s.genres.slice(0, 2).join(', ')].filter(Boolean).join(' · ');
   const card = (s: CatalogStation): Card => ({ key: s.id, name: s.name, url: s.streamUrl, hls: s.codec === 'hls', meta: meta(s) });
   const byId = new Map((stations ?? []).map((s) => [s.id, s]));
+  const [country, setCountry] = useState('TH');
+  const [popular, setPopular] = useState<MapListStation[] | null | 'failed'>(null);
+  const [links, setLinks] = useState<Card[]>([]);
+  const favs = [...(favorites ?? [])].sort((a, b) => a.order - b.order).flatMap((f) => (byId.has(f.stationId) ? [card(byId.get(f.stationId)!)] : []));
   const lists: Record<Tab, Card[]> = {
-    favorites: [...(favorites ?? [])].sort((a, b) => a.order - b.order).flatMap((f) => (byId.has(f.stationId) ? [card(byId.get(f.stationId)!)] : [])),
+    favorites: favs,
+    popular: Array.isArray(popular) ? popular.map((s) => ({ key: s.id, name: s.name, url: s.streamUrl, hls: s.codec === 'hls', logo: logoSrc(s), meta: s.genres.slice(0, 2).join(', ') || countryName(s.country ?? country, lang) })) : [],
+    links,
     curated: (stations ?? []).map(card),
     recent: recent.map((r) => ({ ...r, key: r.url, meta: t.homeRecentMeta })),
   };
-  const [tab, setTab] = useState<Tab>(lists.favorites.length ? 'favorites' : 'curated');
+  const [tab, setTab] = useState<Tab>(favs.length ? 'favorites' : 'popular');
+  /** Until the viewer picks a tab, the page may move itself off a tab that turned out to have nothing. */
+  const auto = useRef(true);
+  const countries = useMemo(() => COUNTRY_CODES.map((c) => ({ code: c, name: countryName(c, lang) })).sort((a, b) => a.name.localeCompare(b.name, lang)), [lang]);
+
   useEffect(() => {
     document.documentElement.lang = lang;
+    try {
+      const saved = localStorage.getItem(COUNTRY_KEY);
+      const region = saved ?? (lang === 'th' ? 'TH' : /-([A-Z]{2})$/.exec(navigator.language ?? '')?.[1]);
+      if (region && COUNTRY_CODES.includes(region)) setCountry(region);
+      setLinks(readChannels(localStorage.getItem(CHANNELS_KEY)).map((c) => ({ key: c.id, name: c.name, url: c.url, hls: c.hls, meta: c.group ?? t.homeLinkMeta })));
+    } catch {
+      /* nothing remembered */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per language
   }, [lang]);
+
+  useEffect(() => {
+    let live = true;
+    setPopular(null);
+    fetch(`/bff/directory/top?country=${country}`, { headers: { accept: 'application/json' } })
+      .then(async (res) => {
+        if (res.status === 401) return window.location.assign('/login?returnTo=/app/home');
+        if (!res.ok) throw new Error(String(res.status));
+        const body = (await res.json()) as { stations: MapListStation[] };
+        if (live) setPopular(body.stations);
+      })
+      .catch(() => {
+        if (!live) return;
+        setPopular('failed');
+        // The directory is off or unreachable: show the curated catalog rather than an error as the first thing.
+        if (auto.current) setTab((cur) => (cur === 'popular' ? 'curated' : cur));
+      });
+    return () => {
+      live = false;
+    };
+  }, [country]);
+
+  const chooseTab = (id: Tab) => {
+    auto.current = false;
+    setTab(id);
+  };
+  const chooseCountry = (code: string) => {
+    auto.current = false;
+    setCountry(code);
+    try {
+      localStorage.setItem(COUNTRY_KEY, code);
+    } catch {
+      /* not remembered, still switched */
+    }
+  };
   const tabs: [Tab, string][] = [
     ['favorites', t.radioFavorites],
+    ['popular', t.homePopular],
+    ['links', t.homeLinks],
     ['curated', t.homeCurated],
     ['recent', t.homeRecent],
   ];
   const shown = lists[tab];
-  const empty = tab === 'favorites' ? (favorites === null ? t.radioLoadError : t.homeFavoritesNone) : tab === 'curated' ? (stations === null ? t.radioLoadError : t.radioCatalogNone) : t.homeRecentNone;
+  const empty =
+    tab === 'favorites'
+      ? favorites === null ? t.radioLoadError : t.homeFavoritesNone
+      : tab === 'popular'
+        ? popular === null ? t.exploreLoading : popular === 'failed' ? t.exploreError : t.exploreNone
+        : tab === 'links'
+          ? t.homeLinksNone
+          : tab === 'curated'
+            ? stations === null ? t.radioLoadError : t.radioCatalogNone
+            : t.homeRecentNone;
 
   return (
     <main className="shell wide home-shell">
@@ -60,9 +131,9 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
       <p className="lede">{t.homeLede}</p>
       <div className="wall-tabs" role="tablist" aria-label={t.homeTitle}>
         {tabs.map(([id, text]) => (
-          <button key={id} type="button" role="tab" id={`wall-tab-${id}`} aria-selected={tab === id} aria-controls="wall" onClick={() => setTab(id)}>
+          <button key={id} type="button" role="tab" id={`wall-tab-${id}`} aria-selected={tab === id} aria-controls="wall" onClick={() => chooseTab(id)}>
             {text}
-            <span>{lists[id].length}</span>
+            {(id !== 'popular' || Array.isArray(popular)) && <span>{lists[id].length}</span>}
           </button>
         ))}
         <Link href="/app/radio" prefetch={false} className="wall-link">
@@ -73,6 +144,19 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
         </Link>
       </div>
       <div id="wall" role="tabpanel" aria-labelledby={`wall-tab-${tab}`}>
+        {tab === 'popular' && (
+          <p className="wall-country">
+            <label htmlFor="wall-country">{t.homeCountry}</label>
+            <select id="wall-country" value={country} onChange={(e) => chooseCountry(e.target.value)}>
+              {countries.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <span className="status">{t.homePopularNote}</span>
+          </p>
+        )}
         {shown.length === 0 ? (
           <p className="status">{empty}</p>
         ) : (
