@@ -12,13 +12,14 @@ import { COUNTRY_CODES } from '../explore/countries';
 import { logoSrc } from '../explore/logo';
 import { useDesktop } from '../desktop';
 import { ListeningPanel } from '../player/ListeningPanel';
+import { DashboardHome } from './DashboardHome';
 import { Presets } from './Presets';
 import { usePlayer } from '../player/Player';
 import type { NowPlaying } from '../radio/MediaPlayer';
 
 type Tab = 'favorites' | 'popular' | 'links' | 'curated' | 'recent';
 const COUNTRY_KEY = 'tunedeck.web.homeCountry';
-interface Card extends NowPlaying {
+export interface Card extends NowPlaying {
   key: string;
   meta: string;
 }
@@ -170,6 +171,10 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
   </section>;
   // Up to three distinct stations, drawn from real history, favourites and available catalogs.
   const highlights = [...lists.recent, ...lists.favorites, ...lists.popular, ...lists.curated].filter((c, i, all) => all.findIndex(x => x.url === c.url) === i).slice(0, 3);
+
+  if (wide && ['cockpit', 'head-unit'].includes(theme)) return <main className="shell wide home-shell">
+    <DashboardHome lang={lang} items={[...lists.favorites, ...lists.popular, ...lists.curated, ...lists.links].filter((c,i,all)=>all.findIndex(x=>x.url===c.url)===i)} favorites={favs.length} headUnit={theme==='head-unit'} />
+  </main>;
 
   return (
     <main className="shell wide home-shell">

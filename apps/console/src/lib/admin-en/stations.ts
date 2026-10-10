@@ -1,5 +1,10 @@
 /** English for the staff console (stations), keyed by the Thai text. `{0}`, `{1}` … are filled in by t(). */
 export const EN_STATIONS: Record<string, string> = {
+  'แผงหน้าปัดรถ': 'Cockpit',
+  'แผงสถานีและข้อมูลคอลเลกชัน พรีเซ็ตหกช่องในเบราว์เซอร์ โทนเข้ม': 'A station dashboard and collection counts; six browser presets, dark appearance',
+  'หน้าปัดวิทยุรถ': 'Head unit',
+  'เลือกสถานีด้วยแถบตำแหน่ง กดเล่นแยกต่างหาก พรีเซ็ตในเบราว์เซอร์ โทนเข้ม': 'A station-position strip with separate Play controls; browser presets, dark appearance',
+
   'ค้นหาซ้าย ฟังขวา': 'Listen and find',
   'ค้นหาสถานีด้านซ้าย แผงฟังด้านขวาอยู่ที่เดิมทุกหน้า': 'Search on the left; a listening panel stays on the right on every page',
   'หน้าต่างประเทศ': 'Country window',
