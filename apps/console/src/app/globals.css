@@ -617,3 +617,21 @@ a.btn { display: inline-block; text-decoration: none; }
   .daylight-columns li > span { font-size: 22px; font-weight: 700; }
   .daylight-columns button { min-height: 44px; white-space: normal; }
 }
+
+@media (min-width: 1101px) and (min-height: 501px) {
+  :is(.t-listen-find, .t-country-window) #wall .wall-country { display: none; }
+  .desktop-theme :where(button, input, select) { min-width: 0; }
+  .desktop-theme :where(select, input[type="search"]) { max-width: 100%; }
+  .desktop-theme .wall-country select { min-width: 0; }
+  .desktop-theme .side-nav > a { flex-shrink: 0; }
+  .desktop-theme .theme-top-nav { padding-right: clamp(16px, 3vw, 32px); }
+  .desktop-theme :focus-visible { outline: 3px solid var(--web-accent); outline-offset: 3px; }
+}
+@media (min-width: 1101px) and (min-height: 501px) {
+  .desktop-theme { color: var(--fg); }
+  :is(.t-cockpit, .t-head-unit, .t-tune-world, .t-map-home, .t-night-garden) { --ink: var(--web-accent); --ink-t: var(--web-accent-ink); --danger: #fb7185; color-scheme: dark; }
+  .listening-panel, .theme-stage { --danger: #fb7185; }
+  .desktop-theme .home-shell :where(button:not(.btn):not(.wall-play)) { font: inherit; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--fg); cursor: pointer; }
+  .desktop-theme .home-shell :where(button:disabled) { opacity: 0.5; cursor: default; }
+  .desktop-theme .home-shell :where(input[type="search"]) { font: inherit; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--line); color: var(--fg); background: var(--panel); }
+}

@@ -124,7 +124,7 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
     ['curated', t.homeCurated],
     ['recent', t.homeRecent],
   ];
-  const shown = lists[tab];
+  const shown = lists[tab].filter(c => !wide || !['listen-find', 'country-window'].includes(theme) || c.name.toLocaleLowerCase(lang).includes(query.toLocaleLowerCase(lang)));
   const empty =
     tab === 'favorites'
       ? favorites === null ? t.radioLoadError : t.homeFavoritesNone
@@ -228,10 +228,10 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
           </p>
         )}
         {shown.length === 0 ? (
-          <p className="status">{empty}</p>
+          <p className="status">{query && wide && ['listen-find', 'country-window'].includes(theme) ? t.noSearchMatches : empty}</p>
         ) : (
           <ul className="wall">
-            {shown.filter(c => !wide || !['listen-find', 'country-window'].includes(theme) || c.name.toLocaleLowerCase(lang).includes(query.toLocaleLowerCase(lang))).map((c) => tile(c))}
+            {shown.map((c) => tile(c))}
           </ul>
         )}
       </div>
