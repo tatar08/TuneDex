@@ -10,7 +10,7 @@ import { Lang, strings } from '@/lib/i18n';
 import { countryName, languageName } from '@/lib/names';
 import { appendChannel } from '@/lib/playlist';
 import { AppNav } from '../AppNav';
-import { MediaPlayer, NowPlaying } from '../radio/MediaPlayer';
+import { PlayerSlot, usePlayer } from '../player/Player';
 import { COUNTRY_CODES } from './countries';
 import { logoSrc } from './logo';
 import type { GlobePalette } from './WorldGlobe';
@@ -84,7 +84,7 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
   const [failed, setFailed] = useState(false);
   const [selected, setSelected] = useState<MapListStation | null>(null);
   const [group, setGroup] = useState<Set<string> | null>(null);
-  const [now, setNow] = useState<NowPlaying | null>(null);
+  const { now, play: setNow } = usePlayer();
   const [filter, setFilter] = useState('');
   const [genre, setGenre] = useState('');
   const [note, setNote] = useState('');
@@ -486,11 +486,7 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
           </aside>
 
           {/* A bar under the map and list on a wide screen; on a phone a capsule floating on the map, above the sheet. */}
-          {now && (
-            <div className="explore-player">
-              <MediaPlayer lang={lang} item={now} onStop={() => setNow(null)} compact />
-            </div>
-          )}
+          <PlayerSlot className="explore-player" />
         </div>
       </section>
     </main>

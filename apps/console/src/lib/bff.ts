@@ -839,6 +839,7 @@ export function createBff(deps: BffDeps) {
   }
 
   const logoCache = new Map<string, { at: number; image: { type: string; bytes: Uint8Array } | null }>();
+  let webTheme: { at: number; theme: string } | null = null;
   let brandCache: { at: number; image: { type: string; bytes: Uint8Array } | null } | null = null;
 
   /** An image from the API's public logo routes: only known image types, at most 64 KiB, else null. */
@@ -1044,6 +1045,35 @@ export function createBff(deps: BffDeps) {
       timed(req, remove ? '/bff/admin/brand/station-logo/remove' : '/bff/admin/brand/station-logo', async (requestId) =>
         forgetLogos(await adminProxy(req, requestId, `/v1/admin/brand/station-logo${remove ? '/remove' : ''}`, true, LOGO_BODY_BYTES)),
       ),
+    /**
+     * Which layout theme the web app shows (public, chosen by staff). Kept half a minute in this process and shared
+     * by every visitor; the default when the API cannot be reached, so the pages never wait on it.
+     */
+    async loadWebTheme(): Promise<string> {
+      if (webTheme && Date.now() - webTheme.at < 30_000) return webTheme.theme;
+      const res = await fetchImpl(`${config.apiBaseUrl}/v1/brand/web-theme`, {
+        headers: { accept: 'application/json', 'x-request-id': `web_${randomUUID()}`, traceparent: traceparent() },
+        signal: AbortSignal.timeout(3000),
+        redirect: 'error',
+      }).catch(() => null);
+      const theme = res?.ok ? ((await res.json()) as { theme?: unknown }).theme : null;
+      if (typeof theme !== 'string') return webTheme?.theme ?? 'classic';
+      webTheme = { at: Date.now(), theme };
+      return theme;
+    },
+    /** Server-side read for /admin/settings: the theme and who chose it. Null when refused (admins only) or unreachable, undefined when signed out. */
+    async loadWebThemeAdmin(ctx: SessionContext): Promise<{ theme: string; updatedBy: string | null; updatedAt: string | null } | null | undefined> {
+      const res = await callApi(ctx, '/v1/admin/brand/web-theme', { method: 'GET' }, `web_${randomUUID()}`).catch(() => false as const);
+      if (res === null) return undefined;
+      return res && res.ok ? ((await res.json()) as { theme: string; updatedBy: string | null; updatedAt: string | null }) : null;
+    },
+    /** POST /bff/admin/brand/web-theme `{ theme }` (admins): the layout for every visitor; shows here at once. */
+    webThemeSet: (req: Request) =>
+      timed(req, '/bff/admin/brand/web-theme', async (requestId) => {
+        const res = await adminProxy(req, requestId, '/v1/admin/brand/web-theme', true);
+        if (res.ok) webTheme = null;
+        return res;
+      }),
     /** Server-side read for /admin/settings: whether TuneDeck's logo was replaced. Null when refused or unreachable, undefined when signed out. */
     async loadBrandLogo(ctx: SessionContext): Promise<{ custom: boolean; version?: string; updatedAt?: string } | null | undefined> {
       const res = await callApi(ctx, '/v1/admin/brand/station-logo', { method: 'GET' }, `web_${randomUUID()}`).catch(() => false as const);

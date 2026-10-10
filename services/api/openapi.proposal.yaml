@@ -792,6 +792,20 @@ paths:
         '400': { $ref: '#/components/responses/Error' }
         '404': { description: 'NOT_FOUND: no logo to show; use TuneDeck''s', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { $ref: '#/components/responses/Error' }
+  /v1/brand/web-theme:
+    get:
+      summary: Which layout the web app shows (no sign-in)
+      description: 'The layout theme staff chose for every visitor of the web app (Tar 2026-10-11); classic until one is chosen. The web app owns the list of themes and shows classic for an id it does not know. Visitors choose only a colour, which stays in their browser. Cache-Control: public, max-age=60. Rate limited with the logo images.'
+      security: []
+      responses:
+        '200':
+          description: The theme id
+          headers: { Cache-Control: { schema: { type: string, example: 'public, max-age=60' } } }
+          content: { application/json: { schema: { type: object, additionalProperties: false, required: [theme], properties: { theme: { type: string, pattern: '^[a-z][a-z0-9-]{1,31}$', example: classic } } } } }
+        '429':
+          description: API_RATE_LIMITED, details.retryAfterSeconds
+          headers: { Retry-After: { schema: { type: integer } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
   /v1/brand/station-logo:
     get:
       summary: TuneDeck's logo for stations without one (no sign-in)
@@ -958,6 +972,29 @@ paths:
         '403': { description: 'ROLE_REQUIRED: needs catalog_editor or admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: No logo was uploaded for this station, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/admin/brand/web-theme:
+    get:
+      summary: The web app's layout theme and who chose it (admin)
+      description: 'Roles: admin. Cache-Control: no-store.'
+      responses:
+        '200': { description: The theme, content: { application/json: { schema: { $ref: '#/components/schemas/WebTheme' } } } }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    post:
+      summary: Choose the web app's layout theme for everyone (admin)
+      description: 'Roles: admin. Takes effect for visitors within about a minute. Audited as brand.web_theme.set with the theme before and after.'
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, description: 'Optional; see POST /v1/admin/stations', schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,128}$' } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [theme], properties: { theme: { type: string, pattern: '^[a-z][a-z0-9-]{1,31}$' } } } } }
+      responses:
+        '200': { description: Saved, content: { application/json: { schema: { $ref: '#/components/schemas/WebTheme' } } } }
+        '400': { description: 'VALIDATION_FAILED: theme must_be_theme_id, unknown_field', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: 'AUTH_REQUIRED, or MFA_REQUIRED with details {scope: session, maxAgeSeconds: 43200}', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'ROLE_REQUIRED: needs admin', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'IDEMPOTENCY_KEY_REUSED or IDEMPOTENCY_IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { $ref: '#/components/responses/Error' }
   /v1/admin/brand/station-logo:
     get:
       summary: Whether TuneDeck's station logo was replaced (catalog_editor, admin)
@@ -2250,6 +2287,14 @@ components:
                 id: { type: string, pattern: '^[1-9][0-9]*$' }
                 kind: { type: string, enum: [station, host] }
                 value: { type: string }
+    WebTheme:
+      type: object
+      additionalProperties: false
+      required: [theme, updatedBy, updatedAt]
+      properties:
+        theme: { type: string, pattern: '^[a-z][a-z0-9-]{1,31}$' }
+        updatedBy: { type: string, nullable: true, description: 'OIDC subject of the admin; null while it is the default' }
+        updatedAt: { type: string, format: date-time, nullable: true }
     DirectoryBlock:
       type: object
       additionalProperties: false

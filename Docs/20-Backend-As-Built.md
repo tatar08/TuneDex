@@ -133,6 +133,7 @@ Migrations อยู่ที่ `services/api/src/db/migrations` (forward-only,
 | `032_rights_sweep_index.sql` | index สำหรับ rights sweep |
 | `033_staff_mfa_pins.sql` | `staff_mfa_pins` |
 | `034_station_health_variant.sql` | `station_health.variant` (0 = stream หลัก, 1-3 = variant) |
+| `037_site_settings.sql` | `site_settings` (ตอนนี้มีค่าเดียว: `web_theme` ธีมโครงหน้าของเว็บผู้ใช้) |
 
 ระยะเก็บข้อมูลตามโค้ด:
 
