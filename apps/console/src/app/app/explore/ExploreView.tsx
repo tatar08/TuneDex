@@ -23,8 +23,11 @@ const WorldGlobe = dynamic(() => import('./WorldGlobe').then((m) => m.WorldGlobe
 type View = 'map' | 'globe';
 type Look = 'auto' | 'light' | 'dark';
 /** How far the station list is pulled up over the map on a phone or a portrait tablet. */
-type Sheet = 'peek' | 'half' | 'full';
-const SHEETS: Sheet[] = ['peek', 'half', 'full'];
+/** How far the phone's station sheet is pulled up: folded to its handle and the count, three stations, half, all. */
+type Sheet = 'closed' | 'peek' | 'half' | 'full';
+const SHEETS: Sheet[] = ['closed', 'peek', 'half', 'full'];
+/** A tap on the handle folds the resting sheet away or brings it back; from higher up it returns to rest. */
+const tapSheet = (h: Sheet): Sheet => (h === 'peek' ? 'closed' : 'peek');
 const VIEW_KEY = 'tunedeck.web.exploreView';
 const LOOK_KEY = 'tunedeck.web.exploreLook';
 
@@ -204,6 +207,8 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
   const select = (s: MapListStation) => {
     setSelected(s);
     setNote('');
+    // A folded sheet opens again, so the picked station and its buttons can be seen.
+    setSheet((h) => (h === 'closed' ? 'peek' : h));
   };
   const step = (by: number) => setSheet((h) => SHEETS[Math.min(SHEETS.length - 1, Math.max(0, SHEETS.indexOf(h) + by))]);
   const looks: Look[] = ['auto', 'light', 'dark'];
@@ -396,7 +401,7 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
               type="button"
               className="explore-handle"
               aria-label={t.exploreSheet}
-              aria-expanded={sheet !== 'peek'}
+              aria-expanded={sheet !== 'closed'}
               onPointerDown={(e) => {
                 drag.current = e.clientY;
                 e.currentTarget.setPointerCapture?.(e.pointerId);
@@ -407,7 +412,7 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
                 if (from === null) return;
                 const dy = e.clientY - from;
                 if (Math.abs(dy) > 30) step(dy < 0 ? 1 : -1);
-                else setSheet((h) => (h === 'full' ? 'peek' : SHEETS[SHEETS.indexOf(h) + 1]));
+                else setSheet(tapSheet);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'ArrowUp') step(1);
@@ -415,7 +420,7 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
               }}
               onClick={(e) => {
                 // Keyboard Enter/Space arrive as a click with no pointer gesture before it.
-                if (e.detail === 0) setSheet((h) => (h === 'full' ? 'peek' : SHEETS[SHEETS.indexOf(h) + 1]));
+                if (e.detail === 0) setSheet(tapSheet);
               }}
             >
               <span aria-hidden="true" />
