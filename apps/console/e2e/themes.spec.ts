@@ -188,6 +188,7 @@ for (const { id: theme, name: label } of WEB_THEMES.filter(t => !['classic', 'ra
     const page = await open(browser, `e2e-batch-${theme}`, '/app/home');
     await expect(page.getByTestId('app-frame')).toHaveClass(new RegExp(`t-${theme}`));
     await expect(page.getByTestId('player')).toHaveCount(0);
+    if(theme==='explorer')await expect(page.locator('.atlas-menu-close')).toBeHidden();
     const desktop = theme === 'preset-wall' ? page.locator('#wall') : ['shelves','studio'].includes(theme) ? page.locator('.shelf-curated') : page.locator('.home-shell');
     if (['cockpit','head-unit','signal-dial','tune-world'].includes(theme)) await page.locator('.tuning-stations ol button').filter({ hasText: 'Wall Jazz FM' }).click();
     await page.route('https://stream.example.com/**', route => route.fulfill({ contentType: 'audio/wav', body: playableWave() }));
@@ -223,6 +224,7 @@ for (const { id: theme, name: label } of WEB_THEMES.filter(t => !['classic', 'ra
         if (theme === 'explorer' && path === '/app/explore') continue;
         await nav.locator(`a[href="${path}"]:not(.brand)`).click();
         await expect(page).toHaveURL(`${stack.base}${path}`, { timeout: 15_000 });
+        if(theme==='explorer')await expect(page.locator('.atlas-menu-close')).toBeHidden();
         await expect(page.locator('.player-screen video')).toHaveAttribute('data-kept', 'batch');
         await expect(page.locator('[data-testid=player]:visible')).toHaveCount(1);
         const dock = await page.locator('[data-testid=player]:visible').boundingBox();
@@ -270,7 +272,7 @@ for (const { id: theme, name: label } of WEB_THEMES.filter(t => !['classic', 'ra
       await expect(page.locator('.preset-discovery')).toBeHidden();
       await expect(page.locator('.side-nav')).toBeHidden();
       await expect(page.locator('.theme-top-nav')).toBeHidden();
-      await expect(page.locator('.wall-tabs')).toBeVisible();
+      await expect(page.locator(theme==='explorer'?'.atlas-home':'.wall-tabs')).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
       if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/${theme}-${viewport.width}-home.png` });
     }
@@ -282,10 +284,10 @@ for (const { id: theme, name: label } of WEB_THEMES.filter(t => !['classic', 'ra
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
     await page.setViewportSize({ width: 1100, height: 860 });
     await expect(chrome).toBeHidden();
-    await expect(page.locator('.wall-tabs')).toBeVisible();
+    await expect(page.locator(theme==='explorer'?'.atlas-home':'.wall-tabs')).toBeVisible();
     await page.setViewportSize({ width: 1360, height: 500 });
     await expect(chrome).toBeHidden();
-    await expect(page.locator('.wall-tabs')).toBeVisible();
+    await expect(page.locator(theme==='explorer'?'.atlas-home':'.wall-tabs')).toBeVisible();
     await form.getByRole('radio', { name: /ดั้งเดิม/ }).check();
     await form.getByRole('button', { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' }).click();
     await expect(form.getByRole('status')).toContainText('บันทึกแล้ว');
@@ -612,6 +614,76 @@ test('Explorer Radio combines navigation and reference map with real playback', 
  await expect(page.locator('.explorer-nav').getByRole('link',{name:'วิทยุ',exact:true})).toHaveAttribute('aria-current','page');
  await page.setViewportSize({width:390,height:844});
  await page.goto(`${stack.base}/app/radio`);
- await expect(page.locator('.explorer-radio-map')).toHaveCount(0);
- await expect(page.getByRole('heading',{name:'วิทยุ',exact:true})).toBeVisible();
+ await expect(page.locator('.explorer-radio-map')).toBeVisible();
+ await expect(page.locator('.atlas-header')).toBeVisible();
+});
+
+// Atlas replaces only Explorer's touch UI, preserving the actual account routes and media element.
+test('Atlas touch: all menus, country requests, account pages, media continuity and full player',async({browser})=>{
+ test.setTimeout(180_000);
+ const admin=await open(browser,'e2e-th-admin','/admin/settings');
+ const form=admin.getByRole('form',{name:'ธีมของเว็บผู้ใช้'});
+ await form.locator('input[value=explorer]').check();
+ const save=form.getByRole('button',{name:'ใช้ธีมนี้กับผู้ใช้ทุกคน'});
+ if(await save.isEnabled()){await save.click();await expect(form.getByRole('status')).toContainText('บันทึกแล้ว')}
+ const page=await open(browser,'atlas-th-user','/app/home');
+ await page.route('https://stream.example.com/**',r=>r.fulfill({contentType:'audio/wav',body:playableWave()}));
+ const requests:string[]=[];
+ await page.route('**/bff/directory/map**',r=>{
+  const country=new URL(r.request().url()).searchParams.get('country')||'';requests.push(country);
+  return r.fulfill({json:{stations:[{id:'atlas-th',name:'Atlas Bangkok',lat:13.75,lon:100.5,country:'TH',language:'th',genres:['music'],codec:'aac',streamUrl:'https://stream.example.com/atlas.aac'}].filter(s=>!country||s.country===country),unmapped:[]}});
+ });
+ const menu=page.locator('.explorer-nav');
+ const showMenu=async()=>{await page.getByRole('button',{name:'เปิดเมนูทั้งหมด'}).click();await expect(menu).toBeVisible();const close=menu.locator('.atlas-menu-close');await expect(close).toBeVisible();const box=await close.boundingBox();expect(box!.width).toBe(44);expect(box!.height).toBe(44)};
+ const move=async(path:string)=>{await showMenu();await menu.locator(`a[href="${path}"]:not(.brand)`).click();await expect(page).toHaveURL(`${stack.base}${path}`);await expect(menu).toBeHidden()};
+ await page.setViewportSize({width:390,height:844});
+ await expect(page.locator('.atlas-home')).toBeVisible();
+ await page.locator('.atlas-station').getByRole('button',{name:'เล่น Wall Jazz FM',exact:true}).first().click();
+ await expect(page.getByTestId('player')).toHaveAttribute('data-state','playing');
+ await expect.poll(()=>page.locator('.player-screen video').evaluate((v:HTMLVideoElement)=>v.currentTime)).toBeGreaterThan(.2);
+ await page.locator('.player-screen video').evaluate(v=>v.setAttribute('data-kept','atlas'));
+ for(const width of [390,820]){
+  await page.setViewportSize({width,height:width===390?844:1180});
+  await move('/app/home');
+  await page.locator('.atlas-station-detail').first().click();
+  await expect(page.getByRole('dialog',{name:'รายละเอียดสถานี'})).toBeVisible();
+  await expect(page.locator('.player-screen video')).toHaveAttribute('src','https://stream.example.com/jazz.aac');
+  if(process.env.ADMIN_SHOTS_DIR)await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/atlas-${width}-station-details.png`});
+  await page.keyboard.press('Escape');await expect(page.getByRole('dialog',{name:'รายละเอียดสถานี'})).toBeHidden();
+  await showMenu();if(process.env.ADMIN_SHOTS_DIR)await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/atlas-${width}-all-menus.png`});await page.keyboard.press('Escape');
+  for(const name of ['สำหรับคุณ','สถานีโปรด','ฟังล่าสุด','เพลง','กีฬา','ข่าวและพูดคุย','ตามประเทศ','ตามภาษา']){
+   await showMenu();await menu.getByRole('button',{name,exact:true}).click();await expect(menu).toBeHidden();await expect(page.locator('.atlas-home h1')).toHaveText(name);
+   if(process.env.ADMIN_SHOTS_DIR)await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/atlas-${width}-${['สำหรับคุณ','สถานีโปรด','ฟังล่าสุด','เพลง','กีฬา','ข่าวและพูดคุย','ตามประเทศ','ตามภาษา'].indexOf(name)}.png`});
+  }
+  for(const path of ['/app/home','/app/overview','/app/settings','/app/devices','/app/privacy','/app/radio?library=1','/app/radio']){
+   await move(path);await expect(page).toHaveURL(`${stack.base}${path}`);
+   await expect(page.locator('.player-screen video')).toHaveAttribute('data-kept','atlas');
+   await expect(page.locator('.player-screen video')).toHaveAttribute('src','https://stream.example.com/jazz.aac');
+   await expect(page.getByTestId('player')).toHaveAttribute('data-state','playing');
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(0);
+   const player=await page.getByTestId('player').boundingBox(),dock=await page.locator('.atlas-bottom-nav').boundingBox();expect(player!.y+player!.height).toBeLessThanOrEqual(dock!.y);
+   if(process.env.ADMIN_SHOTS_DIR)await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/atlas-${width}-${path.endsWith('library=1')?'library':path.split('/').at(-1)}.png`});
+  }
+  const map=page.locator('.explorer-radio-map');
+  await map.getByRole('button',{name:'ค้นหา',exact:true}).click();
+  const input=map.getByRole('combobox',{name:'ประเทศ',exact:true});const before=requests.length;
+  await input.click();await input.fill('TH');expect(requests.length).toBe(before);if(process.env.ADMIN_SHOTS_DIR)await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/atlas-${width}-country-dropdown.png`});await input.press('Enter');await expect.poll(()=>requests.at(-1)).toBe('TH');
+  await expect(map.locator('.explorer-search-results')).toContainText('Atlas Bangkok');
+  if(process.env.ADMIN_SHOTS_DIR)await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/atlas-${width}-country-search.png`});
+  await map.locator('.explorer-search-results').getByRole('button',{name:'Atlas Bangkok',exact:true}).click();await expect(map.getByTestId('explore-pick')).toContainText('Atlas Bangkok');
+  await expect(page.locator('.player-screen video')).toHaveAttribute('src','https://stream.example.com/jazz.aac');
+ }
+ await page.getByRole('button',{name:'เปิดเครื่องเล่นเต็ม'}).click();
+ const dialog=page.getByRole('dialog',{name:'กำลังฟัง'});await expect(dialog).toBeVisible();
+ await dialog.getByRole('button',{name:'พักการเล่น',exact:true}).click();await expect(page.getByTestId('player')).toHaveAttribute('data-state','paused');
+ await dialog.getByRole('button',{name:'เล่นต่อ',exact:true}).click();await expect(page.getByTestId('player')).toHaveAttribute('data-state','playing');
+ await dialog.getByLabel('ตั้งเวลาหยุด').selectOption('30');
+ if(process.env.ADMIN_SHOTS_DIR)await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/atlas-full-player.png`});
+ await page.keyboard.press('Escape');await expect(dialog).toBeHidden();
+ await showMenu();await page.keyboard.press('Escape');await expect(menu).toBeHidden();await expect(page.getByRole('button',{name:'เปิดเมนูทั้งหมด'})).toBeFocused();
+ await page.setViewportSize({width:844,height:390});await move('/app/radio');expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(0);await expect(page.locator('.atlas-header')).toBeVisible();if(process.env.ADMIN_SHOTS_DIR)await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/atlas-landscape-radio.png`});
+ await page.setViewportSize({width:320,height:640});await move('/app/settings');expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(0);
+ await showMenu();await menu.getByRole('switch').click();await page.keyboard.press('Escape');await expect(page.locator('.explorer-ui')).toHaveAttribute('data-explorer-look','dark');
+ if(process.env.ADMIN_SHOTS_DIR)await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/atlas-320-dark-settings.png`});
+ for(const path of ['/login','/register','/recover']){await page.goto(`${stack.base}${path}`);await expect(page.locator('.atlas-auth .auth')).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(0);if(process.env.ADMIN_SHOTS_DIR)await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/atlas-${path.slice(1)}.png`});}
 });
