@@ -7,6 +7,8 @@ import { Lang, strings } from '@/lib/i18n';
 import { ACCENT_COOKIE, WebAccentId, WebThemeId } from '@/lib/web-themes';
 import { Icon, ICONS } from './AppNav';
 import { ListeningPanel } from './player/ListeningPanel';
+import { ExplorerNav, ExplorerProvider } from './ExplorerUI';
+import { useDesktop } from './desktop';
 import { PlayerProvider } from './player/Player';
 
 const ThemeCtx = createContext<WebThemeId>('classic');
@@ -90,6 +92,7 @@ function TopNav({ lang, csrfToken }: { lang: Lang; csrfToken: string }) {
  */
 export function AppFrame({ theme, accent: initial, lang, csrfToken, children }: { theme: WebThemeId; accent: WebAccentId; lang: Lang; csrfToken: string | null; children: React.ReactNode }) {
   const [accent, set] = useState(initial);
+  const wide = useDesktop();
   const top = ['preset-wall', 'listen-find', 'country-window', 'stage', 'cockpit', 'head-unit', 'signal-dial', 'language-lanes', 'daylight'].includes(theme);
   const side = ['tune-world', 'map-home', 'night-garden', 'explorer'].includes(theme);
   const extra = ['listen-find', 'country-window', 'stage', 'cockpit', 'head-unit', 'signal-dial', 'language-lanes', 'tune-world', 'map-home', 'night-garden', 'daylight', 'explorer'].includes(theme);
@@ -98,17 +101,18 @@ export function AppFrame({ theme, accent: initial, lang, csrfToken, children }: 
     document.cookie = `${ACCENT_COOKIE}=${a}; Path=/; Max-Age=31536000; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`;
   };
   return (
-    <ThemeCtx.Provider value={theme}>
+    <ExplorerProvider><ThemeCtx.Provider value={theme}>
       <AccentCtx.Provider value={{ accent, setAccent }}>
       <div className={`app-frame t-${theme}${top ? ' desktop-top-frame' : ''}${side ? ' desktop-side-frame' : ''}${extra ? ' desktop-theme' : ''}`} data-accent={accent} data-testid="app-frame">
-        <PlayerProvider lang={lang}>
-          {(side || ['radio-wall', 'shelves', 'studio'].includes(theme)) && csrfToken && <SideNav lang={lang} csrfToken={csrfToken} />}
+        <PlayerProvider lang={lang} explorer={theme === 'explorer' && wide}>
+          {theme === 'explorer' && csrfToken && <ExplorerNav lang={lang} csrfToken={csrfToken} />}
+          {((side && theme !== 'explorer') || ['radio-wall', 'shelves', 'studio'].includes(theme)) && csrfToken && <SideNav lang={lang} csrfToken={csrfToken} />}
           {top && csrfToken && <TopNav lang={lang} csrfToken={csrfToken} />}
           {children}
           {['listen-find', 'country-window'].includes(theme) && <ListeningPanel />}
         </PlayerProvider>
       </div>
       </AccentCtx.Provider>
-    </ThemeCtx.Provider>
+    </ThemeCtx.Provider></ExplorerProvider>
   );
 }

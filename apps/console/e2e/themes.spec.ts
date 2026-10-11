@@ -424,8 +424,40 @@ test('Explorer decodes HTTPS audio on Home, browses without autoplay and retries
   await expect(page.getByTestId('player')).toHaveAttribute('data-state', 'playing');
   await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(.25);
   expect(requests).toBeGreaterThanOrEqual(2);
+  // Reference geometry and real controls: no fake progress/play state.
+  expect((await page.locator('.explorer-nav').boundingBox())!.width).toBe(244);
+  expect((await page.locator('.home-shell').boundingBox())!.x).toBe(244);
+  expect((await page.locator('.explorer-heading').boundingBox())!.x).toBe(266);
+  expect((await page.locator('.player-dock').boundingBox())!.height).toBe(76);
+  const card = await page.locator('.explorer-card').first().boundingBox();
+  expect(card!.width / card!.height).toBeCloseTo(16 / 9, 2);
+  const controls = page.getByTestId('player');
+  await controls.getByRole('button', { name: 'พักการเล่น', exact: true }).click();
+  await expect(controls).toHaveAttribute('data-state', 'paused');
+  expect(await video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
+  await controls.getByRole('button', { name: 'เล่นต่อ', exact: true }).click();
+  await expect(controls).toHaveAttribute('data-state', 'playing');
+  await controls.getByRole('button', { name: 'ปิดเสียง', exact: true }).click();
+  expect(await video.evaluate((v: HTMLVideoElement) => v.muted)).toBe(true);
+  const volume = controls.getByRole('slider', { name: 'ระดับเสียง' });
+  await volume.press('Home');
+  await volume.press('ArrowRight');
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.volume)).toBeCloseTo(.05, 2);
+  await controls.getByRole('button', { name: 'เปิดเสียง', exact: true }).click();
+  expect(await video.evaluate((v: HTMLVideoElement) => v.muted)).toBe(false);
+  if (process.env.ADMIN_SHOTS_DIR) {
+    await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/explorer-reference-light.png`, animations: 'disabled' });
+    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+    await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/explorer-reference-dark.png`, animations: 'disabled' });
+    await page.emulateMedia({ colorScheme: 'light' });
+  }
+
   await video.evaluate(v => v.setAttribute('data-audio-kept', 'yes'));
-  await page.getByRole('button', { name: 'สถานีถัดไป', exact: true }).click();
+  // Clicking a feed card scrolls it into view; catalog order is not fixed.
+  const jazzIndex = Number(await page.locator('.explorer-feed article').filter({ has: page.getByRole('button', { name: 'เล่น Wall Jazz FM', exact: true }) }).getAttribute('data-index'));
+  const browseStep = page.getByRole('button', { name: jazzIndex > 0 ? 'สถานีก่อนหน้า' : 'สถานีถัดไป', exact: true });
+  await expect(browseStep).toBeEnabled();
+  await browseStep.click();
   await expect(page.getByRole('button', { name: 'เล่น Wall News TH', exact: true })).toBeInViewport();
   await expect(video).toHaveAttribute('src', 'https://stream.example.com/jazz.aac');
   await page.getByLabel('ค้นหาสถานี', { exact: true }).fill('no-match');
@@ -433,6 +465,21 @@ test('Explorer decodes HTTPS audio on Home, browses without autoplay and retries
   await expect(page.getByTestId('player')).toHaveAttribute('data-state', 'playing');
   await page.getByLabel('ค้นหาสถานี', { exact: true }).fill('');
   if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/explorer-playing.png` });
+  await page.getByLabel('ค้นหาสถานี', { exact: true }).fill('Jazz');
+  await expect(page.locator('.explorer-search-results')).toBeVisible();
+  await expect(page.locator('.explorer-search-results').getByRole('button', { name: 'เล่น Wall Jazz FM', exact: true })).toBeVisible();
+  await expect(controls).toHaveAttribute('data-state', 'playing');
+  await page.getByLabel('ค้นหาสถานี', { exact: true }).fill('');
+  const appearance = page.getByRole('switch', { name: 'โหมดมืด', exact: true });
+  await appearance.click();
+  await expect(appearance).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('.explorer-ui')).toHaveAttribute('data-explorer-look', 'dark');
+  await appearance.click();
+  await expect(appearance).toHaveAttribute('aria-checked', 'false');
+  await page.locator('.explorer-nav').getByRole('link', { name: 'หน้าแรก', exact: true }).click();
+  await expect(page.locator('.explorer-heroes')).toBeVisible();
+  await expect(controls).toHaveAttribute('data-state', 'playing');
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/explorer-reference-browse.png`, animations: 'disabled' });
   for (const destination of ['การตั้งค่า', 'อุปกรณ์', 'สำรวจ', 'วิทยุ']) {
     const before = await video.evaluate((v: HTMLVideoElement) => v.currentTime);
     await page.locator('.side-nav').getByRole('link', { name: destination, exact: true }).click();
