@@ -105,9 +105,9 @@
     {
       "theme": "explorer",
       "file": "explorer.webp",
-      "sourceScreenshot": "explorer-radio-nav-home.png",
-      "sourceSha256": "7fee413d00e08bade95707b3fdfceeec30c6e86cf6130637cc3e87aea3784c96",
-      "capturedApplicationRevision": "12331016dbc52afbf6caf1a10929d83f3fb580d4"
+      "sourceScreenshot": "explorer-map-controls-home.png",
+      "sourceSha256": "8fd17fef4454cd32acf8175c9663d2e8b250d00718b1e29deab0a80db91c1e61",
+      "capturedApplicationRevision": "6fbdf729a88fc7ed54a3c45b3a149c21f144887a"
     }
   ]
 }

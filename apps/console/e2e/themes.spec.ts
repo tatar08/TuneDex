@@ -510,6 +510,7 @@ test('Explorer Radio combines navigation and reference map with real playback', 
  expect((await map.boundingBox())!.x).toBe(244);
  expect((await map.boundingBox())!.height).toBe(784);
  await expect(map.getByTestId('world-map')).toHaveCSS('background-color','rgb(38, 42, 92)');
+ await expect(map.locator('.leaflet-control-zoom-in')).toHaveCSS('width','44px');
  await map.getByTestId('world-map').getByRole('button',{name:'BBC London',exact:true}).click();
  await expect(map.getByTestId('explore-pick')).toContainText('BBC London');
  await expect(page.getByTestId('player')).toHaveCount(0);
@@ -535,8 +536,21 @@ test('Explorer Radio combines navigation and reference map with real playback', 
   await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/explorer-radio-map-wide.png`});
  }
  await map.getByRole('button',{name:'ลูกโลก',exact:true}).click();
- await expect(map.getByTestId('world-globe').or(map.getByRole('alert'))).toBeVisible();
+ await expect(map.getByTestId('world-globe')).toHaveAttribute('data-ready','true');
+ await expect(map).toHaveAttribute('data-view','globe');
+ await expect(map.getByTestId('world-globe')).toHaveCSS('background-color','rgb(236, 241, 247)');
+ await page.waitForTimeout(900);
+ const globeBefore=await map.getByTestId('world-globe').screenshot();
+ await map.getByRole('button',{name:'ซูมเข้า',exact:true}).click();
+ await page.waitForTimeout(350);
+ expect((await map.getByTestId('world-globe').screenshot()).equals(globeBefore)).toBe(false);
+ await map.getByRole('button',{name:'ซูมออก',exact:true}).click();
  await expect(page.getByTestId('player')).toHaveAttribute('data-state','playing');
+ if(process.env.ADMIN_SHOTS_DIR){await page.waitForTimeout(600);await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/explorer-radio-globe-wide.png`});}
+ await map.getByRole('button',{name:'แผนที่',exact:true}).click();
+ await expect(map).toHaveAttribute('data-view','map');
+ await map.getByRole('button',{name:'ลูกโลก',exact:true}).click();
+ await expect(map.getByTestId('world-globe')).toHaveAttribute('data-ready','true');
  await map.getByRole('button',{name:'แผนที่',exact:true}).click();
  await map.getByRole('link',{name:'คลังของฉัน',exact:true}).click();
  await expect(page).toHaveURL(`${stack.base}/app/radio?library=1`);
