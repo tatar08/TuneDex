@@ -6,6 +6,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY next.config.ts tsconfig.json ./
 COPY src ./src
+COPY public ./public
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npx next build && npm prune --omit=dev
 
@@ -15,6 +16,7 @@ WORKDIR /app
 COPY --from=build --chown=root:root /app/package.json /app/next.config.ts ./
 COPY --from=build --chown=root:root /app/node_modules ./node_modules
 COPY --from=build --chown=root:root /app/.next ./.next
+COPY --from=build --chown=root:root /app/public ./public
 # Next writes its image/fetch cache under .next/cache; give the unprivileged user only that.
 RUN mkdir -p .next/cache && chown node:node .next/cache
 USER node
