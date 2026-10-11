@@ -105,8 +105,9 @@
     {
       "theme": "explorer",
       "file": "explorer.webp",
-      "sourceScreenshot": "explorer-1360-home.png",
-      "sourceSha256": "7389c4a78ac9e56d9a0bec5a700f09a3c4c2f843a8390f7623f427eab30dfb53"
+      "sourceScreenshot": "explorer-reference-light.png",
+      "sourceSha256": "b33fc4c32af9923629dc5d583d400bbc0f938b4061b1e1d6159f8584ab0f08aa",
+      "capturedApplicationRevision": "dc6d8dfbdd9bcdbb3c4b4e210a1ea1aba512b456"
     }
   ]
 }
