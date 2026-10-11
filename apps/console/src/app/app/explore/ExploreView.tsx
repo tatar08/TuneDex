@@ -258,7 +258,7 @@ export function ExploreView({ lang, csrfToken }: { lang: Lang; csrfToken: string
     </div>
   );
 
-  if (reference && desktop) return <ExplorerRadioMap lang={lang} stations={shown} unmapped={others} selected={selected} loading={stations===null&&!failed} failed={failed} filter={filter} setFilter={setFilter} genre={genre} setGenre={setGenre} genres={genres} select={select} play={play} add={add} note={note} onGroup={members=>setGroup(new Set(members.map(s=>s.id)))} group={group} clearGroup={()=>setGroup(null)}/>;
+  if (reference && desktop) return <ExplorerRadioMap country={country} setCountry={code=>{setCountry(code);setCountryText(code?countryName(code,lang):'')}} lang={lang} stations={shown} unmapped={others} selected={selected} loading={stations===null&&!failed} failed={failed} filter={filter} setFilter={setFilter} genre={genre} setGenre={setGenre} genres={genres} select={select} play={play} add={add} note={note} onGroup={members=>setGroup(new Set(members.map(s=>s.id)))} group={group} clearGroup={()=>setGroup(null)}/>;
   return (
     <main className="shell wide explore-shell">
       <AppNav lang={lang} current="/app/explore" csrfToken={csrfToken} />

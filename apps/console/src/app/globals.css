@@ -830,3 +830,55 @@ a.btn { display: inline-block; text-decoration: none; }
  .explorer-player button:disabled { opacity:.4;cursor:default; }
  .explorer-player-right button,.explorer-player-right a { display:grid;place-items:center;min-width:32px;min-height:40px; }
 }
+
+/* Compact search: opaque surfaces keep both globe and flat-map results legible. */
+@media (min-width:1101px) and (min-height:501px) {
+ .explorer-map-bar button.explorer-map-search-toggle,.explorer-radio-map[data-view=globe] .explorer-map-bar button.explorer-map-search-toggle { display:flex;align-items:center;gap:8px;background:#fe2c55;color:white;border:1px solid #fe2c55;padding:10px 16px;box-shadow:0 4px 14px #fe2c552b;font-size:12px;letter-spacing:0; }
+ .explorer-map-search-toggle svg { width:17px;height:17px; }
+ .explorer-search-country-badge { font-size:17px;line-height:1; }
+ .explorer-map-search-box { --search-panel:#fff;--search-ink:#262a5c;--search-muted:#707a94;--search-line:#e5e8f0;--search-soft:#f4f5fa;position:absolute;left:18px;top:78px;width:min(360px,calc(100% - 36px));padding:20px;border:1px solid var(--search-line);border-radius:20px;background:var(--search-panel);color:var(--search-ink);box-shadow:0 12px 38px #262a5c26;animation:explorer-search-enter .16s ease-out; }
+ .explorer-ui[data-explorer-look=dark] .explorer-map-search-box { --search-panel:#171b31;--search-ink:#eff1fc;--search-muted:#bac0d7;--search-line:#3c4260;--search-soft:#2b314b; }
+ .explorer-search-heading { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px; }
+ .explorer-search-heading h2 { font-size:16px;font-weight:700;margin:0; }
+ .explorer-map-search-box .explorer-search-close { border:0;background:var(--search-soft);color:var(--search-muted);width:32px;height:32px;padding:0;border-radius:50%;font-size:24px;display:grid;place-items:center;flex-shrink:0; }
+ .explorer-search-field,.explorer-country-field { display:flex;align-items:center;gap:10px;background:var(--search-soft);border:1px solid var(--search-line);border-radius:12px;padding:11px 12px; }
+ .explorer-search-field svg { width:18px;height:18px;color:var(--search-muted);flex-shrink:0; }
+ .explorer-search-field:focus-within,.explorer-country-field:focus-within { border-color:#fe2c55;box-shadow:0 0 0 3px #fe2c5514; }
+ .explorer-map-search-box .explorer-search-field input,.explorer-map-search-box .explorer-country-field input { width:100%;max-width:none;min-width:0;border:0;border-radius:0;padding:0;background:transparent;color:var(--search-ink);font:inherit;font-size:13px;outline:0;box-shadow:none; }
+ .explorer-map-search-box input::placeholder { color:var(--search-muted); }
+ .explorer-country-autocomplete { position:relative;margin-top:16px; }
+ .explorer-country-autocomplete>label { display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;margin-bottom:7px; }
+ .explorer-country-autocomplete>label span { color:var(--search-muted);font-size:11px;font-weight:400; }
+ .explorer-country-flag { display:grid;place-items:center;width:24px;flex-shrink:0;font-size:20px;line-height:1; }
+ .explorer-country-flag svg { width:20px;height:20px; }
+ .explorer-country-toggle { display:grid;place-items:center;width:26px;height:26px;border:0;padding:0;background:transparent;color:var(--search-muted);flex-shrink:0; }
+ .explorer-country-toggle svg { width:18px;height:18px; }
+ .explorer-country-popup { position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:10;background:var(--search-panel);border:1px solid var(--search-line);border-radius:14px;padding:5px;box-shadow:0 10px 26px #0002; }
+ .explorer-map-search-box .explorer-country-popup ul { margin:0;padding:0;list-style:none;max-height:min(260px,max(80px,calc(100dvh - 390px)));overflow-y:auto;overscroll-behavior:contain; }
+ .explorer-country-popup li { display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;cursor:pointer; }
+ .explorer-country-popup li[data-active=true],.explorer-country-popup li:hover { background:var(--search-soft); }
+ .explorer-country-popup li[aria-selected=true] { color:#fe2c55; }
+ .explorer-country-name { flex:1;min-width:0;font-size:13px; }
+ .explorer-country-name small { display:block;color:var(--search-muted);font-size:11px;margin-top:1px; }
+ .explorer-country-popup p { font-size:12px;padding:10px;color:var(--search-muted);margin:0; }
+ .explorer-search-results-heading { display:flex;justify-content:space-between;gap:10px;align-items:baseline;color:var(--search-muted);font-size:11px;margin:18px 0 7px; }
+ .explorer-map-search-box ul.explorer-search-results { margin:0;padding:0;max-height:max(100px,min(310px,calc(100dvh - 410px)));overflow-y:auto;overscroll-behavior:contain; }
+ .explorer-map-search-box .explorer-search-results li button { display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:10px 7px;border:0;border-radius:12px;background:transparent;color:var(--search-ink);margin:2px 0;font:inherit; }
+ .explorer-map-search-box .explorer-search-results li button:hover { background:var(--search-soft); }
+ .explorer-search-station-art { display:grid;place-items:center;flex-shrink:0;width:37px;height:37px;background:var(--search-soft);color:#fe2c55;border-radius:10px;font-size:12px;font-weight:700; }
+ .explorer-search-station-copy { flex:1;min-width:0;overflow-wrap:anywhere; }
+ .explorer-search-station-copy b { display:block;font-size:13px;font-weight:600; }
+ .explorer-search-station-copy small { display:block;color:var(--search-muted);font-size:11px;margin-top:2px; }
+ .explorer-search-station-arrow { font-size:18px;color:var(--search-muted); }
+ .explorer-search-empty { padding:16px 4px;text-align:center;color:var(--search-muted);font-size:12px;margin:0; }
+}
+@keyframes explorer-search-enter { from { opacity:0;transform:translateY(-5px); } to { opacity:1;transform:translateY(0); } }
+@media (prefers-reduced-motion:reduce) { .explorer-map-search-box { animation:none; } }
+
+@media (prefers-color-scheme:dark) {
+ .explorer-ui[data-explorer-look=system] .explorer-map-search-box { --search-panel:#171b31;--search-ink:#eff1fc;--search-muted:#bac0d7;--search-line:#3c4260;--search-soft:#2b314b; }
+}
+@media (min-width:1101px) and (min-height:501px) and (max-height:640px) {
+ .explorer-map-search-box { padding:16px; }
+ .explorer-map-search-box ul.explorer-search-results { max-height:max(45px,calc(100dvh - 455px)); }
+}
