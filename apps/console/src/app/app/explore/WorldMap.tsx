@@ -27,7 +27,9 @@ export function WorldMap({
   onGroup,
   fit,
   labels,
+  reference = false,
 }: {
+  reference?: boolean;
   stations: MapStation[];
   selected: string | null;
   onSelect: (s: MapStation) => void;
@@ -56,14 +58,21 @@ export function WorldMap({
       if (cancelled || !el.current) return;
       const m = L.map(el.current, {
         worldCopyJump: true,
-        minZoom: 2,
+        minZoom: reference ? 0 : 2,
+        zoomSnap: reference ? 0.1 : 1,
         maxZoom: 10,
         attributionControl: false,
         zoomControl: false,
       }).setView([25, 40], 2);
+      if (reference) {
+        // The reference fills the width rather than fitting the poles with wide margins.
+        const worldZoom = () => Math.log2(m.getSize().x / 256);
+        m.setView([30,0], worldZoom(), { animate:false });
+        m.on('resize', () => m.setZoom(worldZoom(), { animate:false }));
+      }
       L.control
         .zoom({
-          position: 'topright',
+          position: reference ? 'bottomleft' : 'topright',
           zoomInTitle: text.current.zoomIn,
           zoomOutTitle: text.current.zoomOut,
         })
@@ -81,7 +90,7 @@ export function WorldMap({
       map.current?.map.remove();
       map.current = null;
     };
-  }, []);
+  }, [reference]);
 
   useEffect(() => {
     const draw = () => {
@@ -103,7 +112,11 @@ export function WorldMap({
           const s = c.members[0];
           const chosen = s.id === on;
           node.className = `${chosen ? 'explore-dot on' : 'explore-dot'}${withLogos ? ' logo' : ''}`;
-          if (withLogos) {
+          if (reference) {
+            node.className = chosen ? 'explorer-map-pin on' : 'explorer-map-pin';
+            node.textContent = s.name.trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
+            node.style.color = ['#00ad94','#0067ff','#ff2c55','#ff9e00'][Array.from(s.name).reduce((n,c)=>n+c.charCodeAt(0),0)%4];
+          } else if (withLogos) {
             const img = document.createElement('img');
             img.src = logoSrc(s);
             img.alt = '';
@@ -111,11 +124,12 @@ export function WorldMap({
             img.loading = 'lazy';
             node.append(img);
           }
-          m.L.marker(ll, {
+          const marker = m.L.marker(ll, {
             icon: m.L.divIcon({
               html: node,
               className: 'explore-hit',
-              iconSize: [40, 40],
+              iconSize: reference ? [56,76] : [40, 40],
+              iconAnchor: reference ? [28,76] : undefined,
             }),
             title: s.name,
             keyboard: true,
@@ -123,6 +137,7 @@ export function WorldMap({
           })
             .on('click', () => pick.current(s))
             .addTo(m.layer);
+          marker.getElement()?.setAttribute('aria-label', s.name);
           continue;
         }
         const size = clusterSize(c.members.length);

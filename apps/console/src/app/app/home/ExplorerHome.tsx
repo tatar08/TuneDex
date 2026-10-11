@@ -73,9 +73,9 @@ export function ExplorerHome({ lang, items, favorites, recent, countryControl, e
             </div>
             <aside className="explorer-actions" aria-label={c.name}>
               <span className="explorer-avatar" style={{background:m.color}} aria-hidden="true">{m.text}</span>
-              <Link href="/app/radio" prefetch={false} aria-label={t.homeManage} title={t.homeManage}><ExplorerIcon kind="heart"/><small>{th?'สถานีโปรด':'Favourites'}</small></Link>
+              <Link href="/app/radio?library=1" prefetch={false} aria-label={t.homeManage} title={t.homeManage}><ExplorerIcon kind="heart"/><small>{th?'สถานีโปรด':'Favourites'}</small></Link>
               <button type="button" onClick={()=>setInfo(c)} aria-label={th?`รายละเอียด ${c.name}`:`Details ${c.name}`}><ExplorerIcon kind="info"/><small>{th?'รายละเอียด':'Details'}</small></button>
-              <Link href="/app/explore" prefetch={false} aria-label={t.homeExplore}><ExplorerIcon kind="globe"/><small>{th?'สำรวจ':'Explore'}</small></Link>
+              <Link href="/app/radio" prefetch={false} aria-label={t.navRadio}><ExplorerIcon kind="globe"/><small>{t.navRadio}</small></Link>
               <button type="button" onClick={()=>void copy(c)} aria-label={th?`คัดลอกลิงก์ ${c.name}`:`Copy link ${c.name}`}><ExplorerIcon kind="share"/><small>{th?'แชร์':'Share'}</small></button>
               <span className="explorer-disc" style={{backgroundColor:m.color}} aria-hidden="true"/>
             </aside>

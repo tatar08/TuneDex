@@ -57,7 +57,7 @@ export function ExplorerNav({ lang, csrfToken }: { lang: Lang; csrfToken: string
   const th = lang === 'th';
   const browse = (source: ExplorerSource, category = '') => { ui.setSource(source); ui.setCategory(category); ui.setQuery(''); router.push('/app/home'); };
   const button = (source: ExplorerSource, kind: string, label: string, category = '') => <button key={kind} type="button" aria-pressed={path === '/app/home' && ui.source === source && ui.category === category} onClick={() => browse(source, category)}><ExplorerIcon kind={kind}/><span>{label}</span></button>;
-  const link = (href: string, kind: string, label: string) => <Link href={href} prefetch={false} aria-current={path === href ? 'page' : undefined}><ExplorerIcon kind={kind}/><span>{label}</span></Link>;
+  const link = (href: string, kind: string, label: string) => <Link href={href} prefetch={false} aria-current={path === href || (href === '/app/radio' && path === '/app/explore') ? 'page' : undefined}><ExplorerIcon kind={kind}/><span>{label}</span></Link>;
   return <nav className="side-nav explorer-nav" aria-label={t.navMenu}>
     <Link href="/app/home" prefetch={false} className="brand"><span className="explorer-mark" aria-hidden="true"><ExplorerIcon kind="radio"/></span>TuneDeck</Link>
     <label className="explorer-search"><ExplorerIcon kind="search"/><span className="sr-only">{t.exploreSearch}</span><input type="search" placeholder={th ? 'ค้นหา' : 'Search'} value={ui.query} onChange={e => { ui.setSource('all'); ui.setCategory(''); ui.setQuery(e.target.value); if (path !== '/app/home') router.push('/app/home'); }}/></label>
@@ -65,7 +65,6 @@ export function ExplorerNav({ lang, csrfToken }: { lang: Lang; csrfToken: string
       {button('all','feed',th ? 'สำหรับคุณ' : 'For You')}
       <Link href="/app/home" prefetch={false} aria-current={path === '/app/home' && ui.source === 'browse' ? 'page' : undefined} onClick={() => { ui.setSource('browse'); ui.setCategory(''); ui.setQuery(''); }}><ExplorerIcon kind="home"/><span>{t.navHome}</span></Link>
       {link('/app/radio','radio',t.navRadio)}
-      {link('/app/explore','globe',t.navExplore)}
     </div>
     <div className="explorer-nav-group">
       {button('favorites','heart',t.radioFavorites)}

@@ -1,6 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useDesktop } from '../desktop';
+import { useWebTheme } from '../AppFrame';
+import { ExploreView } from '../explore/ExploreView';
 import type { CatalogStation, Favorite, SyncResult } from '@/lib/bff';
 import { Lang, strings } from '@/lib/i18n';
 import { countryName, languageName } from '@/lib/names';
@@ -19,8 +23,13 @@ interface Change {
   value?: { stationId: string; order: number };
 }
 
+export function RadioView(props: Parameters<typeof RadioLibrary>[0]) {
+  const theme = useWebTheme(), desktop = useDesktop(), search = useSearchParams();
+  return theme === 'explorer' && desktop && search.get('library') !== '1' ? <ExploreView lang={props.lang} csrfToken={props.csrfToken}/> : <RadioLibrary {...props}/>;
+}
+
 /** Favorites are edited through the same sync as the phones, so a change from another device shows as a conflict. */
-export function RadioView({
+function RadioLibrary({
   lang,
   csrfToken,
   favorites: initial,
