@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Lang, strings } from '@/lib/i18n';
 
 export type ExplorerSource = 'all' | 'browse' | 'favorites' | 'recent';
@@ -28,6 +28,7 @@ export function ExplorerProvider({ children }: { children: React.ReactNode }) {
 export function useExplorerUI() { return useContext(Context)!; }
 export function ExplorerIcon({ kind }: { kind: string }) {
   const paths: Record<string,string> = {
+    menu:'M3 6h18M3 12h18M3 18h18', close:'m6 6 12 12M18 6 6 18',
     moon:'M21 12a9 9 0 1 1-9-9 7 7 0 0 0 9 9Z',
     feed:'M4 4h7v7H4zM14 4h6v7h-6zM4 14h7v6H4zM14 14h6v6h-6z',
     home:'m3 11 9-8 9 8M5 10v11h5v-7h4v7h5V10',
@@ -56,20 +57,41 @@ export function ExplorerNav({ lang, csrfToken }: { lang: Lang; csrfToken: string
   const t = strings(lang), path = usePathname(), router = useRouter();
   const ui = useExplorerUI();
   const th = lang === 'th';
-  const browse = (source: ExplorerSource, category = '') => { ui.setSource(source); ui.setCategory(category); ui.setQuery(''); router.push('/app/home'); };
+  const [open,setOpen] = useState(false);
+  const trigger=useRef<HTMLButtonElement>(null), menu=useRef<HTMLElement>(null);
+  const close=()=>{setOpen(false);trigger.current?.focus()};
+  useEffect(()=>{setOpen(false)},[path]);
+  useEffect(()=>{
+    if(!open)return;
+    menu.current?.querySelector<HTMLButtonElement>('.atlas-menu-close')?.focus();
+    const trap=(e:KeyboardEvent)=>{
+      if(e.key==='Escape'){e.preventDefault();close()}
+      if(e.key!=='Tab')return;
+      const nodes=Array.from(menu.current?.querySelectorAll<HTMLElement>('a,button,input')??[]).filter(el=>el.getClientRects().length&&!el.hasAttribute('disabled'));
+      const first=nodes[0],last=nodes.at(-1);
+      if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}
+    };
+    document.addEventListener('keydown',trap);return()=>document.removeEventListener('keydown',trap);
+  },[open]);
+  const browse = (source: ExplorerSource, category = '') => { setOpen(false); ui.setSource(source); ui.setCategory(category); ui.setQuery(''); if(path!=='/app/home')router.push('/app/home'); };
   const button = (source: ExplorerSource, kind: string, label: string, category = '') => <button key={kind} type="button" aria-pressed={path === '/app/home' && ui.source === source && ui.category === category} onClick={() => browse(source, category)}><ExplorerIcon kind={kind}/><span>{label}</span></button>;
   const link = (href: string, kind: string, label: string) => <Link href={href} prefetch={false} aria-current={path === href || (href === '/app/radio' && path === '/app/explore') ? 'page' : undefined}><ExplorerIcon kind={kind}/><span>{label}</span></Link>;
-  return <nav className="side-nav explorer-nav" aria-label={t.navMenu}>
+  return <>
+    <header className="atlas-header"><button type="button" ref={trigger} aria-label={th?'เปิดเมนูทั้งหมด':'Open all menus'} aria-expanded={open} aria-controls="atlas-menu" onClick={()=>setOpen(!open)}><ExplorerIcon kind="menu"/></button><Link href="/app/home" prefetch={false} onClick={e=>{if(path==='/app/home')e.preventDefault();setOpen(false);ui.setSource('browse');ui.setCategory('');ui.setQuery('')}}>TuneDeck<small>EXPLORER</small></Link><button type="button" aria-label={th?'สลับโหมดสี':'Toggle appearance'} aria-pressed={ui.dark} onClick={ui.toggleDark}><ExplorerIcon kind="moon"/></button></header>
+    {open&&<button type="button" className="atlas-menu-shade" aria-label={th?'ปิดเมนู':'Close menu'} onClick={close}/>}
+    <nav ref={menu} id="atlas-menu" className="side-nav explorer-nav" data-open={open} aria-label={t.navMenu} onClick={e=>{if((e.target as HTMLElement).closest('a'))setOpen(false)}}>
+    <button type="button" className="atlas-menu-close" aria-label={th?'ปิดเมนู':'Close menu'} onClick={close}><ExplorerIcon kind="close"/></button>
     <Link href="/app/home" prefetch={false} className="brand"><span className="explorer-mark" aria-hidden="true"><ExplorerIcon kind="radio"/></span>TuneDeck</Link>
     <label className="explorer-search"><ExplorerIcon kind="search"/><span className="sr-only">{t.exploreSearch}</span><input type="search" placeholder={th ? 'ค้นหา' : 'Search'} value={ui.query} onChange={e => { ui.setSource('all'); ui.setCategory(''); ui.setQuery(e.target.value); if (path !== '/app/home') router.push('/app/home'); }}/></label>
     <div className="explorer-nav-group">
       {button('all','feed',th ? 'สำหรับคุณ' : 'For You')}
-      <Link href="/app/home" prefetch={false} aria-current={path === '/app/home' && ui.source === 'browse' ? 'page' : undefined} onClick={() => { ui.setSource('browse'); ui.setCategory(''); ui.setQuery(''); }}><ExplorerIcon kind="home"/><span>{t.navHome}</span></Link>
+      <Link href="/app/home" prefetch={false} aria-current={path === '/app/home' && ui.source === 'browse' ? 'page' : undefined} onClick={e => { if(path==='/app/home')e.preventDefault(); setOpen(false); ui.setSource('browse'); ui.setCategory(''); ui.setQuery(''); }}><ExplorerIcon kind="home"/><span>{t.navHome}</span></Link>
       {link('/app/radio','radio',t.navRadio)}
     </div>
     <div className="explorer-nav-group">
       {button('favorites','heart',t.radioFavorites)}
       {button('recent','recent',t.homeRecent)}
+      {link('/app/radio?library=1','save',th?'จัดการคลังและลิงก์ส่วนตัว':'Manage library & private links')}
     </div>
     <div className="explorer-nav-group">
       {button('all','music',th ? 'เพลง' : 'Music','music')}
@@ -87,5 +109,7 @@ export function ExplorerNav({ lang, csrfToken }: { lang: Lang; csrfToken: string
     <form method="post" action="/auth/logout"><input type="hidden" name="csrf" value={csrfToken}/><button type="submit">{t.signOut}</button></form>
 <button className="explorer-dark-toggle" type="button" role="switch" aria-checked={ui.dark} onClick={ui.toggleDark}><ExplorerIcon kind="moon"/><span>{th ? 'โหมดมืด' : 'Dark mode'}</span></button>
     <small className="explorer-footer">TuneDeck · Explorer</small>
-  </nav>;
+  </nav>
+  <nav className="atlas-bottom-nav" aria-label={th?'เมนูด่วน':'Quick navigation'}>{link('/app/radio','radio',t.navRadio)}{button('favorites','heart',t.radioFavorites)}{button('recent','recent',t.homeRecent)}</nav>
+  </>;
 }

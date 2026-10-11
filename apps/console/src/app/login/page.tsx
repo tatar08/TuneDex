@@ -1,3 +1,4 @@
+import { ExplorerAuthTheme } from '../ExplorerAuthTheme';
 import { safeReturnTo } from '@/lib/cookies';
 import { strings } from '@/lib/i18n';
 import { pageLang } from '@/lib/lang';
@@ -14,7 +15,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const key = params.expired ? 'expired' : params.signedOut ? 'signedOut' : params.error === 'unavailable' ? 'unavailable' : params.error ? 'signin' : null;
   const returnTo = params.returnTo && safeReturnTo(params.returnTo) === params.returnTo ? `?returnTo=${encodeURIComponent(params.returnTo)}` : '';
   return (
-    <main className="shell auth" lang={lang}>
+    <ExplorerAuthTheme><main className="shell auth" lang={lang}>
       <div className="nav"><span className="brand">{t.appName}</span><LangSwitch lang={lang} path="/login" /></div>
       <h1>{t.loginTitle}</h1>
       <p className="lede">{t.loginLede}</p>
@@ -29,6 +30,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <p className="auth-links">
         {t.loginNoAccount} <a href="/register">{t.registerStart}</a> · <a href="/recover">{t.loginForgot}</a>
       </p>
-    </main>
+    </main></ExplorerAuthTheme>
   );
 }

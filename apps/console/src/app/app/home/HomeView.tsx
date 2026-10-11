@@ -13,6 +13,7 @@ import { logoSrc } from '../explore/logo';
 import { useDesktop } from '../desktop';
 import { ListeningPanel } from '../player/ListeningPanel';
 import { ExplorerHome } from './ExplorerHome';
+import { ExplorerAtlasHome } from './ExplorerAtlasHome';
 import { MapHome, DaylightHome } from './EditorialHomes';
 import { TuningHome, LanguageHome } from './DiscoveryHomes';
 import { DashboardHome } from './DashboardHome';
@@ -179,6 +180,7 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
 
   const catalogNotice = stations === null ? <p className="status" role="alert">{t.radioLoadError}</p> : null;
   const allCards = [...lists.favorites, ...lists.popular, ...lists.curated, ...lists.links].filter((c,i,all)=>all.findIndex(x=>x.url===c.url)===i);
+  if (!wide && theme === 'explorer') return <main className="shell home-shell atlas-home-shell">{catalogNotice}<ExplorerAtlasHome lang={lang} items={allCards} favorites={favs} recent={lists.recent} countryControl={countryControl('atlas-country')} empty={stations === null ? t.radioLoadError : t.radioCatalogNone}/></main>;
   if (wide && theme === 'explorer') return <main className="shell wide home-shell">{catalogNotice}<ExplorerHome lang={lang} items={allCards} favorites={favs} recent={lists.recent} countryControl={countryControl('explorer-country')} empty={stations === null ? t.radioLoadError : t.radioCatalogNone}/></main>;
   if (wide && ['map-home', 'night-garden', 'daylight'].includes(theme)) return <main className="shell wide home-shell">
     {catalogNotice}

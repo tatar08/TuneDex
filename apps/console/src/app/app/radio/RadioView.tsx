@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useDesktop } from '../desktop';
 import { useWebTheme } from '../AppFrame';
 import { ExploreView } from '../explore/ExploreView';
 import type { CatalogStation, Favorite, SyncResult } from '@/lib/bff';
@@ -24,8 +23,8 @@ interface Change {
 }
 
 export function RadioView(props: Parameters<typeof RadioLibrary>[0]) {
-  const theme = useWebTheme(), desktop = useDesktop(), search = useSearchParams();
-  return theme === 'explorer' && desktop && search.get('library') !== '1' ? <ExploreView lang={props.lang} csrfToken={props.csrfToken}/> : <RadioLibrary {...props}/>;
+  const theme = useWebTheme(), search = useSearchParams();
+  return theme === 'explorer' && search.get('library') !== '1' ? <ExploreView lang={props.lang} csrfToken={props.csrfToken}/> : <RadioLibrary {...props}/>;
 }
 
 /** Favorites are edited through the same sync as the phones, so a change from another device shows as a conflict. */

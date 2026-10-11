@@ -1,3 +1,4 @@
+import { ExplorerAuthTheme } from '../ExplorerAuthTheme';
 import { strings } from '@/lib/i18n';
 import { pageLang } from '@/lib/lang';
 import { LangSwitch } from '../LangSwitch';
@@ -10,7 +11,7 @@ export default async function RecoverPage({ searchParams }: { searchParams: Prom
   const lang = await pageLang();
   const t = strings(lang);
   return (
-    <main className="shell auth" lang={lang}>
+    <ExplorerAuthTheme><main className="shell auth" lang={lang}>
       <div className="nav"><span className="brand">{t.appName}</span><LangSwitch lang={lang} path="/recover" /></div>
       <h1>{t.recoverTitle}</h1>
       {params.expired && <div className="notice error" role="status">{t.recoverExpired}</div>}
@@ -20,6 +21,6 @@ export default async function RecoverPage({ searchParams }: { searchParams: Prom
         {t.recoverStart}
       </a>
       <p className="auth-links"><a href="/login">{t.backToSignIn}</a></p>
-    </main>
+    </main></ExplorerAuthTheme>
   );
 }
