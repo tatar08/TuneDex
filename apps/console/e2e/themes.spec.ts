@@ -188,6 +188,7 @@ for (const { id: theme, name: label } of WEB_THEMES.filter(t => !['classic', 'ra
     const page = await open(browser, `e2e-batch-${theme}`, '/app/home');
     await expect(page.getByTestId('app-frame')).toHaveClass(new RegExp(`t-${theme}`));
     await expect(page.getByTestId('player')).toHaveCount(0);
+    if(theme==='explorer')await expect(page.locator('.atlas-menu-close')).toBeHidden();
     const desktop = theme === 'preset-wall' ? page.locator('#wall') : ['shelves','studio'].includes(theme) ? page.locator('.shelf-curated') : page.locator('.home-shell');
     if (['cockpit','head-unit','signal-dial','tune-world'].includes(theme)) await page.locator('.tuning-stations ol button').filter({ hasText: 'Wall Jazz FM' }).click();
     await page.route('https://stream.example.com/**', route => route.fulfill({ contentType: 'audio/wav', body: playableWave() }));
@@ -223,6 +224,7 @@ for (const { id: theme, name: label } of WEB_THEMES.filter(t => !['classic', 'ra
         if (theme === 'explorer' && path === '/app/explore') continue;
         await nav.locator(`a[href="${path}"]:not(.brand)`).click();
         await expect(page).toHaveURL(`${stack.base}${path}`, { timeout: 15_000 });
+        if(theme==='explorer')await expect(page.locator('.atlas-menu-close')).toBeHidden();
         await expect(page.locator('.player-screen video')).toHaveAttribute('data-kept', 'batch');
         await expect(page.locator('[data-testid=player]:visible')).toHaveCount(1);
         const dock = await page.locator('[data-testid=player]:visible').boundingBox();
@@ -632,7 +634,7 @@ test('Atlas touch: all menus, country requests, account pages, media continuity 
   return r.fulfill({json:{stations:[{id:'atlas-th',name:'Atlas Bangkok',lat:13.75,lon:100.5,country:'TH',language:'th',genres:['music'],codec:'aac',streamUrl:'https://stream.example.com/atlas.aac'}].filter(s=>!country||s.country===country),unmapped:[]}});
  });
  const menu=page.locator('.explorer-nav');
- const showMenu=async()=>{await page.getByRole('button',{name:'เปิดเมนูทั้งหมด'}).click();await expect(menu).toBeVisible()};
+ const showMenu=async()=>{await page.getByRole('button',{name:'เปิดเมนูทั้งหมด'}).click();await expect(menu).toBeVisible();const close=menu.locator('.atlas-menu-close');await expect(close).toBeVisible();const box=await close.boundingBox();expect(box!.width).toBe(44);expect(box!.height).toBe(44)};
  const move=async(path:string)=>{await showMenu();await menu.locator(`a[href="${path}"]:not(.brand)`).click();await expect(page).toHaveURL(`${stack.base}${path}`);await expect(menu).toBeHidden()};
  await page.setViewportSize({width:390,height:844});
  await expect(page.locator('.atlas-home')).toBeVisible();
