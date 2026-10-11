@@ -9,3 +9,10 @@ import '@fontsource/sarabun/400.css';
 import '@fontsource/sarabun/500.css';
 import '@fontsource/sarabun/600.css';
 import '@fontsource/sarabun/700.css';
+
+// Explorer reference typography, served from this application.
+import '@fontsource/figtree/400.css';
+import '@fontsource/figtree/500.css';
+import '@fontsource/figtree/600.css';
+import '@fontsource/figtree/700.css';
+import '@fontsource/figtree/800.css';

@@ -1,0 +1,22 @@
+'use client';
+import Link from 'next/link';
+import { useState } from 'react';
+import { strings } from '@/lib/i18n';
+import { ExplorerIcon } from '../ExplorerUI';
+import { usePlayer } from './Player';
+
+/** The reference's three-part player, with actual media time/volume and no fabricated live seek bar. */
+export function ExplorerPlayerBar() {
+  const { now, status, lang, stop, togglePlayback, muted, toggleMute, volume, setVolume, elapsed } = usePlayer();
+  const [message,setMessage] = useState('');
+  const t=strings(lang),th=lang==='th';
+  const paused=status==='paused';
+  const state=status==='failed'?t.playerFailed:paused?(th?'พักการเล่น':'Paused'):status==='playing'?t.playerPlaying:t.playerConnecting;
+  const share=async()=>{if(!now)return;try{await navigator.clipboard.writeText(now.url);setMessage(th?'คัดลอกลิงก์แล้ว':'Link copied');}catch{setMessage(th?'คัดลอกไม่ได้':'Cannot copy link');}};
+  return <section className="explorer-player" data-testid={now?'player':undefined} data-state={now?status:'idle'} aria-label={now?t.playerNow(now.name):(th?'ตัวเล่น':'Player')}>
+    <div className="explorer-player-left"><span className="explorer-player-art" aria-hidden="true">{now?.name.trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase() ?? '♫'}</span><div><b>{now?.name ?? (th?'ยังไม่ได้เล่นสถานี':'Nothing playing')}</b><span role={status==='failed'?'alert':'status'}>{now?state:(th?'เลือกสถานี แล้วกดเล่น':'Choose a station and press Play')}</span></div></div>
+    <div className="explorer-player-center"><button type="button" className="explorer-player-toggle" disabled={!now} onClick={togglePlayback} aria-label={th?(status==='playing'?'พักการเล่น':'เล่นต่อ'):(status==='playing'?'Pause':'Resume')}><span aria-hidden="true">{status==='playing'?'Ⅱ':'▶'}</span></button><div className="explorer-live-readout"><time>{String(Math.floor(elapsed/60)).padStart(2,'0')}:{String(Math.floor(elapsed%60)).padStart(2,'0')}</time><span className="explorer-live-line" aria-hidden="true"/><b>{now?(th?'สตรีม':'STREAM'):'—'}</b></div></div>
+    <div className="explorer-player-right"><button type="button" onClick={toggleMute} aria-label={th?(muted?'เปิดเสียง':'ปิดเสียง'):(muted?'Unmute':'Mute')} aria-pressed={muted}><ExplorerIcon kind={muted?'muted':'volume'}/></button><input aria-label={th?'ระดับเสียง':'Volume'} type="range" min="0" max="1" step="0.05" value={volume} onChange={e=>setVolume(Number(e.target.value))}/><button type="button" onClick={()=>void share()} disabled={!now} aria-label={th?'คัดลอกลิงก์สถานี':'Copy station link'}><ExplorerIcon kind="share"/></button><Link href="/app/radio" prefetch={false} aria-label={t.homeManage}><ExplorerIcon kind="heart"/></Link>{now&&<button type="button" onClick={stop} aria-label={t.playerStop}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg></button>}</div>
+    {message&&<span className="explorer-player-notice" role="status">{message}<button type="button" onClick={()=>setMessage('')} aria-label={th?'ปิดข้อความ':'Dismiss'}>×</button></span>}
+  </section>;
+}

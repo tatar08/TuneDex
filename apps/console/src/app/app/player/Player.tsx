@@ -3,10 +3,18 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type HlsType from 'hls.js';
 import { Lang, strings } from '@/lib/i18n';
+import { ExplorerPlayerBar } from './ExplorerPlayerBar';
 import type { NowPlaying } from '../radio/MediaPlayer';
 
-type Status = 'connecting' | 'playing' | 'failed';
+type Status = 'connecting' | 'playing' | 'failed' | 'paused';
 interface PlayerApi {
+  explorer: boolean;
+  elapsed: number;
+  muted: boolean;
+  volume: number;
+  setVolume: (value: number) => void;
+  toggleMute: () => void;
+  togglePlayback: () => void;
   now: NowPlaying | null;
   status: Status;
   /** Starts this station or link; only ever called from a press on a play button. */
@@ -35,12 +43,22 @@ export function usePlayer(): PlayerApi {
  * HLS plays natively in Safari and through hls.js elsewhere (loaded only when needed, no worker, so the CSP needs
  * no blob: workers). A stream that carries a picture shows it in a small screen floating over the page.
  */
-export function PlayerProvider({ lang, children }: { lang: Lang; children: React.ReactNode }) {
+export function PlayerProvider({ lang, children, explorer = false }: { lang: Lang; children: React.ReactNode; explorer?: boolean }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [now, setNow] = useState<NowPlaying | null>(null);
   const [status, setStatus] = useState<Status>('connecting');
   const [hasVideo, setHasVideo] = useState(false);
   const [slots, setSlots] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
+  useEffect(() => { if (ref.current) ref.current.volume = volume; }, [volume]);
+  const toggleMute = useCallback(() => setMuted(value => !value), []);
+  const togglePlayback = useCallback(() => {
+    const media = ref.current;
+    if (!media || !media.currentSrc) return;
+    if (media.paused) void media.play().catch(() => setStatus('failed')); else media.pause();
+  }, []);
   const [recent, setRecent] = useState<NowPlaying[]>([]);
 
   useEffect(() => {
@@ -55,6 +73,7 @@ export function PlayerProvider({ lang, children }: { lang: Lang; children: React
   useEffect(() => {
     const video = ref.current;
     if (!video || !now) return;
+    setElapsed(0);
     setHasVideo(false);
     setStatus('connecting');
     let hls: HlsType | null = null;
@@ -100,12 +119,12 @@ export function PlayerProvider({ lang, children }: { lang: Lang; children: React
       return next;
     });
   }, [status]);
-  const stop = useCallback(() => setNow(null), []);
+  const stop = useCallback(() => { setNow(null); setElapsed(0); }, []);
   const claim = useCallback(() => {
     setSlots((n) => n + 1);
     return () => setSlots((n) => n - 1);
   }, []);
-  const api = useMemo(() => ({ now, status, play, stop, recent, lang, claim }), [now, status, play, stop, recent, lang, claim]);
+  const api = useMemo(() => ({ now, status, play, stop, recent, lang, claim, explorer, elapsed, muted, volume, setVolume, toggleMute, togglePlayback }), [now, status, play, stop, recent, lang, claim, explorer, elapsed, muted, volume, toggleMute, togglePlayback]);
   const check = () => setHasVideo((ref.current?.videoWidth ?? 0) > 0);
 
   return (
@@ -116,6 +135,9 @@ export function PlayerProvider({ lang, children }: { lang: Lang; children: React
           <video
             ref={ref}
             controls={hasVideo}
+            muted={muted}
+            onTimeUpdate={() => { if (explorer) setElapsed(ref.current?.currentTime ?? 0); }}
+            onPause={() => { if (now && !ref.current?.error) setStatus('paused'); }}
             playsInline
             preload="none"
             onLoadedMetadata={check}
@@ -125,7 +147,7 @@ export function PlayerProvider({ lang, children }: { lang: Lang; children: React
             onWaiting={() => setStatus('connecting')}
           />
         </div>
-        {now && slots === 0 && (
+        {(now || explorer) && slots === 0 && (
           <div className="player-dock">
             <PlayerBar />
           </div>
@@ -137,8 +159,9 @@ export function PlayerProvider({ lang, children }: { lang: Lang; children: React
 
 /** The player's one row: logo, name, state and Stop. Live radio cannot be wound back, so there is no time line. */
 export function PlayerBar() {
-  const { now, status, stop, lang } = usePlayer();
+  const { now, status, stop, lang, explorer } = usePlayer();
   const t = strings(lang);
+  if (explorer) return <ExplorerPlayerBar />;
   if (!now) return null;
   return (
     <section className="player compact" aria-label={t.playerNow(now.name)} data-testid="player" data-state={status}>
@@ -147,7 +170,7 @@ export function PlayerBar() {
       <span className="player-text">
         <span className="player-name">{now.name}</span>
         <span role={status === 'failed' ? 'alert' : 'status'} className="player-state" data-state={status}>
-          {status === 'failed' ? t.playerFailed : status === 'playing' ? t.playerPlaying : t.playerConnecting}
+          {status === 'failed' ? t.playerFailed : status === 'paused' ? t.playerPaused : status === 'playing' ? t.playerPlaying : t.playerConnecting}
         </span>
       </span>
       <span className="player-eq" aria-hidden="true">
@@ -166,9 +189,9 @@ export function PlayerBar() {
 
 /** Where a page draws the player itself (the explorer floats it on the map); the frame's bar hides meanwhile. */
 export function PlayerSlot({ className }: { className: string }) {
-  const { now, claim } = usePlayer();
+  const { now, claim, explorer } = usePlayer();
   useEffect(() => claim(), [claim]);
-  return now ? (
+  return now || explorer ? (
     <div className={className}>
       <PlayerBar />
     </div>

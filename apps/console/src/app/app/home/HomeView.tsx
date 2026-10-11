@@ -158,7 +158,7 @@ export function HomeView({ lang, csrfToken, favorites, stations }: { lang: Lang;
         <span className="wall-name">{c.name}</span>
         <span className="wall-meta legacy-stream-state">{on ? t.playerPlaying : c.meta}</span>
         {!['classic', 'radio-wall'].includes(theme) && (
-          <span className="wall-meta desktop-stream-state">{on ? status === 'failed' ? t.playerFailed : status === 'playing' ? t.playerPlaying : t.playerConnecting : c.meta}</span>
+          <span className="wall-meta desktop-stream-state">{on ? status === 'failed' ? t.playerFailed : status === 'paused' ? t.playerPaused : status === 'playing' ? t.playerPlaying : t.playerConnecting : c.meta}</span>
         )}
       </li>
     );
