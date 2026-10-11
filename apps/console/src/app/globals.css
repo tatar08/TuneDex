@@ -772,3 +772,40 @@ a.btn { display: inline-block; text-decoration: none; }
   .explorer-result small { color:var(--muted); font-size:12px; }
   .explorer-result i { display:grid; place-items:center; border-radius:50%; width:32px; height:32px; background:var(--explorer-active); color:white; font-size:12px; }
 }
+
+/* Explorer Radio: edge-to-edge reference map; shared/mobile explorers retain their existing layout. */
+@media (min-width:1101px) and (min-height:501px) {
+ .explorer-radio-map { position:fixed;left:244px;right:0;top:0;bottom:76px;overflow:hidden;background:#262a5c;color:white; }
+ .explorer-radio-map .explore-canvas { position:absolute;inset:0;height:100%;background:#262a5c;z-index:0; }
+ .explorer-radio-map .explore-land { fill:#a97284;stroke:rgba(255,255,255,.28); }
+ .explorer-radio-map .leaflet-container { font-family:inherit; }
+ .explorer-map-bar { position:absolute;z-index:500;left:18px;right:18px;top:18px;display:flex;align-items:center;gap:10px; }
+ .explorer-map-bar button,.explorer-map-bar a { background:#ffffff22;color:white;white-space:nowrap;border:0;border-radius:99px;padding:12px 18px;font:inherit;font-weight:800;font-size:11px;letter-spacing:.05em;text-decoration:none; }
+ .explorer-map-bar button[aria-pressed=true] { background:#ffffff44; }
+ .explorer-map-genres { display:flex;gap:8px;overflow:auto;scrollbar-width:none; }
+ .explorer-map-search-toggle { flex-shrink:0; }
+ .explorer-map-pin { display:grid;place-items:center;width:56px;height:56px;background:white;border-radius:9px;font-size:20px;font-weight:800;position:relative;box-shadow:0 2px 5px #0001; }
+ .explorer-map-pin:before { content:'';position:absolute;top:55px;border:9px solid transparent;border-top-color:white; }
+ .explorer-map-pin:after { content:'';position:absolute;top:65px;width:18px;height:18px;background:white;border-radius:50%; }
+ .explorer-map-pin.on { outline:3px solid #fe2c55; }
+ .explorer-radio-map .explore-cluster { background:white;color:#262a5c;box-shadow:none; }
+ .explorer-radio-map .leaflet-control-zoom { border:0;margin:20px 18px;box-shadow:none; }
+ .explorer-radio-map .leaflet-control-zoom a { width:44px;height:44px;line-height:44px;background:white;color:#262a5c;border-radius:3px;border:0;margin-top:10px;font-size:26px; }
+ .explorer-radio-map .leaflet-control-zoom a.leaflet-disabled { background:#ffffff88; }
+ .explorer-map-similar { position:absolute;z-index:500;bottom:16px;left:50%;transform:translateX(-50%);max-width:calc(100% - 180px);background:#20224be0;border-radius:10px;padding:14px 16px;box-shadow:0 4px 18px #0004; }
+ .explorer-map-similar>b { display:block;font-size:11px;letter-spacing:.12em;margin-bottom:10px; }
+ .explorer-map-stations { display:flex;gap:10px;overflow:auto; }
+ .explorer-map-stations button { flex-shrink:0;display:grid;place-items:center;width:56px;height:56px;background:white;color:#fe2c55;border:0;border-radius:8px;font-size:20px;font-weight:800; }
+ .explorer-map-stations button:nth-child(3n) { color:#00ad94; }.explorer-map-stations button:nth-child(3n + 2) { color:#262a5c; }
+ .explorer-map-selected { display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px;max-width:700px; }
+ .explorer-map-selected span { font-size:12px;color:#ddd; }
+ .explorer-map-selected button,.explorer-map-similar>button { background:white;color:#262a5c;border:0;border-radius:6px;padding:8px 12px; }
+ .explorer-map-attribution { position:absolute;z-index:400;bottom:6px;right:10px;font-size:10px;color:#b7b4d2;max-width:35%;text-align:right; }
+ .explorer-map-notice { position:absolute;z-index:500;left:50%;top:80px;transform:translateX(-50%);background:#20224be0;padding:12px;border-radius:8px; }
+ .explorer-map-search-box { position:absolute;z-index:600;left:18px;top:72px;width:min(400px,80%);background:#fff;color:#161823;padding:16px;border-radius:10px;box-shadow:0 8px 24px #0004; }
+ .explorer-map-search-box input { max-width:80%;padding:10px;border:1px solid #ddd;border-radius:6px; }
+ .explorer-map-search-box ul { list-style:none;padding:0;max-height:40vh;overflow:auto; }
+ .explorer-map-search-box li button { width:100%;text-align:left;padding:10px;border:0;background:#f1f1f2;margin:2px 0; }
+}
+
+@media (min-width:1101px) and (min-height:501px) { .explorer-map-bar button.explorer-map-view { flex-shrink:0;width:46px;height:46px;padding:0;background:white;color:#262a5c;border-radius:50%;font-size:24px; } }

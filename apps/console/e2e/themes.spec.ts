@@ -220,6 +220,7 @@ for (const { id: theme, name: label } of WEB_THEMES.filter(t => !['classic', 'ra
           await page.locator('.theme-account').evaluate((d: HTMLDetailsElement) => { d.open = true; });
         }
         // Use the destination rather than translated labels, which can differ on account pages.
+        if (theme === 'explorer' && path === '/app/explore') continue;
         await nav.locator(`a[href="${path}"]:not(.brand)`).click();
         await expect(page).toHaveURL(`${stack.base}${path}`, { timeout: 15_000 });
         await expect(page.locator('.player-screen video')).toHaveAttribute('data-kept', 'batch');
@@ -480,11 +481,72 @@ test('Explorer decodes HTTPS audio on Home, browses without autoplay and retries
   await expect(page.locator('.explorer-heroes')).toBeVisible();
   await expect(controls).toHaveAttribute('data-state', 'playing');
   if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/explorer-reference-browse.png`, animations: 'disabled' });
-  for (const destination of ['การตั้งค่า', 'อุปกรณ์', 'สำรวจ', 'วิทยุ']) {
+  for (const destination of ['การตั้งค่า', 'อุปกรณ์', 'วิทยุ']) {
     const before = await video.evaluate((v: HTMLVideoElement) => v.currentTime);
     await page.locator('.side-nav').getByRole('link', { name: destination, exact: true }).click();
     await expect(video).toHaveAttribute('data-audio-kept', 'yes');
     await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(before);
     await expect(page.getByTestId('player')).toHaveAttribute('data-state', 'playing');
   }
+});
+
+test('Explorer Radio combines navigation and reference map with real playback', async ({browser})=>{
+ const admin=await open(browser,'e2e-th-admin','/admin/settings');
+ const form=admin.getByRole('form',{name:'ธีมของเว็บผู้ใช้'});
+ await form.locator('input[value="explorer"]').check();
+ const save=form.getByRole('button',{name:'ใช้ธีมนี้กับผู้ใช้ทุกคน'});
+ if(await save.isEnabled()){await save.click();await expect(form.getByRole('status')).toContainText('บันทึกแล้ว');}
+ const page=await open(browser,'explorer-map','/app/home');
+ const points=[['COOL Thailand',13.75,100.5],['BBC London',51.5,-.12],['KEXP Seattle',47.6,-122.3],['Brasil Radio',-23.55,-46.63],['Melbourne Radio',-37.8,144.96],['Tokyo Radio',35.68,139.69]] as const;
+ await page.route('**/bff/directory/map**',r=>r.fulfill({json:{stations:points.map(([name,lat,lon],i)=>({id:`map-${i}`,name,lat,lon,country:null,language:'en',genres:i===1?['news']:['music'],codec:'aac',bitrateKbps:96,streamUrl:`https://stream.example.com/map-${i}.aac`}))}}));
+ await page.route('https://stream.example.com/**',r=>r.fulfill({contentType:'audio/wav',body:playableWave()}));
+ const nav=page.locator('.explorer-nav');
+ await expect(nav.getByRole('link',{name:'สำรวจ',exact:true})).toHaveCount(0);
+ await nav.getByRole('link',{name:'วิทยุ',exact:true}).click();
+ await expect(page).toHaveURL(`${stack.base}/app/radio`);
+ await expect(nav.getByRole('link',{name:'วิทยุ',exact:true})).toHaveAttribute('aria-current','page');
+ const map=page.locator('.explorer-radio-map');
+ await expect(map.getByTestId('world-map').getByRole('button',{name:'BBC London',exact:true})).toBeVisible();
+ expect((await map.boundingBox())!.x).toBe(244);
+ expect((await map.boundingBox())!.height).toBe(784);
+ await expect(map.getByTestId('world-map')).toHaveCSS('background-color','rgb(38, 42, 92)');
+ await map.getByTestId('world-map').getByRole('button',{name:'BBC London',exact:true}).click();
+ await expect(map.getByTestId('explore-pick')).toContainText('BBC London');
+ await expect(page.getByTestId('player')).toHaveCount(0);
+ await map.getByRole('button',{name:'เล่น',exact:true}).click();
+ await expect(page.getByTestId('player')).toHaveAttribute('data-state','playing');
+ const video=page.locator('.player-screen video');
+ await expect.poll(()=>video.evaluate((v:HTMLVideoElement)=>v.currentTime)).toBeGreaterThan(.25);
+ await map.getByRole('group',{name:'ประเภท'}).getByRole('button',{name:'MUSIC',exact:true}).click();
+ await expect(map.getByTestId('world-map').getByRole('button',{name:'BBC London',exact:true})).toHaveCount(0);
+ await expect(video).toHaveAttribute('src','https://stream.example.com/map-1.aac');
+ await map.getByRole('group',{name:'ประเภท'}).getByRole('button',{name:'ทั้งหมด',exact:true}).click();
+ await map.getByRole('button',{name:'ค้นหา',exact:true}).click();
+ await map.getByLabel('ค้นหาสถานี', {exact:true}).fill('Tokyo');
+ await expect(map.locator('.explorer-map-search-box li')).toHaveCount(1);
+ await map.locator('.explorer-map-search-box li button').click();
+ await expect(map.getByTestId('explore-pick')).toContainText('Tokyo Radio');
+ await expect(video).toHaveAttribute('src','https://stream.example.com/map-1.aac');
+ await map.getByRole('button',{name:'ค้นหา',exact:true}).click();
+ await map.getByRole('button',{name:'ปิด',exact:true}).click();
+ if(process.env.ADMIN_SHOTS_DIR){
+  await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/explorer-radio-map.png`});
+  await page.setViewportSize({width:1920,height:1080});
+  await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/explorer-radio-map-wide.png`});
+ }
+ await map.getByRole('button',{name:'ลูกโลก',exact:true}).click();
+ await expect(map.getByTestId('world-globe').or(map.getByRole('alert'))).toBeVisible();
+ await expect(page.getByTestId('player')).toHaveAttribute('data-state','playing');
+ await map.getByRole('button',{name:'แผนที่',exact:true}).click();
+ await map.getByRole('link',{name:'คลังของฉัน',exact:true}).click();
+ await expect(page).toHaveURL(`${stack.base}/app/radio?library=1`);
+ await expect(page.getByRole('heading',{name:'วิทยุ',exact:true})).toBeVisible();
+ await expect(page.getByTestId('player')).toHaveAttribute('data-state','playing');
+ await page.goto(`${stack.base}/app/explore`);
+ await expect(page.locator('.explorer-radio-map')).toBeVisible();
+ await expect(page.locator('.explorer-nav').getByRole('link',{name:'วิทยุ',exact:true})).toHaveAttribute('aria-current','page');
+ await page.setViewportSize({width:390,height:844});
+ await page.goto(`${stack.base}/app/radio`);
+ await expect(page.locator('.explorer-radio-map')).toHaveCount(0);
+ await expect(page.getByRole('heading',{name:'วิทยุ',exact:true})).toBeVisible();
 });
