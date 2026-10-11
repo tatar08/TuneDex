@@ -79,6 +79,7 @@ function WebThemePicker({ current }: { current: { theme: string; updatedBy: stri
     <form className="adm-panel st-theme" aria-labelledby="st-theme" onSubmit={save}>
       <h3 id="st-theme">{t('ธีมของเว็บผู้ใช้')}</h3>
       <p className="dim">{t('โครงหน้าที่ผู้ใช้ทุกคนเห็นบนคอมพิวเตอร์ ผู้ใช้เปลี่ยนเองไม่ได้ เลือกได้แค่สีในหน้าการตั้งค่าของตัวเอง มือถือใช้แบบเดียวทุกธีม')}</p>
+      <p className="dim">{t('ภาพแคปหน้าแรกจริงของแต่ละธีม โดยใช้สถานีตัวอย่าง')}</p>
       <div className="st-theme-groups st-themes" role="radiogroup" aria-labelledby="st-theme">
         {WEB_THEME_GROUPS.flatMap((group) => WEB_THEMES.filter((th) => th.group === group.id).map((th) => (
           <label key={th.id} className={picked === th.id ? 'st-theme-card on' : 'st-theme-card'}>

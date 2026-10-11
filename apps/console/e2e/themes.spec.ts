@@ -53,6 +53,7 @@ test('home has stations to play, and the sound keeps going from page to page', a
   await page.getByRole('button', { name: 'เล่น Wall Jazz FM' }).click();
   await expect(page.getByTestId('player')).toHaveAttribute('data-state', 'playing');
   await expect.poll(() => page.locator('.player-screen video').evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(.25);
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/classic-home.png` });
   const player = page.getByTestId('player');
   await expect(player).toHaveAttribute('aria-label', 'กำลังเล่น: Wall Jazz FM');
   const src = () => page.locator('.player-screen video').evaluate((v: HTMLVideoElement) => v.src);
@@ -128,6 +129,13 @@ test('an admin chooses the layout theme for everyone; editors cannot', async ({ 
   const admin = await open(browser, 'e2e-th-admin', '/admin/settings');
   const form = admin.getByRole('form', { name: 'ธีมของเว็บผู้ใช้' });
   await expect(form.getByRole('radio', { name: /ดั้งเดิม/ })).toBeChecked();
+  // Every screenshot must be served and decoded, including lazy images below the fold.
+  await expect(form.locator('img.theme-preview')).toHaveCount(WEB_THEMES.length);
+  for (const image of await form.locator('img.theme-preview').all()) {
+    await image.scrollIntoViewIfNeeded();
+    await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(1360);
+  }
+
   await expect(form.getByRole('button', { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' })).toBeDisabled();
   await form.getByRole('radio', { name: /ผนังวิทยุส่วนตัว/ }).check();
   await form.getByRole('button', { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' }).click();

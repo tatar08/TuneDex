@@ -1,0 +1,112 @@
+{
+  "capturedApplicationRevision": "5a9fa066a098c105ee5fe125919ecd67efdb372d",
+  "viewport": {
+    "width": 1360,
+    "height": 860
+  },
+  "data": "Disposable Playwright fixture stations; no private account data",
+  "previews": [
+    {
+      "theme": "classic",
+      "file": "classic.webp",
+      "sourceScreenshot": "classic-home.png",
+      "sourceSha256": "d840049590e02be9fb8f7c5bda77127ca8b073493c44678d9b72d74ba325739b"
+    },
+    {
+      "theme": "radio-wall",
+      "file": "radio-wall.webp",
+      "sourceScreenshot": "theme-radio-wall-home.png",
+      "sourceSha256": "1b4631c1070b0028cd2e9603d3c30bff0d0510662e96092304b568a7c273f216"
+    },
+    {
+      "theme": "preset-wall",
+      "file": "preset-wall.webp",
+      "sourceScreenshot": "preset-wall-1360-home.png",
+      "sourceSha256": "d7733919fe4aacab0a149034174519887f4da9f149c560b8713cd2cccfedf938"
+    },
+    {
+      "theme": "shelves",
+      "file": "shelves.webp",
+      "sourceScreenshot": "shelves-1360-home.png",
+      "sourceSha256": "1cd85f4f04d21a45f1b320ff306dc504087a836ccea7646892a73914ce395a93"
+    },
+    {
+      "theme": "studio",
+      "file": "studio.webp",
+      "sourceScreenshot": "studio-1360-home.png",
+      "sourceSha256": "9e95527b68d65a82e8e95297a4d09decbeca8e3db89826f36624686667444d17"
+    },
+    {
+      "theme": "listen-find",
+      "file": "listen-find.webp",
+      "sourceScreenshot": "listen-find-1360-home.png",
+      "sourceSha256": "8d4d53c4fac3f3595d9bf2dd19640e2dea6dd08290f8b7aeaa3cf3982053827e"
+    },
+    {
+      "theme": "country-window",
+      "file": "country-window.webp",
+      "sourceScreenshot": "country-window-1360-home.png",
+      "sourceSha256": "2a94846817a50f6009e0774ee2d855894b96b7b6c2afdc1c11fb8d4be7f8d235"
+    },
+    {
+      "theme": "stage",
+      "file": "stage.webp",
+      "sourceScreenshot": "stage-1360-home.png",
+      "sourceSha256": "ba589320ccb3925cc6f18750e1488cadcab7fd75d70c97f7f83f6f872e1f647d"
+    },
+    {
+      "theme": "cockpit",
+      "file": "cockpit.webp",
+      "sourceScreenshot": "cockpit-1360-home.png",
+      "sourceSha256": "00bdb3bf433af8fb691eca3635dd577ce03dbbf42ec1bb9510c1f532807ca2ff"
+    },
+    {
+      "theme": "head-unit",
+      "file": "head-unit.webp",
+      "sourceScreenshot": "head-unit-1360-home.png",
+      "sourceSha256": "86fb86ed1180bbce89750c76962e6e59d1199df57ac9e0ad134115bd9a6f892e"
+    },
+    {
+      "theme": "signal-dial",
+      "file": "signal-dial.webp",
+      "sourceScreenshot": "signal-dial-1360-home.png",
+      "sourceSha256": "3b6c9409b0c0616cc65d0980532803419becb99d4db7bfe3f68238b44c83dea0"
+    },
+    {
+      "theme": "tune-world",
+      "file": "tune-world.webp",
+      "sourceScreenshot": "tune-world-1360-home.png",
+      "sourceSha256": "fbe2957e79b715b8414f9fe5ee4ec703a6a802aa295952e034679b0c651178a5"
+    },
+    {
+      "theme": "language-lanes",
+      "file": "language-lanes.webp",
+      "sourceScreenshot": "language-lanes-1360-home.png",
+      "sourceSha256": "c0bcb57398050e1fff84058e7cd5de5442b711a2458705449b465c75a6230847"
+    },
+    {
+      "theme": "map-home",
+      "file": "map-home.webp",
+      "sourceScreenshot": "map-home-1360-home.png",
+      "sourceSha256": "901253f518e355f5215d54f25cd52ab4f149363c483624d8ae0b875bfae11891"
+    },
+    {
+      "theme": "night-garden",
+      "file": "night-garden.webp",
+      "sourceScreenshot": "night-garden-1360-home.png",
+      "sourceSha256": "71a97a2572679082bc1323121809c3b05ec437783e2fc441bcc35a8fd49a8ab8"
+    },
+    {
+      "theme": "daylight",
+      "file": "daylight.webp",
+      "sourceScreenshot": "daylight-1360-home.png",
+      "sourceSha256": "e172a6abe0ab6dd9292cc857818edfacb9ced5e134be2e85cc1cff20ab27959c"
+    },
+    {
+      "theme": "explorer",
+      "file": "explorer.webp",
+      "sourceScreenshot": "explorer-1360-home.png",
+      "sourceSha256": "7389c4a78ac9e56d9a0bec5a700f09a3c4c2f843a8390f7623f427eab30dfb53"
+    }
+  ]
+}
