@@ -37,6 +37,8 @@ export function WorldGlobe({
   onFail,
   fit,
   palette,
+  reference = false,
+  zoomRequest,
 }: {
   stations: MapStation[];
   selected: string | null;
@@ -44,6 +46,8 @@ export function WorldGlobe({
   onFail: () => void;
   fit: boolean;
   palette: GlobePalette;
+  reference?: boolean;
+  zoomRequest?: {sequence: number; direction: number};
 }) {
   const el = useRef<HTMLDivElement>(null);
   const globe = useRef<GlobeInstance | null>(null);
@@ -73,14 +77,15 @@ export function WorldGlobe({
             .pointLat('lat')
             .pointLng('lon')
             .pointAltitude(0.006)
-            // Thousands of stations: no grow-in animation keeps the globe smooth; ten sides make a dot read as round, not a hexagon.
+            // Thousands of stations: no grow-in animation keeps the globe smooth; small round dots use more sides in the reference view.
             .pointsTransitionDuration(0)
-            .pointResolution(10)
+            .pointResolution(reference ? 24 : 10)
             .pointLabel((d: object) => escape((d as MapStation).name))
             .onPointClick((d: object) => pick.current(d as MapStation))
             .onZoom((pov) => setStep(stepOf(pov.altitude)));
           // The earth's radius is 100 units; stop the camera a little above the surface so it never fills the screen with one dot.
           (g.controls() as unknown as { minDistance: number }).minDistance = 112;
+          if (reference) g.pointOfView({lat:15,lng:100,altitude:2.3});
           globe.current = g;
           resize = new ResizeObserver(() => g.width(node.clientWidth).height(node.clientHeight));
           resize.observe(node);
@@ -97,7 +102,7 @@ export function WorldGlobe({
       globe.current?._destructor();
       globe.current = null;
     };
-  }, []);
+  }, [reference]);
 
   useEffect(() => {
     const g = globe.current;
@@ -112,8 +117,8 @@ export function WorldGlobe({
     globe.current
       ?.pointsData(stations)
       .pointColor((d: object) => ((d as MapStation).id === selected ? palette.dotOn : palette.dot))
-      .pointRadius((d: object) => ((d as MapStation).id === selected ? 1.1 : 0.45) * 1.25 ** step);
-  }, [ready, stations, selected, palette, step]);
+      .pointRadius((d: object) => ((d as MapStation).id === selected ? (reference ? .5 : 1.1) : (reference ? .25 : .45)) * 1.25 ** step);
+  }, [ready, stations, selected, palette, step, reference]);
 
   useEffect(() => {
     if (!fit || !stations.length) return;
@@ -124,8 +129,15 @@ export function WorldGlobe({
 
   useEffect(() => {
     const s = stations.find((x) => x.id === selected);
-    if (s) globe.current?.pointOfView({ lat: s.lat, lng: s.lon, altitude: 1.2 * tall(el.current) }, 800);
-  }, [ready, selected, stations]);
+    if (s) globe.current?.pointOfView({ lat: s.lat, lng: s.lon, altitude: (reference ? 2.3 : 1.2) * tall(el.current) }, 800);
+  }, [ready, selected, stations, reference]);
 
-  return <div ref={el} className="explore-canvas globe" data-testid="world-globe" />;
+  useEffect(() => {
+    const g = globe.current;
+    if (!ready || !g || !zoomRequest?.sequence) return;
+    const altitude = Math.max(.12, Math.min(4, g.pointOfView().altitude * (zoomRequest.direction > 0 ? .8 : 1.25)));
+    g.pointOfView({altitude}, 250);
+  }, [ready, zoomRequest]);
+
+  return <div ref={el} className="explore-canvas globe" data-testid="world-globe" data-ready={ready} />;
 }

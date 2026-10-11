@@ -37,6 +37,7 @@ export function ExplorerIcon({ kind }: { kind: string }) {
     music:'M9 18V5l11-2v13M9 7l11-2M9 18a3 3 0 1 1-3-3c2 0 3 1 3 3ZM20 16a3 3 0 1 1-3-3c2 0 3 1 3 3Z',
     sports:'M5 3h14v5a7 7 0 0 1-14 0V3ZM5 5H2v3a4 4 0 0 0 4 4M19 5h3v3a4 4 0 0 1-4 4M12 15v6M7 21h10',
     news:'M3 4h18v16H3zM6 8h5v5H6zM14 8h4M14 12h4M6 16h12',
+    map:'m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2V5ZM9 3v16M15 5v16',
     globe:'M3 12h18M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 0c-6 6-6 12 0 18 6-6 6-12 0-18Z',
     pin:'M12 22S4 14 4 9a8 8 0 1 1 16 0c0 5-8 13-8 13ZM9 9a3 3 0 1 0 6 0 3 3 0 0 0-6 0',
     user:'M8 7a4 4 0 1 0 8 0 4 4 0 0 0-8 0ZM4 22v-2a8 8 0 0 1 16 0v2',
