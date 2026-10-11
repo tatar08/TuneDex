@@ -1,5 +1,6 @@
 /** English for the staff console (stations), keyed by the Thai text. `{0}`, `{1}` … are filled in by t(). */
 export const EN_STATIONS: Record<string, string> = {
+  'ฟีดสถานีแนวตั้ง การ์ดใหญ่ ค้นหาและเลื่อนเลือก พร้อมตัวเล่นต่อเนื่อง': 'Vertical station feed, large cards, search and browse with continuous playback',
   'แผนที่คือหน้าแรก': 'Map as home',
   'แผนที่เต็มพื้นที่ แผงสถานีโปรดและฟังล่าสุด โทนเข้ม': 'A map filling the main area, favourites and recent listening, dark appearance',
   'สวนกลางคืน': 'Night garden',

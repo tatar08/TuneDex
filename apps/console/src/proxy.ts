@@ -9,10 +9,10 @@ import { NextRequest, NextResponse } from 'next/server';
 export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
   const dev = process.env.NODE_ENV === 'development';
-  // /app/radio and /app/explore play catalog, community and the viewer's own https streams, and hls.js fetches HLS
-  // segments itself; the https-wide media and connect sources stay on those pages only.
+  // Home themes also play HTTPS catalog streams. Keep this permission limited
+  // to the three playback entry pages; other routes retain the restrictive policy.
   const path = request.nextUrl.pathname;
-  const player = path === '/app/radio' || path === '/app/explore';
+  const player = ['/app/home', '/app/radio', '/app/explore'].includes(path);
   const csp = [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval'" : ''}`,

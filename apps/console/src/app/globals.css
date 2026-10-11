@@ -626,3 +626,39 @@ a.btn { display: inline-block; text-decoration: none; }
   .desktop-theme .home-shell :where(button:disabled) { opacity: 0.5; cursor: default; }
   .desktop-theme .home-shell :where(input[type="search"]) { font: inherit; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--line); color: var(--fg); background: var(--panel); }
 }
+
+@media (min-width: 1101px) and (min-height: 501px) {
+  .t-explorer .home-shell { padding: 24px 32px 112px; }
+  .explorer-home { max-width: 1440px; margin: auto; }
+  .explorer-heading { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
+  .explorer-heading h1 { font-size: 32px; margin: 0; }
+  .explorer-heading p { color: var(--muted); margin: 6px 0 18px; }
+  .explorer-tools { display: flex; align-items: start; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; }
+  .explorer-tools label { display: grid; gap: 6px; font-size: 13px; }
+  .explorer-tools .wall-country { margin: 0; max-width: 360px; }
+  .explorer-tools .wall-country .status { font-size: 12px; }
+  .explorer-sources { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .t-explorer .explorer-sources button[aria-pressed="true"] { background: var(--web-accent); color: var(--web-accent-ink); border-color: transparent; }
+  .explorer-stage { position: relative; padding-right: 60px; }
+  .explorer-feed { height: max(280px, calc(100dvh - 380px)); overflow-y: auto; scroll-snap-type: y mandatory; overscroll-behavior-y: contain; scrollbar-width: thin; }
+  .explorer-feed article { height: 100%; scroll-snap-align: start; display: flex; justify-content: center; align-items: center; gap: 20px; padding: 16px 10px; }
+  .explorer-card { position: relative; width: min(100%, calc((100dvh - 412px) * 1.7778)); min-width: 320px; aspect-ratio: 16/9; border-radius: 18px; overflow: hidden; color: white; }
+  .explorer-rings { position: absolute; height: 140%; top: -20%; left: 50%; transform: translateX(-50%); fill: none; stroke: #ffffff30; }
+  .explorer-initials { position: absolute; inset: 0; display: grid; place-items: center; font-size: clamp(52px, 7vw, 110px); font-weight: 800; opacity: .32; }
+  .explorer-state { position: absolute; left: 18px; top: 16px; z-index: 2; max-width: calc(100% - 36px); font-size: 12px; background: #000a; border-radius: 20px; padding: 8px 12px; }
+  .t-explorer .home-shell button.explorer-play { position: absolute; inset: 0; width: 100%; border: 0; border-radius: 18px; padding: 0; background: transparent; color: white; font-size: 44px; }
+  .explorer-play > span { display: inline-grid; place-items: center; width: 78px; height: 78px; border-radius: 50%; background: #0008; }
+  .explorer-caption { position: absolute; bottom: 0; left: 0; right: 0; padding: 40px 24px 20px; background: linear-gradient(transparent, #000c); pointer-events: none; }
+  .explorer-caption h2 { font-size: clamp(20px, 2vw, 32px); margin: 0 0 4px; overflow-wrap: anywhere; }
+  .explorer-caption p { margin: 0; font-size: 14px; }
+  .explorer-caption > span { font-size: 12px; }
+  .explorer-actions { display: grid; justify-items: center; gap: 14px; width: 68px; flex: 0 0 68px; text-align: center; }
+  .explorer-actions small { display: block; font-size: 11px; }
+  .explorer-actions a { color: var(--fg); text-decoration: none; font-size: 28px; }
+  .explorer-avatar, .explorer-disc { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--fg); color: var(--panel); font-weight: 700; }
+  .explorer-disc { border: 5px double var(--panel); }
+  .explorer-steppers { position: absolute; right: 0; top: 50%; transform: translateY(-50%); display: grid; gap: 12px; text-align: center; font-size: 12px; }
+  .is-playing .explorer-disc { animation: explorer-spin 8s linear infinite; }
+  @keyframes explorer-spin { to { transform: rotate(360deg); } }
+}
+@media (prefers-reduced-motion: reduce) { .is-playing .explorer-disc { animation: none; } }

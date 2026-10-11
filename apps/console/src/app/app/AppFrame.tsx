@@ -91,8 +91,8 @@ function TopNav({ lang, csrfToken }: { lang: Lang; csrfToken: string }) {
 export function AppFrame({ theme, accent: initial, lang, csrfToken, children }: { theme: WebThemeId; accent: WebAccentId; lang: Lang; csrfToken: string | null; children: React.ReactNode }) {
   const [accent, set] = useState(initial);
   const top = ['preset-wall', 'listen-find', 'country-window', 'stage', 'cockpit', 'head-unit', 'signal-dial', 'language-lanes', 'daylight'].includes(theme);
-  const side = ['tune-world', 'map-home', 'night-garden'].includes(theme);
-  const extra = ['listen-find', 'country-window', 'stage', 'cockpit', 'head-unit', 'signal-dial', 'language-lanes', 'tune-world', 'map-home', 'night-garden', 'daylight'].includes(theme);
+  const side = ['tune-world', 'map-home', 'night-garden', 'explorer'].includes(theme);
+  const extra = ['listen-find', 'country-window', 'stage', 'cockpit', 'head-unit', 'signal-dial', 'language-lanes', 'tune-world', 'map-home', 'night-garden', 'daylight', 'explorer'].includes(theme);
   const setAccent = (a: WebAccentId) => {
     set(a);
     document.cookie = `${ACCENT_COOKIE}=${a}; Path=/; Max-Age=31536000; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`;
