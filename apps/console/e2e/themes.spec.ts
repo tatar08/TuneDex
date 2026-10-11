@@ -49,7 +49,10 @@ test('home has stations to play, and the sound keeps going from page to page', a
   await expect(page.getByRole('tab', { name: /คัดสรร/ })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('wall-station')).toHaveCount(2);
   await expect(page.getByTestId('player')).toHaveCount(0);
+  await page.route('https://stream.example.com/**', route => route.fulfill({ contentType: 'audio/wav', body: playableWave() }));
   await page.getByRole('button', { name: 'เล่น Wall Jazz FM' }).click();
+  await expect(page.getByTestId('player')).toHaveAttribute('data-state', 'playing');
+  await expect.poll(() => page.locator('.player-screen video').evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(.25);
   const player = page.getByTestId('player');
   await expect(player).toHaveAttribute('aria-label', 'กำลังเล่น: Wall Jazz FM');
   const src = () => page.locator('.player-screen video').evaluate((v: HTMLVideoElement) => v.src);
@@ -139,7 +142,10 @@ test('an admin chooses the layout theme for everyone; editors cannot', async ({ 
   await expect(side).toBeVisible();
   await expect(side.getByRole('link', { name: 'หน้าแรก' })).toHaveAttribute('aria-current', 'page');
   await expect(user.locator('.shell > .nav')).toBeHidden();
+  await user.route('https://stream.example.com/**', route => route.fulfill({ contentType: 'audio/wav', body: playableWave() }));
   await user.getByRole('button', { name: 'เล่น Wall News TH' }).click();
+  await expect(user.getByTestId('player')).toHaveAttribute('data-state', 'playing');
+  await expect.poll(() => user.locator('.player-screen video').evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(.25);
   const bar = await user.locator('.player-dock').boundingBox();
   expect([bar!.x, Math.round(bar!.y + bar!.height), bar!.width]).toEqual([0, 860, 1360]);
   if (process.env.ADMIN_SHOTS_DIR) await user.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/theme-radio-wall-home.png` });
@@ -176,7 +182,10 @@ for (const { id: theme, name: label } of WEB_THEMES.filter(t => !['classic', 'ra
     await expect(page.getByTestId('player')).toHaveCount(0);
     const desktop = theme === 'preset-wall' ? page.locator('#wall') : ['shelves','studio'].includes(theme) ? page.locator('.shelf-curated') : page.locator('.home-shell');
     if (['cockpit','head-unit','signal-dial','tune-world'].includes(theme)) await page.locator('.tuning-stations ol button').filter({ hasText: 'Wall Jazz FM' }).click();
+    await page.route('https://stream.example.com/**', route => route.fulfill({ contentType: 'audio/wav', body: playableWave() }));
     await desktop.getByRole('button', { name: 'เล่น Wall Jazz FM', exact: true }).first().click();
+    await expect(page.getByTestId('player')).toHaveAttribute('data-state', 'playing');
+    await expect.poll(() => page.locator('.player-screen video').evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(.25);
     await page.locator('.player-screen video').evaluate(v => v.setAttribute('data-kept', 'batch'));
     if (['cockpit','head-unit','signal-dial','tune-world'].includes(theme)) {
       await page.locator('.tuning-stations ol button').filter({ hasText: 'Wall News TH' }).click();
@@ -236,7 +245,7 @@ for (const { id: theme, name: label } of WEB_THEMES.filter(t => !['classic', 'ra
       await page.goto(`${stack.base}/app/home`);
       // Wide Home hydrates from the shared phone structure. Wait for its presenter,
       // then read both colours atomically so a replaced SSR heading cannot yield "".
-      const home = ({cockpit:'.dashboard-home','head-unit':'.dashboard-home','signal-dial':'.tuning-home','tune-world':'.tuning-home','language-lanes':'.language-home','map-home':'.map-home-layout','night-garden':'.garden-home-layout',daylight:'.daylight-home'} as Record<string,string>)[theme];
+      const home = ({cockpit:'.dashboard-home','head-unit':'.dashboard-home','signal-dial':'.tuning-home','tune-world':'.tuning-home','language-lanes':'.language-home','map-home':'.map-home-layout','night-garden':'.garden-home-layout',daylight:'.daylight-home',explorer:'.explorer-home'} as Record<string,string>)[theme];
       if (home) await expect(page.locator(home)).toBeVisible();
       await expect.poll(() => page.getByTestId('app-frame').evaluate(frame => {
         const headline = frame.querySelector('.home-shell h1');
@@ -367,3 +376,60 @@ test('browser presets survive reload, reject malformed entries and disclose fail
   await expect(page.locator('.map-shortcuts').first()).not.toContainText('ยังไม่มีสถานีที่เผยแพร่');
   await expect(page.getByTestId('player')).toHaveCount(0);
  });
+
+
+// A real decoded PCM stream, intercepted at an HTTPS origin. Merely assigning src
+// does not test CSP or playback; currentTime advancing does. No broadcaster dependency.
+function playableWave(): Buffer {
+  const rate = 8000, samples = rate * 120;
+  const data = Buffer.alloc(44 + samples * 2);
+  data.write('RIFF'); data.writeUInt32LE(data.length - 8, 4); data.write('WAVEfmt ', 8);
+  data.writeUInt32LE(16, 16); data.writeUInt16LE(1, 20); data.writeUInt16LE(1, 22);
+  data.writeUInt32LE(rate, 24); data.writeUInt32LE(rate * 2, 28);
+  data.writeUInt16LE(2, 32); data.writeUInt16LE(16, 34);
+  data.write('data', 36); data.writeUInt32LE(samples * 2, 40);
+  for (let i = 0; i < samples; i++) data.writeInt16LE(Math.round(Math.sin(i * 2 * Math.PI * 220 / rate) * 1200), 44 + i * 2);
+  return data;
+}
+
+test('Explorer decodes HTTPS audio on Home, browses without autoplay and retries a failed stream', async ({ browser }) => {
+  const admin = await open(browser, 'e2e-th-admin', '/admin/settings');
+  const form = admin.getByRole('form', { name: 'ธีมของเว็บผู้ใช้' });
+  await form.locator('input[value="explorer"]').check();
+  await form.getByRole('button', { name: 'ใช้ธีมนี้กับผู้ใช้ทุกคน' }).click();
+  await expect(form.getByRole('status')).toContainText('บันทึกแล้ว');
+  const page = await open(browser, 'explorer-audio', '/app/home');
+  await expect(page.locator('.explorer-home')).toBeVisible();
+  const wave = playableWave();
+  let fail = true;
+  let requests = 0;
+  await page.route('https://stream.example.com/**', route => {
+    requests++;
+    return fail ? route.abort() : route.fulfill({ contentType: 'audio/wav', body: wave, headers: { 'access-control-allow-origin': '*' } });
+  });
+  const video = page.locator('.player-screen video');
+  await expect(video).not.toHaveAttribute('src', /.+/);
+  await page.getByRole('button', { name: 'เล่น Wall Jazz FM', exact: true }).click();
+  await expect(page.getByTestId('player')).toHaveAttribute('data-state', 'failed');
+  fail = false;
+  await page.getByRole('button', { name: 'เล่น Wall Jazz FM', exact: true }).click();
+  await expect(page.getByTestId('player')).toHaveAttribute('data-state', 'playing');
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(.25);
+  expect(requests).toBeGreaterThanOrEqual(2);
+  await video.evaluate(v => v.setAttribute('data-audio-kept', 'yes'));
+  await page.getByRole('button', { name: 'สถานีถัดไป', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'เล่น Wall News TH', exact: true })).toBeInViewport();
+  await expect(video).toHaveAttribute('src', 'https://stream.example.com/jazz.aac');
+  await page.getByLabel('ค้นหาสถานี', { exact: true }).fill('no-match');
+  await expect(page.locator('.explorer-feed article')).toHaveCount(0);
+  await expect(page.getByTestId('player')).toHaveAttribute('data-state', 'playing');
+  await page.getByLabel('ค้นหาสถานี', { exact: true }).fill('');
+  if (process.env.ADMIN_SHOTS_DIR) await page.screenshot({ path: `${process.env.ADMIN_SHOTS_DIR}/explorer-playing.png` });
+  for (const destination of ['การตั้งค่า', 'อุปกรณ์', 'สำรวจ', 'วิทยุ']) {
+    const before = await video.evaluate((v: HTMLVideoElement) => v.currentTime);
+    await page.locator('.side-nav').getByRole('link', { name: destination, exact: true }).click();
+    await expect(video).toHaveAttribute('data-audio-kept', 'yes');
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(before);
+    await expect(page.getByTestId('player')).toHaveAttribute('data-state', 'playing');
+  }
+});

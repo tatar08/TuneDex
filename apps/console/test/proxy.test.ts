@@ -17,15 +17,19 @@ describe('proxy security headers', () => {
 });
 
 describe('proxy media policy', () => {
-  it('allows https media and fetches on /app/radio only', () => {
-    const radio = proxy(new NextRequest('https://console.example.test/app/radio')).headers.get('content-security-policy')!;
+  it('allows HTTPS streams on playback entry pages, with other pages restricted', () => {
+    for (const path of ['/app/home', '/app/radio', '/app/explore']) {
+    const radio = proxy(new NextRequest(`https://console.example.test${path}`)).headers.get('content-security-policy')!;
     expect(radio).toContain("media-src 'self' https: blob:");
     expect(radio).toContain("connect-src 'self' https:");
     expect(radio).not.toContain('http:');
-    const other = proxy(new NextRequest('https://console.example.test/app/settings')).headers.get('content-security-policy')!;
+    }
+    for (const path of ['/app/settings', '/admin/settings', '/login', '/application', '/app/home-other']) {
+    const other = proxy(new NextRequest(`https://console.example.test${path}`)).headers.get('content-security-policy')!;
     expect(other).toContain("connect-src 'self';");
     expect(other).toContain("media-src 'self'");
     expect(other).not.toContain('https:');
+    }
   });
 });
 

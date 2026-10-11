@@ -89,7 +89,7 @@ export function PlayerProvider({ lang, children }: { lang: Lang; children: React
   }, [now]);
 
   const play = useCallback((item: NowPlaying) => {
-    setNow((cur) => (cur && cur.url === item.url ? cur : item));
+    setNow((cur) => (cur && cur.url === item.url && status !== 'failed' ? cur : { ...item }));
     setRecent((list) => {
       const next = [item, ...list.filter((x) => x.url !== item.url)].slice(0, RECENT_MAX);
       try {
@@ -99,7 +99,7 @@ export function PlayerProvider({ lang, children }: { lang: Lang; children: React
       }
       return next;
     });
-  }, []);
+  }, [status]);
   const stop = useCallback(() => setNow(null), []);
   const claim = useCallback(() => {
     setSlots((n) => n + 1);

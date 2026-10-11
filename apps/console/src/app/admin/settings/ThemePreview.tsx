@@ -3,6 +3,7 @@ import type { WebThemeId } from '@/lib/web-themes';
 /** Local vector thumbnails of layouts, not invented station data or remote artwork. */
 export function ThemePreview({ theme }: { theme: WebThemeId }) {
   const kind: string = theme;
+  if (theme === 'explorer') return <svg viewBox="0 0 180 104" className="theme-preview" aria-hidden="true"><rect width="180" height="104" rx="8" fill="#f1f2f4"/><rect width="32" height="92" fill="#fff"/>{[18,32,46,60].map(y=><rect key={y} x="6" y={y} width="19" height="4" rx="2" fill="#1d1b45"/>)}<rect x="43" y="20" width="110" height="62" rx="8" fill="#9f1239"/>{[10,18,26].map(radius=><circle key={radius} cx="98" cy="49" r={radius} fill="none" stroke="#fda4af"/>)}<path d="M93 40v18l14-9z" fill="white"/><circle cx="166" cy="36" r="5" fill="#1d1b45"/><circle cx="166" cy="54" r="5" fill="#1d1b45"/><rect y="92" width="180" height="12" fill="#1d1b45"/></svg>;
   const maps = ['map-home', 'night-garden', 'tune-world'].includes(theme);
   const tuning = ['signal-dial', 'head-unit', 'tune-world'].includes(theme);
   const panel = ['listen-find', 'country-window'].includes(theme);

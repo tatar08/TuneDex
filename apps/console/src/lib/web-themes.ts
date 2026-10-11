@@ -20,6 +20,7 @@ export const WEB_THEMES = [
   { id: 'map-home', group: 'claude', name: 'แผนที่คือหน้าแรก', hint: 'แผนที่เต็มพื้นที่ แผงสถานีโปรดและฟังล่าสุด โทนเข้ม' },
   { id: 'night-garden', group: 'frames', name: 'สวนกลางคืน', hint: 'แผนที่ในสวนสีเข้ม ชั้นสถานีโปรดและฟังล่าสุด ตัวเล่นแบบแคปซูล' },
   { id: 'daylight', group: 'claude', name: 'นิตยสารกลางวัน', hint: 'ประเทศที่คุณเลือกเป็นหัวเรื่อง สถานีเด่นและชั้นรายการ อ่านได้ทั้งสว่างและมืด' },
+  { id: 'explorer', group: 'joint', name: 'Explorer', hint: 'ฟีดสถานีแนวตั้ง การ์ดใหญ่ ค้นหาและเลื่อนเลือก พร้อมตัวเล่นต่อเนื่อง' },
 ] as const;
 export const WEB_THEME_GROUPS = [
   { id: 'classic', name: 'แบบดั้งเดิม' },
