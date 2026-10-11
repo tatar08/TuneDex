@@ -491,6 +491,7 @@ test('Explorer decodes HTTPS audio on Home, browses without autoplay and retries
 });
 
 test('Explorer Radio combines navigation and reference map with real playback', async ({browser})=>{
+ test.setTimeout(90_000);
  const admin=await open(browser,'e2e-th-admin','/admin/settings');
  const form=admin.getByRole('form',{name:'ธีมของเว็บผู้ใช้'});
  await form.locator('input[value="explorer"]').check();
@@ -498,7 +499,13 @@ test('Explorer Radio combines navigation and reference map with real playback', 
  if(await save.isEnabled()){await save.click();await expect(form.getByRole('status')).toContainText('บันทึกแล้ว');}
  const page=await open(browser,'explorer-map','/app/home');
  const points=[['COOL Thailand',13.75,100.5],['BBC London',51.5,-.12],['KEXP Seattle',47.6,-122.3],['Brasil Radio',-23.55,-46.63],['Melbourne Radio',-37.8,144.96],['Tokyo Radio',35.68,139.69]] as const;
- await page.route('**/bff/directory/map**',r=>r.fulfill({json:{stations:points.map(([name,lat,lon],i)=>({id:`map-${i}`,name,lat,lon,country:null,language:'en',genres:i===1?['news']:['music'],codec:'aac',bitrateKbps:96,streamUrl:`https://stream.example.com/map-${i}.aac`}))}}));
+ const countryRequests:string[]=[];
+ const codes=['TH','GB','US','BR','AU','JP'];
+ await page.route('**/bff/directory/map**',r=>{
+  const country=new URL(r.request().url()).searchParams.get('country')||'';countryRequests.push(country);
+  const stations=points.map(([name,lat,lon],i)=>({id:`map-${i}`,name,lat,lon,country:codes[i],language:'en',genres:i===1?['news']:['music'],codec:'aac',bitrateKbps:96,streamUrl:`https://stream.example.com/map-${i}.aac`})).filter(s=>!country||s.country===country);
+  return r.fulfill({json:{stations,unmapped:country==='JP'?[{id:'jp-no-geo',name:'Tokyo without coordinates',country:'JP',language:'ja',genres:['music'],codec:'aac',bitrateKbps:96,streamUrl:'https://stream.example.com/jp-no-geo.aac'}]:[]}});
+ });
  await page.route('https://stream.example.com/**',r=>r.fulfill({contentType:'audio/wav',body:playableWave()}));
  const nav=page.locator('.explorer-nav');
  await expect(nav.getByRole('link',{name:'สำรวจ',exact:true})).toHaveCount(0);
@@ -530,6 +537,42 @@ test('Explorer Radio combines navigation and reference map with real playback', 
  await expect(video).toHaveAttribute('src','https://stream.example.com/map-1.aac');
  await map.getByRole('button',{name:'ค้นหา',exact:true}).click();
  await map.getByRole('button',{name:'ปิด',exact:true}).click();
+
+ await map.getByRole('button',{name:'ค้นหา',exact:true}).click();
+ const countryInput=map.getByRole('combobox',{name:'ประเทศ',exact:true});
+ const beforeCountryTyping=countryRequests.length;
+ await countryInput.fill('japan');
+ await expect(map.getByRole('option')).toHaveCount(1);
+ expect(countryRequests.length).toBe(beforeCountryTyping);
+ if(process.env.ADMIN_SHOTS_DIR)await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/explorer-country-autocomplete.png`,animations:'disabled'});
+ await countryInput.press('Enter');
+ await expect.poll(()=>countryRequests.at(-1)).toBe('JP');
+ await expect(map.locator('.explorer-search-results li')).toHaveCount(2);
+ await expect(map.locator('.explorer-search-results')).toContainText('Tokyo without coordinates');
+ await expect(video).toHaveAttribute('src','https://stream.example.com/map-1.aac');
+ await expect(page.getByTestId('player')).toHaveAttribute('data-state','playing');
+ await countryInput.fill('zzzzzz');
+ await expect(map.getByRole('option')).toHaveCount(0);
+ await expect(map.locator('.explorer-country-popup')).toContainText('ไม่พบประเทศ');
+ await countryInput.press('Escape');
+ await expect(map.locator('.explorer-map-search-box')).toBeVisible();
+ await expect(countryInput).toHaveValue('ญี่ปุ่น');
+ await countryInput.click();
+ await map.getByRole('option',{name:/^ทั่วโลก/}).click();
+ await expect.poll(()=>countryRequests.at(-1)).toBe('');
+ await expect(map.locator('.explorer-search-results li')).toHaveCount(6);
+ await expect(map.getByTestId('world-map').getByRole('button',{name:'BBC London',exact:true})).toBeVisible();
+ await expect(countryInput).toHaveValue('ทั่วโลก');
+ if(process.env.ADMIN_SHOTS_DIR){
+  await page.waitForTimeout(200);
+  await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/explorer-compact-search.png`,animations:'disabled'});
+  await page.setViewportSize({width:1360,height:501});
+  const panelBox=await map.locator('.explorer-map-search-box').boundingBox();const mapBox=await map.boundingBox();
+  expect(panelBox!.y+panelBox!.height).toBeLessThanOrEqual(mapBox!.y+mapBox!.height);
+  await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/explorer-compact-search-short.png`,animations:'disabled'});
+  await page.setViewportSize({width:1360,height:860});
+ }
+ await map.getByRole('button',{name:'ปิด',exact:true}).click();
  if(process.env.ADMIN_SHOTS_DIR){
   await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/explorer-radio-map.png`});
   await page.setViewportSize({width:1920,height:1080});
@@ -547,6 +590,14 @@ test('Explorer Radio combines navigation and reference map with real playback', 
  await map.getByRole('button',{name:'ซูมออก',exact:true}).click();
  await expect(page.getByTestId('player')).toHaveAttribute('data-state','playing');
  if(process.env.ADMIN_SHOTS_DIR){await page.waitForTimeout(600);await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/explorer-radio-globe-wide.png`});}
+ if(process.env.ADMIN_SHOTS_DIR){
+  await map.getByRole('button',{name:'ค้นหา',exact:true}).click();
+  await map.getByRole('combobox',{name:'ประเทศ',exact:true}).fill('Thailand');
+  await page.screenshot({path:`${process.env.ADMIN_SHOTS_DIR}/explorer-country-globe.png`,animations:'disabled'});
+  await map.getByRole('combobox',{name:'ประเทศ',exact:true}).press('Escape');
+  await map.getByRole('button',{name:'ปิด',exact:true}).click();
+ }
+
  await map.getByRole('button',{name:'แผนที่',exact:true}).click();
  await expect(map).toHaveAttribute('data-view','map');
  await map.getByRole('button',{name:'ลูกโลก',exact:true}).click();
